@@ -1,0 +1,471 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwnerDoc(data) {
+      return isVerifiedUser() && data.ownerId == request.auth.uid;
+    }
+
+    function isOptionalString(data, field, maxLen) {
+      return !(field in data) || (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function isOptionalNumber(data, field) {
+      return !(field in data) || (data[field] is int || data[field] is float);
+    }
+
+    function isOptionalBool(data, field) {
+      return !(field in data) || data[field] is bool;
+    }
+
+    function isOptionalStringList(data, field, maxItems) {
+      return !(field in data) || (
+        data[field] is list &&
+        data[field].size() <= maxItems &&
+        (data[field].size() == 0 || data[field][0] is string)
+      );
+    }
+
+    function isOptionalIntList(data, field, maxItems) {
+      return !(field in data) || (
+        data[field] is list &&
+        data[field].size() <= maxItems &&
+        (data[field].size() == 0 || data[field][0] is int)
+      );
+    }
+
+    function isOptionalMap(data, field) {
+      return !(field in data) || data[field] is map;
+    }
+
+    function isValidWorkshopProfile(data) {
+      return data.keys().hasAll(['ownerId', 'role', 'brandName', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'ownerId', 'email', 'firstName', 'lastName', 'role', 'brandName', 'subtitle',
+          'businessPhone', 'businessAddress', 'wordColors', 'logoDataUrl', 'logoScale',
+          'logoTransparent', 'receiptTerms', 'trackingBaseUrl', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.role in ['admin', 'operator']
+        && data.brandName is string && data.brandName.size() >= 1 && data.brandName.size() <= 80
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && isOptionalString(data, 'email', 200)
+        && isOptionalString(data, 'firstName', 100)
+        && isOptionalString(data, 'lastName', 100)
+        && isOptionalString(data, 'subtitle', 100)
+        && isOptionalString(data, 'businessPhone', 50)
+        && isOptionalString(data, 'businessAddress', 200)
+        && isOptionalStringList(data, 'wordColors', 12)
+        && isOptionalString(data, 'logoDataUrl', 700000)
+        && isOptionalNumber(data, 'logoScale')
+        && isOptionalBool(data, 'logoTransparent')
+        && isOptionalString(data, 'receiptTerms', 2000)
+        && isOptionalString(data, 'trackingBaseUrl', 250);
+    }
+
+    function isValidClient(data) {
+      return data.keys().hasAll(['ownerId', 'name', 'createdAt'])
+        && data.keys().hasOnly(['ownerId', 'name', 'phone', 'dni', 'email', 'address', 'notes', 'createdAt'])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 160
+        && data.createdAt is timestamp
+        && isOptionalString(data, 'phone', 60)
+        && isOptionalString(data, 'dni', 40)
+        && isOptionalString(data, 'email', 200)
+        && isOptionalString(data, 'address', 240)
+        && isOptionalString(data, 'notes', 1000);
+    }
+
+    function isValidRepair(data) {
+      return data.keys().hasAll([
+          'ownerId', 'code', 'trackingCode', 'clientName', 'deviceType', 'brand', 'model',
+          'problem', 'priority', 'status', 'progress', 'dateIn', 'price', 'deposit', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'code', 'trackingCode', 'clientId', 'clientName', 'clientPhone', 'clientDni',
+          'clientEmail', 'clientAddress', 'deviceType', 'deviceIcon', 'brand', 'model', 'color',
+          'capacity', 'imei', 'problem', 'priority', 'status', 'progress', 'dateIn', 'dateEst',
+          'price', 'deposit', 'paidAmount', 'paymentStatus', 'partIds', 'partNames', 'accessories',
+          'consoleAccessories', 'physicalCheck', 'functionalCheck', 'securityType', 'securityPin',
+          'securityPattern', 'notes', 'workDetail', 'checkoutState', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.code is string && data.code.size() >= 1 && data.code.size() <= 40
+        && isValidId(data.trackingCode) && data.trackingCode.size() <= 40
+        && data.clientName is string && data.clientName.size() >= 1 && data.clientName.size() <= 160
+        && data.deviceType is string && data.deviceType.size() >= 1 && data.deviceType.size() <= 60
+        && data.brand is string && data.brand.size() >= 1 && data.brand.size() <= 80
+        && data.model is string && data.model.size() >= 1 && data.model.size() <= 120
+        && data.problem is string && data.problem.size() >= 1 && data.problem.size() <= 2000
+        && data.priority in ['alta', 'media', 'baja']
+        && data.status in ['recibido', 'diagnostico', 'espera_repuesto', 'en_progreso', 'listo', 'entregado']
+        && (data.progress is int || data.progress is float) && data.progress >= 0 && data.progress <= 100
+        && data.dateIn is string && data.dateIn.size() <= 40
+        && (data.price is int || data.price is float) && data.price >= 0
+        && (data.deposit is int || data.deposit is float) && data.deposit >= 0
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && isOptionalString(data, 'clientId', 128)
+        && isOptionalString(data, 'clientPhone', 60)
+        && isOptionalString(data, 'clientDni', 40)
+        && isOptionalString(data, 'clientEmail', 200)
+        && isOptionalString(data, 'clientAddress', 240)
+        && isOptionalString(data, 'deviceIcon', 16)
+        && isOptionalString(data, 'color', 60)
+        && isOptionalString(data, 'capacity', 40)
+        && isOptionalString(data, 'imei', 80)
+        && isOptionalString(data, 'dateEst', 40)
+        && isOptionalNumber(data, 'paidAmount')
+        && (!('paymentStatus' in data) || data.paymentStatus in ['pendiente', 'parcial', 'pagado'])
+        && isOptionalStringList(data, 'partIds', 30)
+        && isOptionalStringList(data, 'partNames', 30)
+        && isOptionalStringList(data, 'accessories', 30)
+        && isOptionalMap(data, 'consoleAccessories')
+        && isOptionalMap(data, 'physicalCheck')
+        && isOptionalMap(data, 'functionalCheck')
+        && (!('securityType' in data) || data.securityType in ['pin', 'pattern', 'none'])
+        && isOptionalString(data, 'securityPin', 80)
+        && isOptionalIntList(data, 'securityPattern', 9)
+        && isOptionalString(data, 'notes', 2000)
+        && isOptionalString(data, 'workDetail', 2000)
+        && isOptionalString(data, 'checkoutState', 500);
+    }
+
+    function isValidPublicTicket(data) {
+      return data.keys().hasAll([
+          'ownerId', 'repairId', 'trackingCode', 'repairCode', 'businessName', 'deviceType',
+          'brand', 'model', 'status', 'progress', 'dateIn', 'problemSummary', 'price', 'deposit', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'repairId', 'trackingCode', 'repairCode', 'businessName', 'businessPhone',
+          'deviceType', 'brand', 'model', 'status', 'progress', 'dateIn', 'dateEst',
+          'problemSummary', 'workDetail', 'price', 'deposit', 'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.repairId)
+        && isValidId(data.trackingCode) && data.trackingCode.size() <= 40
+        && data.repairCode is string && data.repairCode.size() >= 1 && data.repairCode.size() <= 40
+        && data.businessName is string && data.businessName.size() >= 1 && data.businessName.size() <= 80
+        && data.deviceType is string && data.deviceType.size() >= 1 && data.deviceType.size() <= 60
+        && data.brand is string && data.brand.size() >= 1 && data.brand.size() <= 80
+        && data.model is string && data.model.size() >= 1 && data.model.size() <= 120
+        && data.status in ['recibido', 'diagnostico', 'espera_repuesto', 'en_progreso', 'listo', 'entregado']
+        && (data.progress is int || data.progress is float) && data.progress >= 0 && data.progress <= 100
+        && data.dateIn is string && data.dateIn.size() <= 40
+        && data.problemSummary is string && data.problemSummary.size() >= 1 && data.problemSummary.size() <= 2000
+        && (data.price is int || data.price is float) && data.price >= 0
+        && (data.deposit is int || data.deposit is float) && data.deposit >= 0
+        && data.updatedAt is timestamp
+        && isOptionalString(data, 'businessPhone', 50)
+        && isOptionalString(data, 'dateEst', 40)
+        && isOptionalString(data, 'workDetail', 2000);
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll([
+          'ownerId', 'name', 'productType', 'category', 'cost', 'marginMode', 'margin',
+          'vat', 'rounding', 'netPrice', 'price', 'trackStock', 'allowNoStock', 'usesSerial',
+          'stock', 'minStock', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'name', 'description', 'metaDescription', 'productType', 'imageDataUrl',
+          'category', 'subcategory', 'brand', 'supplierId', 'supplierName', 'sku', 'barcode',
+          'location', 'internalCode', 'cost', 'marginMode', 'margin', 'vat', 'rounding',
+          'netPrice', 'price', 'trackStock', 'allowNoStock', 'usesSerial', 'stock', 'minStock',
+          'reorderCap', 'weight', 'height', 'width', 'depth', 'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 200
+        && data.productType is string && data.productType.size() <= 40
+        && data.category is string && data.category.size() >= 1 && data.category.size() <= 80
+        && (data.cost is int || data.cost is float) && data.cost >= 0
+        && data.marginMode in ['percent', 'fixed']
+        && (data.margin is int || data.margin is float)
+        && (data.vat is int || data.vat is float) && data.vat >= 0
+        && (data.rounding is int || data.rounding is float) && data.rounding >= 0
+        && (data.netPrice is int || data.netPrice is float) && data.netPrice >= 0
+        && (data.price is int || data.price is float) && data.price >= 0
+        && data.trackStock is bool
+        && data.allowNoStock is bool
+        && data.usesSerial is bool
+        && (data.stock is int || data.stock is float) && data.stock >= 0
+        && (data.minStock is int || data.minStock is float) && data.minStock >= 0
+        && data.createdAt is timestamp
+        && isOptionalString(data, 'description', 2000)
+        && isOptionalString(data, 'metaDescription', 200)
+        && isOptionalString(data, 'imageDataUrl', 700000)
+        && isOptionalString(data, 'subcategory', 80)
+        && isOptionalString(data, 'brand', 80)
+        && isOptionalString(data, 'supplierId', 128)
+        && isOptionalString(data, 'supplierName', 160)
+        && isOptionalString(data, 'sku', 80)
+        && isOptionalString(data, 'barcode', 80)
+        && isOptionalString(data, 'location', 120)
+        && isOptionalString(data, 'internalCode', 60)
+        && isOptionalNumber(data, 'reorderCap')
+        && isOptionalNumber(data, 'weight')
+        && isOptionalNumber(data, 'height')
+        && isOptionalNumber(data, 'width')
+        && isOptionalNumber(data, 'depth');
+    }
+
+    function isValidTask(data) {
+      return data.keys().hasAll(['ownerId', 'title', 'taskType', 'priority', 'status', 'createdAt'])
+        && data.keys().hasOnly([
+          'ownerId', 'title', 'taskType', 'priority', 'assignee', 'dueDate', 'status', 'notes', 'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && data.taskType in ['seguimiento', 'proveedor', 'finanzas']
+        && data.priority in ['alta', 'media', 'baja']
+        && data.status in ['pendiente', 'hoy', 'completado']
+        && data.createdAt is timestamp
+        && isOptionalString(data, 'assignee', 100)
+        && isOptionalString(data, 'dueDate', 40)
+        && isOptionalString(data, 'notes', 1500);
+    }
+
+    function isValidSupplier(data) {
+      return data.keys().hasAll(['ownerId', 'name', 'category', 'balance', 'createdAt'])
+        && data.keys().hasOnly([
+          'ownerId', 'name', 'category', 'contact', 'phone', 'email', 'leadTime', 'balance', 'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 160
+        && data.category is string && data.category.size() >= 1 && data.category.size() <= 80
+        && (data.balance is int || data.balance is float) && data.balance >= 0
+        && data.createdAt is timestamp
+        && isOptionalString(data, 'contact', 120)
+        && isOptionalString(data, 'phone', 60)
+        && isOptionalString(data, 'email', 200)
+        && isOptionalString(data, 'leadTime', 60);
+    }
+
+    function isValidSale(data) {
+      return data.keys().hasAll(['ownerId', 'clientName', 'invoice', 'amount', 'status', 'createdAt'])
+        && data.keys().hasOnly([
+          'ownerId', 'clientId', 'clientName', 'invoice', 'productId', 'productName',
+          'quantity', 'amount', 'status', 'dueDate', 'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.clientName is string && data.clientName.size() >= 1 && data.clientName.size() <= 160
+        && data.invoice is string && data.invoice.size() >= 1 && data.invoice.size() <= 60
+        && (data.amount is int || data.amount is float) && data.amount >= 0
+        && data.status in ['pendiente', 'cobrado']
+        && data.createdAt is timestamp
+        && isOptionalString(data, 'clientId', 128)
+        && isOptionalString(data, 'productId', 128)
+        && isOptionalString(data, 'productName', 200)
+        && isOptionalNumber(data, 'quantity')
+        && isOptionalString(data, 'dueDate', 40);
+    }
+
+    function isValidPurchase(data) {
+      return data.keys().hasAll(['ownerId', 'supplierName', 'invoice', 'amount', 'status', 'createdAt'])
+        && data.keys().hasOnly([
+          'ownerId', 'supplierId', 'supplierName', 'invoice', 'amount', 'status', 'dueDate', 'createdAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.supplierName is string && data.supplierName.size() >= 1 && data.supplierName.size() <= 160
+        && data.invoice is string && data.invoice.size() >= 1 && data.invoice.size() <= 60
+        && (data.amount is int || data.amount is float) && data.amount >= 0
+        && data.status in ['pendiente', 'pagado']
+        && data.createdAt is timestamp
+        && isOptionalString(data, 'supplierId', 128)
+        && isOptionalString(data, 'dueDate', 40);
+    }
+
+    match /workshopProfiles/{profileId} {
+      allow get: if isValidId(profileId) && isVerifiedUser() && profileId == request.auth.uid && (resource == null || existing().ownerId == request.auth.uid);
+      allow list: if isVerifiedUser() && existing().ownerId == request.auth.uid;
+      allow create: if isValidId(profileId) && isVerifiedUser() && profileId == request.auth.uid
+        && isValidWorkshopProfile(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(profileId) && isOwnerDoc(existing()) && profileId == request.auth.uid
+        && isValidWorkshopProfile(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'email', 'firstName', 'lastName', 'role', 'brandName', 'subtitle',
+          'businessPhone', 'businessAddress', 'wordColors', 'logoDataUrl', 'logoScale',
+          'logoTransparent', 'receiptTerms', 'trackingBaseUrl', 'updatedAt'
+        ]);
+      allow delete: if isValidId(profileId) && isOwnerDoc(existing()) && profileId == request.auth.uid;
+    }
+
+    match /clients/{clientId} {
+      allow get: if isValidId(clientId) && isOwnerDoc(existing());
+      allow list: if isVerifiedUser() && existing().ownerId == request.auth.uid;
+      allow create: if isValidId(clientId) && isVerifiedUser()
+        && isValidClient(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(clientId) && isOwnerDoc(existing())
+        && isValidClient(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'phone', 'dni', 'email', 'address', 'notes'
+        ]);
+      allow delete: if isValidId(clientId) && isOwnerDoc(existing());
+    }
+
+    match /repairs/{repairId} {
+      allow get: if isValidId(repairId) && isOwnerDoc(existing());
+      allow list: if isVerifiedUser() && existing().ownerId == request.auth.uid;
+      allow create: if isValidId(repairId) && isVerifiedUser()
+        && isValidRepair(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(repairId) && isOwnerDoc(existing())
+        && isValidRepair(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'progress', 'notes', 'clientName', 'clientPhone', 'clientDni',
+          'clientEmail', 'clientAddress', 'price', 'deposit', 'paidAmount',
+          'paymentStatus', 'workDetail', 'checkoutState', 'updatedAt'
+        ]);
+      allow delete: if isValidId(repairId) && isOwnerDoc(existing());
+    }
+
+    match /publicTickets/{trackingCode} {
+      allow get: if isValidId(trackingCode);
+      allow list: if false;
+      allow create: if isValidId(trackingCode) && isVerifiedUser()
+        && trackingCode == incoming().trackingCode
+        && isValidPublicTicket(incoming())
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(trackingCode) && isOwnerDoc(existing())
+        && isValidPublicTicket(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().repairId == existing().repairId
+        && incoming().trackingCode == existing().trackingCode
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'progress', 'workDetail', 'price', 'deposit', 'businessName', 'businessPhone', 'updatedAt'
+        ]);
+      allow delete: if isValidId(trackingCode) && isOwnerDoc(existing());
+    }
+
+    match /products/{productId} {
+      allow get: if isValidId(productId) && isOwnerDoc(existing());
+      allow list: if isVerifiedUser() && existing().ownerId == request.auth.uid;
+      allow create: if isValidId(productId) && isVerifiedUser()
+        && isValidProduct(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(productId) && isOwnerDoc(existing())
+        && isValidProduct(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'description', 'metaDescription', 'productType', 'imageDataUrl',
+          'category', 'subcategory', 'brand', 'supplierId', 'supplierName', 'sku', 'barcode',
+          'location', 'internalCode', 'cost', 'marginMode', 'margin', 'vat', 'rounding',
+          'netPrice', 'price', 'trackStock', 'allowNoStock', 'usesSerial', 'stock', 'minStock',
+          'reorderCap', 'weight', 'height', 'width', 'depth'
+        ]);
+      allow delete: if isValidId(productId) && isOwnerDoc(existing());
+    }
+
+    match /tasks/{taskId} {
+      allow get: if isValidId(taskId) && isOwnerDoc(existing());
+      allow list: if isVerifiedUser() && existing().ownerId == request.auth.uid;
+      allow create: if isValidId(taskId) && isVerifiedUser()
+        && isValidTask(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(taskId) && isOwnerDoc(existing())
+        && isValidTask(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'taskType', 'priority', 'assignee', 'dueDate', 'status', 'notes'
+        ]);
+      allow delete: if isValidId(taskId) && isOwnerDoc(existing());
+    }
+
+    match /suppliers/{supplierId} {
+      allow get: if isValidId(supplierId) && isOwnerDoc(existing());
+      allow list: if isVerifiedUser() && existing().ownerId == request.auth.uid;
+      allow create: if isValidId(supplierId) && isVerifiedUser()
+        && isValidSupplier(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(supplierId) && isOwnerDoc(existing())
+        && isValidSupplier(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'category', 'contact', 'phone', 'email', 'leadTime', 'balance'
+        ]);
+      allow delete: if isValidId(supplierId) && isOwnerDoc(existing());
+    }
+
+    match /sales/{saleId} {
+      allow get: if isValidId(saleId) && isOwnerDoc(existing());
+      allow list: if isVerifiedUser() && existing().ownerId == request.auth.uid;
+      allow create: if isValidId(saleId) && isVerifiedUser()
+        && isValidSale(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(saleId) && isOwnerDoc(existing())
+        && isValidSale(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'amount', 'clientName', 'dueDate'
+        ]);
+      allow delete: if isValidId(saleId) && isOwnerDoc(existing());
+    }
+
+    match /purchases/{purchaseId} {
+      allow get: if isValidId(purchaseId) && isOwnerDoc(existing());
+      allow list: if isVerifiedUser() && existing().ownerId == request.auth.uid;
+      allow create: if isValidId(purchaseId) && isVerifiedUser()
+        && isValidPurchase(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(purchaseId) && isOwnerDoc(existing())
+        && isValidPurchase(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'amount', 'supplierName', 'dueDate'
+        ]);
+      allow delete: if isValidId(purchaseId) && isOwnerDoc(existing());
+    }
+  }
+}

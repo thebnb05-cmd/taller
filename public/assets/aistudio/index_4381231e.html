@@ -1,0 +1,1541 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0072BB">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>TH3 BNB servicio técnico</title>
+  <link rel="manifest" href="manifest.webmanifest?v=9">
+  <link rel="stylesheet" href="css/style.css?v=26">
+  <script defer src="js/app.js?v=32"></script>
+</head>
+<body>
+  <main id="public-tracking-page" class="public-tracking-page" hidden></main>
+  <header class="app-header">
+    <button id="legal-settings-btn" class="header-btn" type="button" onclick="openLegalSettings()" aria-label="Configurar marca y comprobantes" title="Configurar marca y comprobantes" style="display:none">⚙️</button>
+    <div class="header-brand">
+      <div id="business-name-title" class="logo-title">
+        <span class="brand-dark">TH3</span>
+        <span class="brand-blue">BNB</span>
+      </div>
+      <div id="business-name-subtitle" class="logo-subtitle">servicio técnico</div>
+    </div>
+    <div class="header-actions">
+      <span id="user-badge" class="user-badge">Invitado</span>
+      <button id="install-btn" class="install-btn hidden" type="button" aria-label="Instalar app">⬇️ Instalar</button>
+      <button id="theme-toggle" class="header-btn theme-toggle" type="button" aria-label="Activar modo oscuro">🌙</button>
+      <button id="logout-btn" class="header-btn logout-btn" type="button" aria-label="Cerrar sesión">Salir</button>
+      <button class="header-btn" type="button" onclick="navigate('inventory');renderInventory('bajo_stock')" aria-label="Alerta de stock bajo">
+        🔔
+        <span id="stock-alert-badge" class="notif-badge" hidden>0</span>
+      </button>
+    </div>
+  </header>
+
+  <aside class="desktop-sidebar" aria-label="Panel lateral de gestión">
+    <div class="aside-card brand-panel">
+      <div class="aside-brand">TH3 <span>BNB</span></div>
+      <div class="aside-subbrand">Sistema de gestión</div>
+    </div>
+
+    <div class="aside-card desktop-nav-card">
+      <div class="aside-title">Secciones</div>
+      <nav class="desktop-nav" aria-label="Secciones principales">
+        <button class="nav-item desktop-nav-item active" type="button" data-page="home" onclick="navigate('home')">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10h14V10"></path></svg>
+          Inicio
+        </button>
+        <button class="nav-item desktop-nav-item" type="button" data-page="repairs" onclick="navigate('repairs')">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.1-3.1"></path><path d="M4 20l6.2-1.2L20 9l-5-5-9.8 9.8z"></path></svg>
+          Reparaciones
+        </button>
+        <button class="nav-item desktop-nav-item" type="button" data-page="clients" onclick="navigate('clients')">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21a8 8 0 0 0-16 0"></path><circle cx="12" cy="8" r="4"></circle></svg>
+          Clientes
+        </button>
+        <button class="nav-item desktop-nav-item" type="button" data-page="repuestos" onclick="navigate('repuestos')">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 7 9-4 9 4-9 4-9-4z"></path><path d="M3 7v10l9 4 9-4V7"></path><path d="M12 11v10"></path></svg>
+          Productos
+        </button>
+        <button class="nav-item desktop-nav-item" type="button" data-page="inventory" onclick="navigate('inventory')">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8v13H3V8"></path><path d="M1 3h22v5H1z"></path></svg>
+          Inventario
+        </button>
+        <button class="nav-item desktop-nav-item" type="button" data-page="agenda" onclick="navigate('agenda')">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M8 3v4M16 3v4M3 10h18"></path></svg>
+          Agenda
+        </button>
+        <button class="nav-item desktop-nav-item" type="button" data-page="suppliers" onclick="navigate('suppliers')">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 20V8l9-5 9 5v12"></path><path d="M3 8h18"></path><path d="M8 12h8"></path></svg>
+          Proveedores
+        </button>
+        <button class="nav-item desktop-nav-item" type="button" data-page="sales" onclick="navigate('sales')">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18v10H3z"></path><path d="M3 11h18"></path></svg>
+          Ventas
+        </button>
+        <button class="nav-item desktop-nav-item" type="button" data-page="purchases" onclick="navigate('purchases')">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16v12H4z"></path><path d="M8 7V5a4 4 0 0 1 8 0v2"></path></svg>
+          Compras
+        </button>
+        <button class="nav-item desktop-nav-item" type="button" data-page="reports" onclick="navigate('reports')">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5"></path><path d="M8 19v-6"></path><path d="M12 19v-10"></path><path d="M16 19v-3"></path><path d="M20 19V9"></path></svg>
+          Reportes
+        </button>
+      </nav>
+    </div>
+
+    <div class="aside-card">
+      <div class="aside-title">Acciones rápidas</div>
+      <button class="aside-action" type="button" data-action="new_repair" onclick="openNewRepair()">＋ Nueva reparación</button>
+      <button class="aside-action" type="button" data-action="new_client" onclick="openNewClient()">＋ Nuevo cliente</button>
+      <button class="aside-action" type="button" data-action="new_product" onclick="openNewProduct()">＋ Nuevo producto</button>
+    </div>
+  </aside>
+
+  <main>
+    <section id="page-home" class="page active">
+      <div class="card-section">
+        <div class="section-header">
+          <div class="section-title">
+            <div class="section-icon">📊</div>
+            Resumen general
+          </div>
+        </div>
+        <div class="stats-row">
+          <div class="stat-card"><div id="home-stat-active" class="stat-num">0</div><div class="stat-label">activas</div></div>
+          <div class="stat-card"><div id="home-stat-ready" class="stat-num">0</div><div class="stat-label">listas</div></div>
+          <div class="stat-card"><div id="home-stat-clients" class="stat-num">0</div><div class="stat-label">clientes</div></div>
+        </div>
+      </div>
+
+      <div class="dashboard-summary">
+        <div class="dashboard-header">
+          <div>
+            <div class="eyebrow">Operación</div>
+            <h3>Panel del taller</h3>
+          </div>
+          <span class="status-chip positive">+12% mes</span>
+        </div>
+
+        <div class="metric-strip">
+          <div class="metric-pill">
+            <span class="metric-label">Tasa de cierre</span>
+            <strong>78%</strong>
+            <small>+6% esta semana</small>
+          </div>
+          <div class="metric-pill">
+            <span class="metric-label">Ingresos</span>
+            <strong>$97.5k</strong>
+            <small>monto estimado</small>
+          </div>
+        </div>
+
+        <div class="status-breakdown">
+          <div class="bar-row">
+            <span>Activas</span>
+            <div class="bar"><i style="width: 62%"></i></div>
+            <strong>5</strong>
+          </div>
+          <div class="bar-row">
+            <span>Listas</span>
+            <div class="bar"><i style="width: 38%"></i></div>
+            <strong>2</strong>
+          </div>
+          <div class="bar-row">
+            <span>Entregadas</span>
+            <div class="bar"><i style="width: 26%"></i></div>
+            <strong>1</strong>
+          </div>
+        </div>
+      </div>
+
+      <div class="ops-grid">
+        <div class="mini-panel">
+          <div class="mini-header">
+            <span>Actividad reciente</span>
+            <span class="mini-badge">Hoy</span>
+          </div>
+          <ul class="activity-list">
+            <li><span class="activity-dot blue"></span><div><strong>R-10023</strong><small>Se cambió pantalla y empezó prueba.</small></div></li>
+            <li><span class="activity-dot green"></span><div><strong>R-10022</strong><small>Equipo listo y pendiente de entrega.</small></div></li>
+            <li><span class="activity-dot orange"></span><div><strong>R-10024</strong><small>Diagnóstico en curso con revisión de placa.</small></div></li>
+          </ul>
+        </div>
+
+        <div class="mini-panel">
+          <div class="mini-header">
+            <span>Flujo de trabajo</span>
+            <span class="mini-badge neutral">Semanal</span>
+          </div>
+          <div class="workflow-chart">
+            <div class="workflow-bar"><span style="height: 72%"></span></div>
+            <div class="workflow-bar"><span style="height: 58%"></span></div>
+            <div class="workflow-bar"><span style="height: 85%"></span></div>
+            <div class="workflow-bar"><span style="height: 64%"></span></div>
+            <div class="workflow-bar"><span style="height: 92%"></span></div>
+            <div class="workflow-bar"><span style="height: 68%"></span></div>
+          </div>
+          <div class="chart-legend">
+            <span>Mon</span>
+            <span>Tue</span>
+            <span>Wed</span>
+            <span>Thu</span>
+            <span>Fri</span>
+            <span>Sat</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="quick-actions">
+        <button class="quick-action" type="button" data-action="new_repair" onclick="openNewRepair()">
+          <div class="qa-icon">🛠️</div>
+          <div class="qa-label">Nueva reparación</div>
+          <div class="qa-sub">ingresar equipo</div>
+        </button>
+        <button class="quick-action" type="button" data-action="new_client" onclick="openNewClient()">
+          <div class="qa-icon">👤</div>
+          <div class="qa-label">Nuevo cliente</div>
+          <div class="qa-sub">guardar contacto</div>
+        </button>
+        <button class="quick-action" type="button" data-action="new_product" onclick="openNewProduct()">
+          <div class="qa-icon">📦</div>
+          <div class="qa-label">Nuevo producto</div>
+          <div class="qa-sub">agregar stock</div>
+        </button>
+      </div>
+
+      <div class="card-section">
+        <div class="section-header">
+          <div class="section-title"><div class="section-icon">🛠️</div>Reparaciones activas</div>
+          <button class="see-all" type="button" onclick="navigate('repairs')">Ver todas</button>
+        </div>
+        <div id="home-repairs"></div>
+      </div>
+
+      <div class="card-section">
+        <div class="section-header">
+          <div class="section-title"><div class="section-icon">👥</div>Clientes recientes</div>
+          <button class="see-all" type="button" onclick="navigate('clients')">Ver todos</button>
+        </div>
+        <div id="home-clients"></div>
+      </div>
+    </section>
+
+    <section id="page-repairs" class="page">
+      <div class="section-header">
+        <div class="section-title"><div class="section-icon">🧰</div>Reparaciones</div>
+        <button class="see-all" type="button" onclick="openNewRepair()">+ Agregar</button>
+      </div>
+      <div class="search-bar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path></svg>
+        <input id="repair-search" type="search" placeholder="Buscar reparación..." oninput="renderRepairs()">
+      </div>
+      <div class="tab-bar">
+        <button class="tab-btn active" type="button" data-filter="all" onclick="renderRepairs(this.dataset.filter)">Todas</button>
+        <button class="tab-btn" type="button" data-filter="activas" onclick="renderRepairs(this.dataset.filter)">Activas</button>
+        <button class="tab-btn" type="button" data-filter="listas" onclick="renderRepairs(this.dataset.filter)">Listas</button>
+        <button class="tab-btn" type="button" data-filter="entregadas" onclick="renderRepairs(this.dataset.filter)">Entregadas</button>
+      </div>
+      <div id="repairs-list"></div>
+    </section>
+
+    <section id="page-clients" class="page">
+      <div class="section-header">
+        <div class="section-title"><div class="section-icon">👥</div>Clientes</div>
+        <button class="see-all" type="button" onclick="openNewClient()">+ Agregar</button>
+      </div>
+      <div class="search-bar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path></svg>
+        <input id="client-search" type="search" placeholder="Buscar cliente..." oninput="renderClients()">
+      </div>
+      <div id="clients-list"></div>
+    </section>
+
+    <section id="page-repuestos" class="page">
+      <div class="section-header">
+        <div class="section-title"><div class="section-icon">📦</div>Productos</div>
+        <div class="section-header-actions">
+          <button class="see-all product-import-button" type="button" onclick="openProductImport()" aria-label="Importar productos desde Excel" title="Importar productos desde Excel">📥 Importar</button>
+          <button class="see-all" type="button" onclick="openNewProduct()">+ Agregar</button>
+        </div>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat-card"><div id="spares-total" class="stat-num">0</div><div class="stat-label">productos</div></div>
+        <div class="stat-card"><div id="spares-low" class="stat-num">0</div><div class="stat-label">stock bajo</div></div>
+        <div class="stat-card"><div id="spares-value" class="stat-num">$0</div><div class="stat-label">valor</div></div>
+      </div>
+
+      <div class="search-bar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path></svg>
+        <input id="spares-search" type="search" placeholder="Buscar producto..." oninput="renderSpareParts()">
+      </div>
+
+      <div id="spares-list"></div>
+    </section>
+
+    <section id="page-inventory" class="page">
+      <div class="section-header">
+        <div class="section-title"><div class="section-icon">📦</div>Inventario</div>
+        <button class="see-all" type="button" onclick="openNewProduct()">+ Agregar</button>
+      </div>
+      <div class="search-bar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path></svg>
+        <input id="inventory-search" type="search" placeholder="Buscar producto..." oninput="renderInventory()">
+      </div>
+      <div class="tab-bar">
+        <button class="tab-btn active" type="button" data-filter="all" onclick="renderInventory(this.dataset.filter)">Todo</button>
+        <button class="tab-btn" type="button" data-filter="repuestos" onclick="renderInventory(this.dataset.filter)">Repuestos</button>
+        <button class="tab-btn" type="button" data-filter="accesorios" onclick="renderInventory(this.dataset.filter)">Accesorios</button>
+        <button class="tab-btn" type="button" data-filter="bajo_stock" onclick="renderInventory(this.dataset.filter)">Bajo stock</button>
+      </div>
+      <div id="inventory-list"></div>
+    </section>
+
+    <section id="page-agenda" class="page">
+      <div class="section-header">
+        <div class="section-title"><div class="section-icon">📅</div>Agenda</div>
+        <button class="see-all" type="button" onclick="openNewTask()">+ Agregar</button>
+      </div>
+
+      <div class="agenda-summary">
+        <div class="agenda-stat"><strong id="agenda-pending">0</strong><span>Pendientes</span></div>
+        <div class="agenda-stat"><strong id="agenda-today">0</strong><span>Hoy</span></div>
+        <div class="agenda-stat"><strong id="agenda-urgent">0</strong><span>Urgentes</span></div>
+      </div>
+
+      <div id="agenda-list" class="agenda-list"></div>
+    </section>
+
+    <section id="page-suppliers" class="page">
+      <div class="section-header">
+        <div class="section-title"><div class="section-icon">🏭</div>Proveedores</div>
+        <button class="see-all" type="button" onclick="openNewSupplier()">+ Agregar</button>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat-card"><div id="suppliers-count" class="stat-num">0</div><div class="stat-label">proveedores</div></div>
+        <div class="stat-card"><div id="suppliers-debt" class="stat-num">$0</div><div class="stat-label">saldo</div></div>
+        <div class="stat-card"><div id="suppliers-lead" class="stat-num">0h</div><div class="stat-label">lead time</div></div>
+      </div>
+
+      <div id="suppliers-list"></div>
+    </section>
+
+    <section id="page-sales" class="page">
+      <div class="section-header">
+        <div class="section-title"><div class="section-icon">💰</div>Ventas y cobranzas</div>
+        <button class="see-all" type="button" onclick="openNewSale()">+ Agregar</button>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat-card"><div id="sales-total" class="stat-num">$0</div><div class="stat-label">total</div></div>
+        <div class="stat-card"><div id="sales-pending" class="stat-num">$0</div><div class="stat-label">pendiente</div></div>
+        <div class="stat-card"><div id="sales-collected" class="stat-num">$0</div><div class="stat-label">cobrado</div></div>
+      </div>
+
+      <div id="sales-list"></div>
+    </section>
+
+    <section id="page-purchases" class="page">
+      <div class="section-header">
+        <div class="section-title"><div class="section-icon">🧾</div>Compras y pagos</div>
+        <button class="see-all" type="button" onclick="openNewPurchase()">+ Agregar</button>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat-card"><div id="purchases-total" class="stat-num">$0</div><div class="stat-label">total</div></div>
+        <div class="stat-card"><div id="purchases-pending" class="stat-num">$0</div><div class="stat-label">pendiente</div></div>
+        <div class="stat-card"><div id="purchases-paid" class="stat-num">$0</div><div class="stat-label">pagado</div></div>
+      </div>
+
+      <div id="purchases-list"></div>
+    </section>
+
+    <section id="page-reports" class="page">
+      <div class="section-header">
+        <div class="section-title"><div class="section-icon">📈</div>Reportes</div>
+      </div>
+
+      <div class="report-filters">
+        <button class="report-filter" type="button" data-range="7" onclick="renderReports('7')">7 días</button>
+        <button class="report-filter" type="button" data-range="30" onclick="renderReports('30')">30 días</button>
+        <button class="report-filter" type="button" data-range="90" onclick="renderReports('90')">90 días</button>
+        <button class="report-filter active" type="button" data-range="all" onclick="renderReports('all')">Total</button>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat-card"><div id="rep-total" class="stat-num">0</div><div class="stat-label">total</div></div>
+        <div class="stat-card"><div id="rep-active" class="stat-num">0</div><div class="stat-label">activas</div></div>
+        <div class="stat-card"><div id="rep-ready" class="stat-num">0</div><div class="stat-label">listas</div></div>
+      </div>
+      <div class="stats-row">
+        <div class="stat-card"><div id="rep-delivered" class="stat-num">0</div><div class="stat-label">entregadas</div></div>
+        <div class="stat-card"><div id="rep-revenue" class="stat-num">$0</div><div class="stat-label">ingreso</div></div>
+        <div class="stat-card"><div id="rep-pending-rev" class="stat-num">$0</div><div class="stat-label">pendiente</div></div>
+      </div>
+      <div class="stats-row">
+        <div class="stat-card"><div id="rep-clients" class="stat-num">0</div><div class="stat-label">clientes</div></div>
+        <div class="stat-card"><div id="rep-products" class="stat-num">0</div><div class="stat-label">productos</div></div>
+        <div class="stat-card"><div id="rep-average" class="stat-num">$0</div><div class="stat-label">ticket</div></div>
+      </div>
+      <div class="stats-row">
+        <div class="stat-card"><div id="rep-purchases" class="stat-num">$0</div><div class="stat-label">compras</div></div>
+        <div class="stat-card"><div id="rep-result" class="stat-num">$0</div><div class="stat-label">resultado</div></div>
+      </div>
+
+      <div class="report-grid">
+        <div class="report-panel">
+          <div class="panel-title">Evolución</div>
+          <div id="report-trend" class="report-bars"></div>
+        </div>
+        <div class="report-panel">
+          <div class="panel-title">Top clientes</div>
+          <div id="report-top-clients"></div>
+        </div>
+      </div>
+
+      <div class="info-block">
+        <div class="info-block-title">Productos con stock bajo</div>
+        <div id="rep-low-stock"></div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="bottom-nav" aria-label="Navegación principal">
+    <button class="nav-item active" type="button" data-page="home" onclick="navigate('home')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10h14V10"></path></svg>
+      Inicio
+    </button>
+    <button class="nav-item" type="button" data-page="repairs" onclick="navigate('repairs')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.1-3.1"></path><path d="M4 20l6.2-1.2L20 9l-5-5-9.8 9.8z"></path></svg>
+      Reparaciones
+    </button>
+    <button class="nav-item" type="button" data-page="clients" onclick="navigate('clients')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21a8 8 0 0 0-16 0"></path><circle cx="12" cy="8" r="4"></circle></svg>
+      Clientes
+    </button>
+    <button class="nav-item" type="button" data-page="repuestos" onclick="navigate('repuestos')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 7 9-4 9 4-9 4-9-4z"></path><path d="M3 7v10l9 4 9-4V7"></path><path d="M12 11v10"></path></svg>
+      Productos
+    </button>
+    <div id="nav-more-menu" class="nav-more-menu" role="menu" aria-label="Más secciones" hidden>
+      <button class="nav-more-link" type="button" role="menuitem" data-page="inventory" onclick="navigate('inventory')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8v13H3V8"></path><path d="M1 3h22v5H1z"></path></svg>
+        Inventario
+      </button>
+      <button class="nav-more-link" type="button" role="menuitem" data-page="agenda" onclick="navigate('agenda')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M8 3v4M16 3v4M3 10h18"></path></svg>
+        Agenda
+      </button>
+      <button class="nav-more-link" type="button" role="menuitem" data-page="suppliers" onclick="navigate('suppliers')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 20V8l9-5 9 5v12"></path><path d="M3 8h18"></path><path d="M8 12h8"></path></svg>
+        Proveedores
+      </button>
+      <button class="nav-more-link" type="button" role="menuitem" data-page="sales" onclick="navigate('sales')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18v10H3z"></path><path d="M16 3v4M8 3v4M3 11h18"></path></svg>
+        Ventas
+      </button>
+      <button class="nav-more-link" type="button" role="menuitem" data-page="purchases" onclick="navigate('purchases')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16v12H4z"></path><path d="M8 7V5a4 4 0 0 1 8 0v2"></path></svg>
+        Compras
+      </button>
+      <button class="nav-more-link" type="button" role="menuitem" data-page="reports" onclick="navigate('reports')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5"></path><path d="M8 19v-6"></path><path d="M12 19v-10"></path><path d="M16 19v-3"></path><path d="M20 19V9"></path></svg>
+        Reportes
+      </button>
+    </div>
+    <button id="nav-more-button" class="nav-item" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="nav-more-menu" onclick="toggleMoreMenu()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg>
+      Más
+    </button>
+  </nav>
+
+  <div id="repair-detail" class="detail-overlay" aria-hidden="true"></div>
+  <div id="client-detail" class="detail-overlay" aria-hidden="true"></div>
+  <div id="product-detail" class="detail-overlay" aria-hidden="true"></div>
+
+  <div id="modal-login" class="modal-overlay open" onclick="if (event.target === this) return;">
+    <div class="modal login-modal">
+      <div class="modal-handle"></div>
+      <div class="login-brand">TH3 <span>BNB</span></div>
+      <div class="login-title">Acceso al sistema</div>
+      <div class="login-subtitle">Ingresá tus credenciales para continuar</div>
+      <form id="login-form" onsubmit="return false;">
+        <div class="form-group">
+          <label class="form-label" for="login-user">Email o usuario</label>
+          <input id="login-user" class="form-input" type="text" value="admin" placeholder="tu@email.com" autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="login-password">Contraseña</label>
+          <input id="login-password" class="form-input" type="password" value="admin123" placeholder="••••••••" autocomplete="current-password">
+        </div>
+        <div class="login-hint">
+          <span>Demo:</span>
+          <strong>admin / admin123</strong>
+        </div>
+        <button class="btn btn-primary" type="submit">Ingresar al sistema</button>
+        <button class="btn btn-outline" type="button" onclick="openNewAccess()">Crear una cuenta</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="modal-new-access" class="modal-overlay" onclick="if (event.target === this) closeModal('modal-new-access')">
+    <div class="modal login-modal">
+      <div class="modal-handle"></div>
+      <div class="modal-title">Crear una cuenta</div>
+      <div class="login-subtitle">Registrate para ingresar al sistema</div>
+      <form id="new-access-form" onsubmit="return false;">
+        <div id="access-step-credentials">
+          <div class="form-group">
+            <label class="form-label" for="access-user">Email</label>
+            <input id="access-user" class="form-input" type="email" placeholder="tu@email.com" autocomplete="email">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="access-password">Contraseña</label>
+            <input id="access-password" class="form-input" type="password" placeholder="Mínimo 8 caracteres" autocomplete="new-password">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="access-password-confirm">Repetir contraseña</label>
+            <input id="access-password-confirm" class="form-input" type="password" placeholder="Volvé a escribirla" autocomplete="new-password">
+          </div>
+          <div class="access-form-actions">
+            <button class="btn btn-outline" type="button" onclick="closeModal('modal-new-access')">Cancelar</button>
+            <button class="btn btn-primary" type="button" onclick="continueNewAccess()">Continuar</button>
+          </div>
+        </div>
+        <div id="access-step-profile" hidden>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="access-first-name">Nombre</label>
+              <input id="access-first-name" class="form-input" type="text" autocomplete="given-name">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="access-last-name">Apellido</label>
+              <input id="access-last-name" class="form-input" type="text" autocomplete="family-name">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="access-phone">Teléfono del local</label>
+            <input id="access-phone" class="form-input" type="tel" autocomplete="tel">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="access-address">Dirección del local</label>
+            <input id="access-address" class="form-input" type="text" autocomplete="street-address">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="access-role">Tipo de acceso</label>
+            <select id="access-role" class="form-select">
+              <option value="operator">Operador</option>
+              <option value="admin">Administrador</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="access-brand">Nombre o marca del taller (opcional)</label>
+            <input id="access-brand" class="form-input" type="text" maxlength="60" placeholder="Nombre del taller" autocomplete="organization">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="access-logo">Logo (PNG, JPG o WebP, máximo 1,5 MB)</label>
+            <input id="access-logo" class="form-input" type="file" accept="image/png,image/jpeg,image/webp">
+          </div>
+          <div class="access-form-actions">
+            <button class="btn btn-outline" type="button" onclick="showAccessStep('credentials')">Volver</button>
+            <button class="btn btn-primary" type="submit">Crear cuenta</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="modal-legal-settings" class="modal-overlay" onclick="if (event.target === this) closeModal('modal-legal-settings')">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="modal-title">Marca y comprobantes</div>
+      <form onsubmit="event.preventDefault(); saveLegalSettings();">
+        <div class="form-group">
+          <label class="form-label" for="settings-brand">Nombre o marca del taller</label>
+          <input id="settings-brand" class="form-input" type="text" maxlength="60" autocomplete="organization" oninput="updateLogoTextPreview(true)">
+        </div>
+        <div id="business-contact-fields" hidden>
+          <div class="form-group">
+            <label class="form-label" for="settings-business-phone">Teléfono del local</label>
+            <input id="settings-business-phone" class="form-input" type="tel" maxlength="40" autocomplete="tel">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="settings-business-address">Dirección del local</label>
+            <input id="settings-business-address" class="form-input" type="text" maxlength="120" autocomplete="street-address">
+          </div>
+        </div>
+        <div class="form-group">
+          <div id="settings-logo-text-fields">
+            <label class="form-label">Color por palabra</label>
+            <div id="settings-logo-word-colors" class="logo-color-fields"></div>
+            <div id="settings-logo-text-preview" class="logo-text-preview" aria-label="Vista previa del logotipo"></div>
+          </div>
+        </div>
+        <section class="business-logo-settings">
+        <h3 class="logo-section-title">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"></rect><circle cx="8.5" cy="9" r="1.5"></circle><path d="m21 15-5-5L5 20"></path></svg>
+          <span>Logo</span>
+        </h3>
+        <label class="form-label logo-change-label" for="settings-logo">Cambiar logo</label>
+        <div class="logo-upload-row">
+          <input id="settings-logo" class="logo-file-input" type="file" accept="image/png,image/jpeg,image/webp" onchange="previewBusinessLogo()">
+          <button id="settings-logo-reset" class="logo-reset-button" type="button" onclick="toggleBusinessLogoRemoval()" aria-label="Quitar logo" title="Quitar logo">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6m4-6v6M6 7l1 14h10l1-14M9 7V4h6v3"></path></svg>
+            <span id="settings-logo-reset-label">Quitar logo</span>
+          </button>
+          <label id="settings-logo-dropzone" class="logo-upload-dropzone" for="settings-logo" ondragover="handleBusinessLogoDragOver(event)" ondragleave="handleBusinessLogoDragLeave(event)" ondrop="handleBusinessLogoDrop(event)">
+            <svg class="logo-upload-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 16V4m0 0L7 9m5-5 5 5"></path><path d="M20 16.5a4.5 4.5 0 0 0-1.6-8.7A6.5 6.5 0 0 0 6 9a4 4 0 0 0-1 7.9"></path></svg>
+            <span id="settings-logo-upload-prompt"><strong>Click para seleccionar</strong> o arrastra una imagen</span>
+            <small>PNG con fondo transparente recomendado · Mínimo 400px de alto · Máx 2MB</small>
+            <img id="settings-logo-preview" class="logo-upload-preview" alt="Vista previa del logo" hidden>
+          </label>
+        </div>
+        <div class="logo-scale-control">
+          <label class="form-label" for="settings-logo-scale">Tamaño del logo</label>
+          <output id="settings-logo-scale-value" for="settings-logo-scale">100%</output>
+          <input id="settings-logo-scale" type="range" min="50" max="300" step="10" value="100" oninput="updateLogoImagePreview()">
+        </div>
+        <label class="logo-transparent-setting">
+          <input id="settings-logo-transparent" type="checkbox" checked onchange="updateLogoImagePreview()">
+          <span>
+            <strong>Mi logo tiene fondo transparente</strong>
+            <small>Déjalo marcado si tu logo es un PNG con fondo transparente (la mayoría de los logos profesionales). Si subiste un JPG o PNG con fondo blanco, desmárcalo y el sistema lo mostrará dentro de un recuadro blanco para que se vea mejor sobre los colores del tema.</small>
+          </span>
+        </label>
+        <input id="settings-remove-logo" type="checkbox" hidden>
+        </section>
+        <div id="legal-terms-fields">
+          <div class="form-group">
+            <label class="form-label" for="receipt-terms">Boleta del cliente</label>
+            <textarea id="receipt-terms" class="form-textarea" rows="4" maxlength="1500"></textarea>
+          </div>
+        </div>
+        <div id="tracking-settings" class="tracking-settings" hidden>
+          <div class="form-group">
+            <label class="form-label" for="settings-tracking-api-key">Clave privada de seguimiento</label>
+            <input id="settings-tracking-api-key" class="form-input" type="password" maxlength="200" autocomplete="new-password">
+            <small>Usá la misma clave configurada en Netlify. No la compartas con los clientes.</small>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="settings-tracking-base-url">Dirección pública del sitio (opcional)</label>
+            <input id="settings-tracking-base-url" class="form-input" type="url" maxlength="200" placeholder="https://tu-taller.netlify.app" autocomplete="url">
+            <small>En la web se detecta automáticamente. Completala si imprimís boletas desde la app instalada.</small>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-outline" type="button" onclick="closeModal('modal-legal-settings')">Cancelar</button>
+          <button class="btn btn-primary" type="submit">Guardar condiciones</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="modal-new-task" class="modal-overlay" onclick="if (event.target === this) closeModal('modal-new-task')">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="modal-title">Nueva tarea</div>
+      <form id="new-task-form" onsubmit="return false;">
+        <div class="form-group">
+          <label class="form-label" for="task-title">Título</label>
+          <input id="task-title" class="form-input" type="text" placeholder="Confirmar repuesto, seguimiento, cobro...">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="task-type">Tipo</label>
+            <select id="task-type" class="form-select">
+              <option value="seguimiento">Seguimiento</option>
+              <option value="proveedor">Proveedor</option>
+              <option value="finanzas">Finanzas</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="task-priority">Prioridad</label>
+            <select id="task-priority" class="form-select">
+              <option value="alta">Alta</option>
+              <option value="media" selected>Media</option>
+              <option value="baja">Baja</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="task-assignee">Responsable</label>
+            <input id="task-assignee" class="form-input" type="text" value="Equipo" placeholder="Nombre del responsable">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="task-due-date">Fecha</label>
+            <input id="task-due-date" class="form-input" type="date">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="task-status">Estado</label>
+          <select id="task-status" class="form-select">
+            <option value="pendiente" selected>Pendiente</option>
+            <option value="hoy">Hoy</option>
+            <option value="completado">Completada</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="task-notes">Notas</label>
+          <textarea id="task-notes" class="form-input" rows="3" placeholder="Detalles, seguimiento o comentarios..."></textarea>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" type="button" onclick="closeModal('modal-new-task')">Cancelar</button>
+          <button class="btn btn-primary" type="button" onclick="saveNewTask()">Guardar tarea</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="modal-new-supplier" class="modal-overlay" onclick="if (event.target === this) closeModal('modal-new-supplier')">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="modal-title">Nuevo proveedor</div>
+      <form id="new-supplier-form" onsubmit="return false;">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="supplier-name">Nombre</label>
+            <input id="supplier-name" class="form-input" type="text" placeholder="TechParts SRL">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="supplier-category">Categoría</label>
+            <select id="supplier-category" class="form-select">
+              <option value="Repuestos">Repuestos</option>
+              <option value="Accesorios">Accesorios</option>
+              <option value="Baterías">Baterías</option>
+              <option value="Servicio">Servicio</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="supplier-contact">Contacto</label>
+            <input id="supplier-contact" class="form-input" type="text" placeholder="María Gómez">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="supplier-phone">Teléfono</label>
+            <input id="supplier-phone" class="form-input" type="text" placeholder="11-5555-2200">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="supplier-email">Email</label>
+            <input id="supplier-email" class="form-input" type="email" placeholder="ventas@proveedor.com">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="supplier-lead-time">Plazo</label>
+            <input id="supplier-lead-time" class="form-input" type="text" value="48h" placeholder="48h">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="supplier-balance">Saldo pendiente</label>
+          <input id="supplier-balance" class="form-input" type="number" min="0" step="0.01" value="0">
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" type="button" onclick="closeModal('modal-new-supplier')">Cancelar</button>
+          <button class="btn btn-primary" type="button" onclick="saveNewSupplier()">Guardar proveedor</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="modal-new-sale" class="modal-overlay" onclick="if (event.target === this) closeModal('modal-new-sale')">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="modal-title">Nueva venta</div>
+      <form id="new-sale-form" onsubmit="return false;">
+        <section id="sale-product-section" class="sale-product-selection" hidden>
+          <div id="sale-product-icon" class="sale-product-icon">📦</div>
+          <div class="sale-product-copy"><strong id="sale-product-name"></strong><span id="sale-product-meta"></span></div>
+          <div class="form-group sale-quantity-field"><label class="form-label" for="sale-item-quantity">Cantidad</label><input id="sale-item-quantity" class="form-input" type="number" min="1" step="1" value="1" oninput="updateSaleItemTotal()"></div>
+          <div id="sale-item-total" class="sale-item-total">$0</div>
+        </section>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="sale-client">Nombre del cliente *</label>
+            <input id="sale-client" class="form-input" type="text" list="sale-client-options" placeholder="Escribe o selecciona un cliente" autocomplete="off" oninput="updateSaleClientHint()">
+            <datalist id="sale-client-options"></datalist>
+            <small id="sale-client-hint" class="product-hint">Si es nuevo, se agregará automáticamente a Clientes.</small>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="sale-invoice">Factura</label>
+            <input id="sale-invoice" class="form-input" type="text" placeholder="FV-1046">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="sale-amount">Monto</label>
+            <input id="sale-amount" class="form-input" type="number" min="0" step="0.01" placeholder="25000">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="sale-status">Estado</label>
+            <select id="sale-status" class="form-select">
+              <option value="pendiente" selected>Pendiente</option>
+              <option value="cobrado">Cobrado</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="sale-due-date">Vencimiento</label>
+          <input id="sale-due-date" class="form-input" type="date">
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" type="button" onclick="closeModal('modal-new-sale')">Cancelar</button>
+          <button class="btn btn-primary" type="button" onclick="saveNewSale()">Guardar venta</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="modal-new-purchase" class="modal-overlay" onclick="if (event.target === this) closeModal('modal-new-purchase')">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="modal-title">Nueva compra</div>
+      <form id="new-purchase-form" onsubmit="return false;">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="purchase-supplier">Proveedor</label>
+            <input id="purchase-supplier" class="form-input" type="text" placeholder="Nombre del proveedor">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="purchase-invoice">Factura</label>
+            <input id="purchase-invoice" class="form-input" type="text" placeholder="FC-204">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="purchase-amount">Monto</label>
+            <input id="purchase-amount" class="form-input" type="number" min="0" step="0.01" placeholder="18000">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="purchase-status">Estado</label>
+            <select id="purchase-status" class="form-select">
+              <option value="pendiente" selected>Pendiente</option>
+              <option value="pagado">Pagado</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="purchase-due-date">Vencimiento</label>
+          <input id="purchase-due-date" class="form-input" type="date">
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" type="button" onclick="closeModal('modal-new-purchase')">Cancelar</button>
+          <button class="btn btn-primary" type="button" onclick="saveNewPurchase()">Guardar compra</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="modal-new-repair" class="modal-overlay repair-modal-overlay" onclick="if (event.target === this) closeModal('modal-new-repair')">
+    <div class="modal repair-modal">
+      <div class="modal-handle"></div>
+      <div class="modal-title">Nueva reparación</div>
+      <form id="new-repair-form" onsubmit="return false;">
+        <input id="nr-client-id" type="hidden" value="">
+        <input id="nr-device-type" type="hidden" value="">
+
+        <div id="nr-device-step" class="form-section repair-device-step">
+          <div class="form-section-title">¿Qué equipo querés arreglar?</div>
+          <div class="repair-device-options">
+            <button class="repair-device-option" type="button" aria-pressed="false" onclick="selectRepairDevice('Celular', '📱', this)"><span>📱</span>Celular</button>
+            <button class="repair-device-option" type="button" aria-pressed="false" onclick="selectRepairDevice('Tablet', '📟', this)"><span>📟</span>Tablets</button>
+            <button class="repair-device-option" type="button" aria-pressed="false" onclick="selectRepairDevice('Notebook', '💻', this)"><span>💻</span>Notebook</button>
+            <button class="repair-device-option" type="button" aria-pressed="false" onclick="selectRepairDevice('Parlante', '🔊', this)"><span>🔊</span>Parlante</button>
+            <button class="repair-device-option" type="button" aria-pressed="false" onclick="selectRepairDevice('PC de escritorio', '🖥️', this)"><span>🖥️</span>PC de escritorio</button>
+            <button class="repair-device-option" type="button" aria-pressed="false" onclick="selectRepairDevice('Consola / joystick', '🎮', this)"><span>🎮</span>Consola / joystick</button>
+            <button class="repair-device-option" type="button" aria-pressed="false" onclick="selectRepairDevice('Smartwatch', '⌚', this)"><span>⌚</span>Smartwatches</button>
+            <button class="repair-device-option" type="button" aria-pressed="false" onclick="selectRepairDevice('Auriculares', '🎧', this)"><span>🎧</span>Auriculares</button>
+            <button class="repair-device-option" type="button" aria-pressed="false" onclick="selectRepairDevice('Otros equipos', '🧰', this)"><span>🧰</span>Otros equipos</button>
+          </div>
+          <button id="nr-device-continue" class="btn btn-primary" type="button" disabled onclick="continueNewRepair()">Continuar</button>
+        </div>
+
+        <div id="nr-repair-details" hidden>
+          <div id="nr-selected-device-summary" class="repair-device-summary"></div>
+
+        <div class="form-section">
+          <div class="form-section-title">👤 Datos del cliente</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="nr-client-name">Nombre</label>
+              <input id="nr-client-name" class="form-input" type="text" placeholder="Nombre completo">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="nr-client-phone">Teléfono</label>
+              <input id="nr-client-phone" class="form-input" type="text" placeholder="11-1234-5678">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="nr-client-dni">DNI</label>
+              <input id="nr-client-dni" class="form-input" type="text" placeholder="DNI">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="nr-client-email">Email</label>
+              <input id="nr-client-email" class="form-input" type="email" placeholder="correo@ejemplo.com">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="nr-client-address">Dirección</label>
+            <input id="nr-client-address" class="form-input" type="text" placeholder="Dirección">
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">📱 Datos del equipo</div>
+          <div class="form-row">
+            <div id="nr-brand-group" class="form-group">
+              <label class="form-label" for="nr-brand">Marca</label>
+              <div id="nr-brand-select-wrap">
+                <select id="nr-brand" class="form-select" onchange="updateRepairModelOptions(this.value)">
+                <option value="Samsung">Samsung</option>
+                <option value="Apple">Apple</option>
+                <option value="Motorola">Motorola</option>
+                <option value="Xiaomi">Xiaomi</option>
+                <option value="Huawei">Huawei</option>
+                <option value="Realme">Realme</option>
+                <option value="Nokia">Nokia</option>
+                <option value="LG">LG</option>
+                <option value="Otro">Otro</option>
+              </select>
+              </div>
+              <div id="nr-brand-notebook-wrap" hidden>
+                <input id="nr-brand-notebook" class="form-input" type="text" placeholder="Marca de notebook">
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="nr-model">Modelo</label>
+              <div id="nr-model-select-wrap">
+              <select id="nr-model" class="form-select" onchange="handleRepairModelChange(this.value)">
+                <option value="">Seleccioná un modelo</option>
+              </select>
+              </div>
+              <div id="nr-model-notebook-wrap" hidden>
+                <input id="nr-model-notebook" class="form-input" type="text" placeholder="Modelo de notebook">
+              </div>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="nr-color">Color</label>
+              <input id="nr-color" class="form-input" type="text" placeholder="Negro / Blanco">
+            </div>
+            <div class="form-group" id="nr-capacity-group">
+              <label class="form-label" for="nr-capacity">Capacidad</label>
+              <select id="nr-capacity" class="form-select">
+                <option value="32 GB">32 GB</option>
+                <option value="64 GB">64 GB</option>
+                <option value="128 GB">128 GB</option>
+                <option value="256 GB">256 GB</option>
+                <option value="512 GB">512 GB</option>
+                <option value="1 TB">1 TB</option>
+              </select>
+            </div>
+          </div>
+          <div id="nr-imei-group" class="form-group">
+            <label id="nr-imei-label" class="form-label" for="nr-imei1">IMEI</label>
+            <input id="nr-imei1" class="form-input" type="text" placeholder="IMEI">
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">🧩 Falla y prioridad</div>
+          <div class="form-group">
+            <label class="form-label" for="nr-problem">Problema reportado</label>
+            <textarea id="nr-problem" class="form-textarea" placeholder="Describí la falla del equipo"></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="nr-priority">Prioridad</label>
+              <select id="nr-priority" class="form-select">
+                <option value="alta">Alta</option>
+                <option value="media" selected>Media</option>
+                <option value="baja">Baja</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="nr-date-in">Fecha de ingreso</label>
+              <input id="nr-date-in" class="form-input" type="date">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="nr-date-est">Entrega estimada</label>
+              <input id="nr-date-est" class="form-input" type="date">
+            </div>
+            <div class="form-group">
+              <div class="form-label">Repuestos</div>
+              <div id="nr-parts-list" class="check-grid repair-parts-list"></div>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="nr-price">Presupuesto</label>
+              <input id="nr-price" class="form-input" type="number" min="0" step="0.01" placeholder="0" oninput="updateNewRepairBalance()">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="nr-deposit">Anticipo / Seña</label>
+              <input id="nr-deposit" class="form-input" type="number" min="0" step="0.01" placeholder="0" oninput="updateNewRepairBalance()">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="nr-total">Total pendiente</label>
+            <input id="nr-total" class="form-input" type="text" value="$0" readonly>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="nr-status">Estado inicial</label>
+              <select id="nr-status" class="form-select">
+                <option value="recibido">Recibido</option>
+                <option value="diagnostico">Diagnóstico</option>
+                <option value="espera_repuesto">Espera repuesto</option>
+                <option value="en_progreso">En progreso</option>
+                <option value="listo">Listo para entregar</option>
+              </select>
+            </div>
+          </div>
+
+        <div id="nr-accessories-section" class="form-section">
+          <div class="form-section-title">📦 Accesorios entregados</div>
+          <div id="nr-accessories-default" class="check-grid">
+            <label><input type="checkbox" name="nr-acc" value="Caja"> Caja</label>
+            <label><input type="checkbox" name="nr-acc" value="Cargador"> Cargador</label>
+            <label><input type="checkbox" name="nr-acc" value="Cable"> Cable</label>
+            <label><input type="checkbox" name="nr-acc" value="Chip"> Chip</label>
+            <label><input type="checkbox" name="nr-acc" value="Funda"> Funda</label>
+            <label><input type="checkbox" name="nr-acc" value="Memoria SD"> Memoria SD</label>
+            <label><input type="checkbox" name="nr-acc" value="Vidrio"> Vidrio</label>
+            <label><input type="checkbox" name="nr-acc" value="Otro"> Otro</label>
+          </div>
+          <div id="nr-accessories-notebook" class="check-grid" hidden>
+            <label><input type="checkbox" name="nr-acc" value="Caja"> Caja</label>
+            <label><input type="checkbox" name="nr-acc" value="Cable"> Cable</label>
+            <label><input type="checkbox" name="nr-acc" value="Funda"> Funda</label>
+          </div>
+          <div id="nr-accessories-console" hidden>
+            <div class="form-group">
+              <div class="form-label">Joystick 1</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-console-accessory-joystick1" value="No" checked> No</label>
+                <label><input type="radio" name="nr-console-accessory-joystick1" value="Sí"> Sí</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Joystick 2</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-console-accessory-joystick2" value="No" checked> No</label>
+                <label><input type="radio" name="nr-console-accessory-joystick2" value="Sí"> Sí</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Cable HDMI</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-console-accessory-hdmi" value="No" checked> No</label>
+                <label><input type="radio" name="nr-console-accessory-hdmi" value="Sí"> Sí</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Cable de poder</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-console-accessory-power" value="No" checked> No</label>
+                <label><input type="radio" name="nr-console-accessory-power" value="Sí"> Sí</label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">✅ CHECK IN · Estado físico</div>
+          <div id="nr-physical-default">
+          <div class="form-group">
+            <div class="form-label">Pantalla</div>
+            <div class="check-grid">
+              <label><input type="radio" name="nr-physical-screen" value="OK"> OK</label>
+              <label><input type="radio" name="nr-physical-screen" value="Rayada"> Rayada</label>
+              <label><input type="radio" name="nr-physical-screen" value="Rota"> Rota</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Tapa trasera</div>
+            <div class="check-grid">
+              <label><input type="radio" name="nr-physical-back" value="OK"> OK</label>
+              <label><input type="radio" name="nr-physical-back" value="Despegada"> Despegada</label>
+              <label><input type="radio" name="nr-physical-back" value="Rayada"> Rayada</label>
+              <label><input type="radio" name="nr-physical-back" value="Rota"> Rota</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Marco / Bisel</div>
+            <div class="check-grid">
+              <label><input type="radio" name="nr-physical-frame" value="OK"> OK</label>
+              <label><input type="radio" name="nr-physical-frame" value="Doblado"> Doblado</label>
+              <label><input type="radio" name="nr-physical-frame" value="Dañado"> Dañado</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Corrosión / Óxido</div>
+            <div class="check-grid">
+              <label><input type="radio" name="nr-physical-corrosion" value="No"> No</label>
+              <label><input type="radio" name="nr-physical-corrosion" value="Leve"> Leve</label>
+              <label><input type="radio" name="nr-physical-corrosion" value="Severa"> Severa</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Puerto de carga</div>
+            <div class="check-grid">
+              <label><input type="radio" name="nr-physical-port" value="OK"> OK</label>
+              <label><input type="radio" name="nr-physical-port" value="Sucio"> Sucio</label>
+              <label><input type="radio" name="nr-physical-port" value="Dañado"> Dañado</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Reparación anterior</div>
+            <div class="check-grid">
+              <label><input type="radio" name="nr-physical-previous" value="No"> No</label>
+              <label><input type="radio" name="nr-physical-previous" value="Sí"> Sí</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Estado general</div>
+            <div class="check-grid">
+              <label><input type="radio" name="nr-physical-general" value="OK"> OK</label>
+              <label><input type="radio" name="nr-physical-general" value="Regular"> Regular</label>
+              <label><input type="radio" name="nr-physical-general" value="Malo"> Malo</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Rayones</div>
+            <div class="check-grid">
+              <label><input type="radio" name="nr-physical-scratches" value="No"> No</label>
+              <label><input type="radio" name="nr-physical-scratches" value="Leves"> Leves</label>
+              <label><input type="radio" name="nr-physical-scratches" value="Severos"> Severos</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Golpes visibles</div>
+            <div class="check-grid">
+              <label><input type="radio" name="nr-physical-impacts" value="No"> No</label>
+              <label><input type="radio" name="nr-physical-impacts" value="Leves"> Leves</label>
+              <label><input type="radio" name="nr-physical-impacts" value="Severos"> Severos</label>
+            </div>
+          </div>
+          </div>
+          <div id="nr-physical-notebook" hidden>
+            <div class="form-group">
+              <div class="form-label">Estado general</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-physical-notebook-general" value="OK"> OK</label>
+                <label><input type="radio" name="nr-physical-notebook-general" value="Regular"> Regular</label>
+                <label><input type="radio" name="nr-physical-notebook-general" value="Malo"> Malo</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Rayones</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-physical-notebook-scratches" value="No"> No</label>
+                <label><input type="radio" name="nr-physical-notebook-scratches" value="Leves"> Leves</label>
+                <label><input type="radio" name="nr-physical-notebook-scratches" value="Severos"> Severos</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Golpes visibles</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-physical-notebook-impacts" value="No"> No</label>
+                <label><input type="radio" name="nr-physical-notebook-impacts" value="Leves"> Leves</label>
+                <label><input type="radio" name="nr-physical-notebook-impacts" value="Severos"> Severos</label>
+              </div>
+            </div>
+          </div>
+          <div id="nr-physical-speaker" hidden>
+            <div class="form-group">
+              <div class="form-label">Estado general</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-physical-speaker-general" value="OK"> OK</label>
+                <label><input type="radio" name="nr-physical-speaker-general" value="Regular"> Regular</label>
+                <label><input type="radio" name="nr-physical-speaker-general" value="Malo"> Malo</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Rayones</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-physical-speaker-scratches" value="No"> No</label>
+                <label><input type="radio" name="nr-physical-speaker-scratches" value="Leves"> Leves</label>
+                <label><input type="radio" name="nr-physical-speaker-scratches" value="Severos"> Severos</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Golpes visibles</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-physical-speaker-impacts" value="No"> No</label>
+                <label><input type="radio" name="nr-physical-speaker-impacts" value="Leves"> Leves</label>
+                <label><input type="radio" name="nr-physical-speaker-impacts" value="Severos"> Severos</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Prende luz</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-physical-speaker-light" value="Sí"> Sí</label>
+                <label><input type="radio" name="nr-physical-speaker-light" value="No"> No</label>
+              </div>
+            </div>
+          </div>
+          <div id="nr-physical-console" hidden>
+            <div class="form-group">
+              <div class="form-label">Estado general</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-physical-console-general" value="OK"> OK</label>
+                <label><input type="radio" name="nr-physical-console-general" value="Regular"> Regular</label>
+                <label><input type="radio" name="nr-physical-console-general" value="Malo"> Malo</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Rayones</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-physical-console-scratches" value="No"> No</label>
+                <label><input type="radio" name="nr-physical-console-scratches" value="Leves"> Leves</label>
+                <label><input type="radio" name="nr-physical-console-scratches" value="Severos"> Severos</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Golpes visibles</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-physical-console-impacts" value="No"> No</label>
+                <label><input type="radio" name="nr-physical-console-impacts" value="Leves"> Leves</label>
+                <label><input type="radio" name="nr-physical-console-impacts" value="Severos"> Severos</label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="nr-functional-section" class="form-section">
+          <div class="form-section-title">⚙️ CHECK IN · Estado funcional</div>
+          <div id="nr-functional-default">
+          <div class="form-group">
+            <div class="form-label">Enciende</div>
+            <div class="check-grid">
+              <label><input type="radio" name="nr-functional-power" value="OK"> OK</label>
+              <label><input type="radio" name="nr-functional-power" value="No"> No</label>
+              <label><input type="radio" name="nr-functional-power" value="No probado"> No probado</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Touch / Táctil</div>
+            <div class="check-grid">
+              <label><input type="radio" name="nr-functional-touch" value="OK"> OK</label>
+              <label><input type="radio" name="nr-functional-touch" value="Falla"> Falla</label>
+              <label><input type="radio" name="nr-functional-touch" value="No probado"> No probado</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Carga</div>
+            <div class="check-grid">
+              <label><input type="radio" name="nr-functional-charge" value="OK"> OK</label>
+              <label><input type="radio" name="nr-functional-charge" value="No"> No</label>
+              <label><input type="radio" name="nr-functional-charge" value="No probado"> No probado</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Sonido</div>
+            <div class="check-grid">
+              <label><input type="radio" name="nr-functional-sound" value="OK"> OK</label>
+              <label><input type="radio" name="nr-functional-sound" value="Falla"> Falla</label>
+              <label><input type="radio" name="nr-functional-sound" value="No probado"> No probado</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Micrófono</div>
+            <div class="check-grid">
+              <label><input type="radio" name="nr-functional-microphone" value="OK"> OK</label>
+              <label><input type="radio" name="nr-functional-microphone" value="Falla"> Falla</label>
+              <label><input type="radio" name="nr-functional-microphone" value="No probado"> No probado</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">WiFi</div>
+            <div class="check-grid">
+              <label><input type="radio" name="nr-functional-wifi" value="OK"> OK</label>
+              <label><input type="radio" name="nr-functional-wifi" value="Falla"> Falla</label>
+              <label><input type="radio" name="nr-functional-wifi" value="No probado"> No probado</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Botones</div>
+            <div class="check-grid">
+              <label><input type="radio" name="nr-functional-buttons" value="OK"> OK</label>
+              <label><input type="radio" name="nr-functional-buttons" value="Falla"> Falla</label>
+              <label><input type="radio" name="nr-functional-buttons" value="No probado"> No probado</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Huella / FaceID</div>
+            <div class="check-grid">
+              <label><input type="radio" name="nr-functional-biometric" value="OK"> OK</label>
+              <label><input type="radio" name="nr-functional-biometric" value="Falla"> Falla</label>
+              <label><input type="radio" name="nr-functional-biometric" value="No tiene"> No tiene</label>
+            </div>
+          </div>
+          </div>
+          <div id="nr-functional-notebook" hidden>
+            <div class="form-group">
+              <div class="form-label">Enciende</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-functional-notebook-power" value="OK"> OK</label>
+                <label><input type="radio" name="nr-functional-notebook-power" value="No"> No</label>
+                <label><input type="radio" name="nr-functional-notebook-power" value="No probado"> No probado</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Lector de discos</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-functional-notebook-disc-drive" value="OK"> OK</label>
+                <label><input type="radio" name="nr-functional-notebook-disc-drive" value="Falla"> Falla</label>
+                <label><input type="radio" name="nr-functional-notebook-disc-drive" value="No tiene"> No tiene</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Imagen HDMI</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-functional-notebook-hdmi" value="OK"> OK</label>
+                <label><input type="radio" name="nr-functional-notebook-hdmi" value="Falla"> Falla</label>
+                <label><input type="radio" name="nr-functional-notebook-hdmi" value="No probado"> No probado</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Ventilador</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-functional-notebook-fan" value="OK"> OK</label>
+                <label><input type="radio" name="nr-functional-notebook-fan" value="Falla"> Falla</label>
+                <label><input type="radio" name="nr-functional-notebook-fan" value="No probado"> No probado</label>
+              </div>
+            </div>
+          </div>
+          <div id="nr-functional-console" hidden>
+            <div class="form-group">
+              <div class="form-label">Enciende</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-functional-console-power" value="OK"> OK</label>
+                <label><input type="radio" name="nr-functional-console-power" value="No"> No</label>
+                <label><input type="radio" name="nr-functional-console-power" value="No probado"> No probado</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Lector de discos</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-functional-console-disc-drive" value="OK"> OK</label>
+                <label><input type="radio" name="nr-functional-console-disc-drive" value="Falla"> Falla</label>
+                <label><input type="radio" name="nr-functional-console-disc-drive" value="No tiene"> No tiene</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Imagen HDMI</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-functional-console-hdmi" value="OK"> OK</label>
+                <label><input type="radio" name="nr-functional-console-hdmi" value="Falla"> Falla</label>
+                <label><input type="radio" name="nr-functional-console-hdmi" value="No probado"> No probado</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Ventilador</div>
+              <div class="check-grid">
+                <label><input type="radio" name="nr-functional-console-fan" value="OK"> OK</label>
+                <label><input type="radio" name="nr-functional-console-fan" value="Ruidoso"> Ruidoso</label>
+                <label><input type="radio" name="nr-functional-console-fan" value="No funciona"> No funciona</label>
+              </div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="nr-notes">Notas</label>
+            <textarea id="nr-notes" class="form-textarea" placeholder="Observaciones internas o de entrega"></textarea>
+          </div>
+        </div>
+        </div>
+         <div class="security-section">
+          <div class="form-section-title">🔐 Seguridad del equipo</div>
+          <div class="security-tabs">
+            <button class="sec-tab-btn active" type="button" data-sec="pin" onclick="switchSecurityTab('pin')">PIN</button>
+            <button class="sec-tab-btn" type="button" data-sec="pattern" onclick="switchSecurityTab('pattern')">Patrón</button>
+          </div>
+          <div id="sec-panel-pin">
+            <div class="form-group">
+              <label class="form-label" for="nr-device-key">PIN / clave</label>
+              <input id="nr-device-key" class="form-input" type="text" placeholder="1234 o contraseña">
+            </div>
+          </div>
+          <div id="sec-panel-pattern" hidden>
+            <div class="pattern-help">Dibujá el patrón conectando los puntos en orden.</div>
+            <div class="pattern-lock-container">
+              <canvas id="nr-pattern-canvas" width="240" height="240"></canvas>
+            </div>
+            <div id="nr-pattern-preview" class="pattern-help">Dibujá el patrón conectando los puntos</div>
+            <button class="btn-clear-pattern" type="button" onclick="clearNewRepairPattern()">Limpiar patrón</button>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-outline" type="button" onclick="closeModal('modal-new-repair')">Cancelar</button>
+          <button class="btn btn-primary" type="button" onclick="saveNewRepair()">Guardar reparación</button>
+        </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="modal-edit-repair" class="modal-overlay" onclick="if (event.target === this) closeModal('modal-edit-repair')">
+    <div class="modal edit-repair-modal">
+      <div class="modal-handle"></div>
+      <div class="modal-title">Editar reparación</div>
+      <form onsubmit="return false;">
+        <input id="edit-repair-id" type="hidden">
+        <div class="form-group"><label class="form-label" for="edit-status">Estado</label><select id="edit-status" class="form-select" onchange="syncEditProgressWithStatus()"><option value="recibido">Recibido</option><option value="diagnostico">Diagnóstico</option><option value="espera_repuesto">Espera repuesto</option><option value="en_progreso">En progreso</option><option value="listo">Listo para entregar</option><option value="entregado">Entregado</option></select></div>
+        <div class="form-group"><label class="form-label" for="edit-progress">Progreso</label><input id="edit-progress" class="form-input" type="range" min="0" max="100" value="0" oninput="document.getElementById('edit-progress-val').textContent = this.value + '%' "><div id="edit-progress-val" style="margin-top:6px;font-size:12px;font-weight:600;color:var(--gray-600)">0%</div></div>
+        <div class="form-group"><label class="form-label" for="edit-notes">Notas</label><textarea id="edit-notes" class="form-textarea"></textarea></div>
+        <div class="form-section">
+          <div class="form-section-title">Datos del cliente</div>
+          <div class="form-group"><label class="form-label" for="edit-client-name">Nombre y apellido</label><input id="edit-client-name" class="form-input" type="text" autocomplete="name"></div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label" for="edit-client-phone">Celular</label><input id="edit-client-phone" class="form-input" type="tel" autocomplete="tel"></div>
+            <div class="form-group"><label class="form-label" for="edit-client-dni">DNI</label><input id="edit-client-dni" class="form-input" type="text"></div>
+          </div>
+          <div class="form-group"><label class="form-label" for="edit-client-email">Email</label><input id="edit-client-email" class="form-input" type="email" autocomplete="email"></div>
+          <div class="form-group"><label class="form-label" for="edit-client-address">Dirección</label><input id="edit-client-address" class="form-input" type="text" autocomplete="street-address"></div>
+        </div>
+        <div class="form-section">
+          <div class="form-section-title">Presupuesto y pagos</div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label" for="edit-price">Presupuesto</label><input id="edit-price" class="form-input" type="number" min="0" step="0.01" oninput="updateEditRepairBalance()"></div>
+            <div class="form-group"><label class="form-label" for="edit-deposit">Anticipo / Seña</label><input id="edit-deposit" class="form-input" type="number" min="0" step="0.01" oninput="updateEditRepairBalance()"></div>
+          </div>
+          <div class="form-group"><label class="form-label" for="edit-total">Total pendiente</label><input id="edit-total" class="form-input" type="text" value="$0" readonly></div>
+          <div id="edit-ready-payment" class="edit-ready-payment" hidden>
+            <div class="edit-ready-payment-title">Registrar pago</div>
+            <div id="edit-ready-payment-amount" class="edit-ready-payment-amount"></div>
+            <button id="edit-ready-payment-button" class="btn btn-primary" type="button" onclick="registerEditRepairPayment()">Registrar pago</button>
+          </div>
+        </div>
+        <div id="edit-checkout-state" class="form-section"></div>
+        <div class="form-section">
+          <div class="form-section-title">Trabajo realizado</div>
+          <div class="form-group"><label class="form-label" for="edit-repair-work-note">Detalle de la reparación</label><textarea id="edit-repair-work-note" class="form-textarea" placeholder="Describí el trabajo realizado en el equipo"></textarea></div>
+        </div>
+        <div style="display:flex;gap:10px"><button class="btn btn-outline" type="button" onclick="closeModal('modal-edit-repair')">Cancelar</button><button class="btn btn-primary" type="button" onclick="saveEditRepair()">Guardar cambios</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div id="modal-new-client" class="modal-overlay" onclick="if (event.target === this) closeModal('modal-new-client')">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="modal-title">Nuevo cliente</div>
+      <form id="new-client-form" onsubmit="return false;">
+        <div class="form-group"><label class="form-label" for="nc-name">Nombre</label><input id="nc-name" class="form-input" type="text" placeholder="Nombre completo"></div>
+        <div class="form-group"><label class="form-label" for="nc-phone">Teléfono</label><input id="nc-phone" class="form-input" type="text" placeholder="11-1234-5678"></div>
+        <div class="form-group"><label class="form-label" for="nc-email">Email</label><input id="nc-email" class="form-input" type="email" placeholder="correo@ejemplo.com"></div>
+        <div class="form-group"><label class="form-label" for="nc-address">Dirección</label><input id="nc-address" class="form-input" type="text" placeholder="Dirección"></div>
+        <div style="display:flex;gap:10px"><button class="btn btn-outline" type="button" onclick="closeModal('modal-new-client')">Cancelar</button><button class="btn btn-primary" type="button" onclick="saveNewClient()">Guardar</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div id="modal-new-product" class="modal-overlay product-modal-overlay" onclick="if (event.target === this) closeModal('modal-new-product')">
+    <div class="modal product-modal">
+      <div class="modal-handle"></div>
+      <div class="modal-title">Nuevo producto</div>
+      <form id="new-product-form" onsubmit="return false;">
+        <section class="product-form-section">
+          <h3>Información básica</h3>
+          <div class="product-form-grid">
+            <div class="form-group product-span-2"><label class="form-label" for="np-name">Nombre del producto *</label><input id="np-name" class="form-input" type="text" list="np-product-suggestions" placeholder="Producto o repuesto" required><datalist id="np-product-suggestions"></datalist></div>
+            <div class="form-group"><label class="form-label" for="np-description">Descripción</label><textarea id="np-description" class="form-textarea" rows="3" placeholder="Detalles del producto"></textarea></div>
+            <div class="form-group"><label class="form-label" for="np-meta-description">Meta descripción SEO</label><textarea id="np-meta-description" class="form-textarea" rows="3" maxlength="160" placeholder="Descripción breve para buscadores" oninput="updateProductMetaCount()"></textarea><small id="np-meta-count" class="product-hint">0/160 caracteres. Ideal: 120 a 155.</small></div>
+            <div class="form-group"><label class="form-label" for="np-type">Tipo *</label><select id="np-type" class="form-select" onchange="handleNewProductTypeChange()"><option value="Fisico">Físico</option><option value="Servicio">Servicio</option><option value="Licencia digital">Licencia digital</option></select></div>
+            <div class="form-group"><label class="form-label" for="np-image">Imagen del producto</label><input id="np-image" class="product-file-input" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onchange="handleNewProductImage(event)"><label class="btn btn-outline product-file-label" for="np-image">Seleccionar imagen</label><span id="np-image-name" class="product-hint">Sin imagen seleccionada</span><small class="product-hint">Una imagen, máximo 4 MB. Se optimiza al cargar.</small><div id="np-image-preview" class="product-image-preview" hidden></div></div>
+          </div>
+        </section>
+
+        <section class="product-form-section">
+          <h3>Clasificación</h3>
+          <div class="product-form-grid">
+            <div class="form-group"><label class="form-label" for="np-category">Categoría *</label><select id="np-category" class="form-select" onchange="handleNewProductCategoryChange()"><option value="Repuesto">Repuestos</option><option value="Accesorio">Accesorios</option><option value="Equipo">Equipos</option><option value="Herramienta e Insumo">Herramientas e Insumos</option><option value="Otro">Otros</option><option value="Servicio">Servicios</option></select></div>
+            <div class="form-group"><label class="form-label" for="np-subcategory">Subcategoría</label><select id="np-subcategory" class="form-select" onchange="updateNewProductSuggestions()"></select></div>
+            <div class="form-group"><label class="form-label" for="np-brand">Marca</label><input id="np-brand" class="form-input" type="text" list="np-brand-options" placeholder="Sin marca"><datalist id="np-brand-options"><option value="Sin marca"><option value="Alcatel"><option value="Anker"><option value="Apple"><option value="Asus"><option value="Baseus"><option value="Belkin"><option value="Genérico"><option value="Google"><option value="Honor"><option value="Huawei"><option value="JBL"><option value="Lenovo"><option value="LG"><option value="Motorola"><option value="Nokia"><option value="OEM"><option value="OnePlus"><option value="OPPO"><option value="Original"><option value="Otra"><option value="OtterBox"><option value="Realme"><option value="Samsung"><option value="Sony"><option value="Spigen"><option value="TCL"><option value="Vivo"><option value="Wuzip"><option value="Xiaomi"><option value="ZTE"></datalist></div>
+            <div class="form-group"><label class="form-label" for="np-supplier">Proveedor</label><select id="np-supplier" class="form-select"><option value="">Sin proveedor</option></select></div>
+          </div>
+        </section>
+
+        <section class="product-form-section">
+          <h3>Identificación y ubicación</h3>
+          <div class="product-form-grid">
+            <div class="form-group"><label class="form-label" for="np-sku">SKU</label><input id="np-sku" class="form-input" type="text" placeholder="Código propio"></div>
+            <div class="form-group"><label class="form-label" for="np-barcode">Código de barras</label><div class="product-code-entry"><input id="np-barcode" class="form-input" type="text" inputmode="numeric" placeholder="Escanear o escribir" onkeydown="if(event.key==='Enter'){event.preventDefault();lookupProductByCode()}"><button class="btn btn-outline product-scan-button" type="button" onclick="startProductBarcodeScanner()" aria-label="Leer código con cámara" title="Leer código con cámara"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h3M17 4h3v3M20 17v3h-3M7 20H4v-3"></path><path d="M7 12h10"></path></svg></button></div><small id="np-scanner-status" class="product-hint">También puedes usar un lector USB.</small><video id="np-scanner-video" class="product-scanner-video" playsinline hidden></video></div>
+            <div class="form-group"><label class="form-label" for="np-location">Ubicación</label><input id="np-location" class="form-input" type="text" placeholder="Estante, caja o depósito"></div>
+            <div class="form-group"><label class="form-label" for="np-internal-code">Código interno</label><input id="np-internal-code" class="form-input" type="text" readonly></div>
+          </div>
+        </section>
+
+        <section class="product-form-section">
+          <h3>Precios</h3>
+          <div class="product-form-grid">
+            <div class="form-group"><label class="form-label" for="np-cost">Costo de compra</label><input id="np-cost" class="form-input" type="number" min="0" step="0.01" value="0" oninput="updateNewProductPricing()"></div>
+            <div class="form-group"><label class="form-label" for="np-margin-mode">Ganancia</label><select id="np-margin-mode" class="form-select" onchange="updateNewProductPricing()"><option value="percent">Porcentaje sobre el costo</option><option value="fixed">Monto fijo sobre el costo</option></select></div>
+            <div class="form-group"><label id="np-margin-label" class="form-label" for="np-margin">Ganancia (%)</label><input id="np-margin" class="form-input" type="number" step="0.01" value="0" oninput="updateNewProductPricing()"></div>
+            <div class="form-group"><label class="form-label" for="np-vat">IVA</label><select id="np-vat" class="form-select" onchange="updateNewProductPricing()"><option value="0">0% (Exento)</option><option value="10.5">10.5%</option><option value="21">21%</option></select></div>
+            <div class="form-group"><label class="form-label" for="np-rounding">Redondeo</label><select id="np-rounding" class="form-select" onchange="updateNewProductPricing()"><option value="0">Ninguno</option><option value="1">Entero</option><option value="10">Decena</option><option value="100">Centena</option><option value="1000">Mil</option></select></div>
+            <div class="form-group"><label class="form-label" for="np-net-price">Precio neto</label><input id="np-net-price" class="form-input" type="number" readonly></div>
+            <div class="form-group product-span-2"><label class="form-label" for="np-price">Precio final de venta</label><input id="np-price" class="form-input" type="number" min="0" step="0.01" readonly><small class="product-hint">Se calcula con el costo, la ganancia y el IVA.</small></div>
+          </div>
+        </section>
+
+        <section class="product-form-section">
+          <h3>Control de stock</h3>
+          <div class="product-check-row">
+            <label><input id="np-track-stock" type="checkbox" checked> Controlar stock</label>
+            <label><input id="np-allow-no-stock" type="checkbox"> Permitir venta sin stock</label>
+            <label><input id="np-uses-serial" type="checkbox"> Usa series / IMEI</label>
+          </div>
+          <div class="product-form-grid">
+            <div class="form-group"><label class="form-label" for="np-stock">Stock actual</label><input id="np-stock" class="form-input" type="number" min="0" step="1" value="0"></div>
+            <div class="form-group"><label class="form-label" for="np-min-stock">Stock mínimo</label><input id="np-min-stock" class="form-input" type="number" min="0" step="1" value="1"><small class="product-hint">Alerta cuando el stock baje a esta cantidad.</small></div>
+            <div class="form-group"><label class="form-label" for="np-reorder-cap">Tope de recompra</label><input id="np-reorder-cap" class="form-input" type="number" min="0" step="1" placeholder="Opcional"></div>
+            <div class="form-group"><label class="form-label" for="np-weight">Peso (kg)</label><input id="np-weight" class="form-input" type="number" min="0" step="0.001"></div>
+            <div class="form-group"><label class="form-label" for="np-height">Alto (cm)</label><input id="np-height" class="form-input" type="number" min="0" step="0.1"></div>
+            <div class="form-group"><label class="form-label" for="np-width">Ancho (cm)</label><input id="np-width" class="form-input" type="number" min="0" step="0.1"></div>
+            <div class="form-group"><label class="form-label" for="np-depth">Profundidad (cm)</label><input id="np-depth" class="form-input" type="number" min="0" step="0.1"></div>
+          </div>
+        </section>
+
+        <div class="product-form-actions"><button class="btn btn-outline" type="button" onclick="closeModal('modal-new-product')">Cancelar</button><button class="btn btn-primary" type="button" onclick="saveNewProduct()">Guardar producto</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div id="modal-product-import" class="modal-overlay product-import-overlay" onclick="if (event.target === this) closeModal('modal-product-import')">
+    <div class="modal product-import-modal" role="dialog" aria-modal="true" aria-labelledby="product-import-title">
+      <div class="modal-handle"></div>
+      <div id="product-import-title" class="modal-title">Importar productos</div>
+      <p class="product-import-description">Arrastrá tu archivo de Excel aquí o buscá el archivo en tu dispositivo. Se agregarán productos nuevos; los duplicados se omiten.</p>
+      <input id="product-import-file" class="product-file-input" type="file" accept=".xlsx,.csv" onchange="handleProductImportFile(this.files[0])">
+      <label id="product-import-dropzone" class="product-import-dropzone" for="product-import-file" ondragover="handleProductImportDragOver(event)" ondragleave="handleProductImportDragLeave(event)" ondrop="handleProductImportDrop(event)">
+        <span class="product-import-icon">📄</span>
+        <strong>Arrastrá el archivo aquí</strong>
+        <span>o hacé clic para buscarlo</span>
+        <small>Formatos permitidos: Excel (.xlsx) y CSV (.csv)</small>
+      </label>
+      <div class="product-import-hint">
+        Se procesa la primera hoja. Columnas: <strong>Nombre</strong> (obligatoria), Precio, Costo, Stock, Categoría, Subcategoría, SKU y Código de barras.
+        Si no indicás categoría, se usará “Repuesto”.
+      </div>
+      <div id="product-import-summary" class="product-import-summary" role="status" aria-live="polite" hidden></div>
+      <div class="product-import-actions">
+        <button class="btn btn-outline" type="button" onclick="closeModal('modal-product-import')">Cancelar</button>
+        <button id="product-import-submit" class="btn btn-primary" type="button" onclick="importProductsFromFile()" hidden>Importar productos</button>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

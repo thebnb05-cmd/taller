@@ -1,0 +1,324 @@
+{
+  "entities": {
+    "WorkshopProfile": {
+      "title": "WorkshopProfile",
+      "description": "Configuración de marca, datos del local y perfil del dueño del taller.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 200 },
+        "firstName": { "type": "string", "maxLength": 100 },
+        "lastName": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "enum": ["admin", "operator"] },
+        "brandName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "subtitle": { "type": "string", "maxLength": 100 },
+        "businessPhone": { "type": "string", "maxLength": 50 },
+        "businessAddress": { "type": "string", "maxLength": 200 },
+        "wordColors": { "type": "array" },
+        "logoDataUrl": { "type": "string", "maxLength": 700000 },
+        "logoScale": { "type": "number" },
+        "logoTransparent": { "type": "boolean" },
+        "receiptTerms": { "type": "string", "maxLength": 2000 },
+        "trackingBaseUrl": { "type": "string", "maxLength": 250 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "role", "brandName", "createdAt", "updatedAt"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Cliente del taller técnico.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "phone": { "type": "string", "maxLength": 60 },
+        "dni": { "type": "string", "maxLength": 40 },
+        "email": { "type": "string", "maxLength": 200 },
+        "address": { "type": "string", "maxLength": 240 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "name", "createdAt"]
+    },
+    "Repair": {
+      "title": "Repair",
+      "description": "Orden de reparación ingresada al taller.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "code": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "trackingCode": { "type": "string", "minLength": 1, "maxLength": 40, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clientId": { "type": "string", "maxLength": 128 },
+        "clientName": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "clientPhone": { "type": "string", "maxLength": 60 },
+        "clientDni": { "type": "string", "maxLength": 40 },
+        "clientEmail": { "type": "string", "maxLength": 200 },
+        "clientAddress": { "type": "string", "maxLength": 240 },
+        "deviceType": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "deviceIcon": { "type": "string", "maxLength": 16 },
+        "brand": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "model": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "color": { "type": "string", "maxLength": 60 },
+        "capacity": { "type": "string", "maxLength": 40 },
+        "imei": { "type": "string", "maxLength": 80 },
+        "problem": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "priority": { "type": "string", "enum": ["alta", "media", "baja"] },
+        "status": {
+          "type": "string",
+          "enum": ["recibido", "diagnostico", "espera_repuesto", "en_progreso", "listo", "entregado"]
+        },
+        "progress": { "type": "number" },
+        "dateIn": { "type": "string", "maxLength": 40 },
+        "dateEst": { "type": "string", "maxLength": 40 },
+        "price": { "type": "number" },
+        "deposit": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "paymentStatus": { "type": "string", "enum": ["pendiente", "parcial", "pagado"] },
+        "partIds": { "type": "array" },
+        "partNames": { "type": "array" },
+        "accessories": { "type": "array" },
+        "consoleAccessories": { "type": "object" },
+        "physicalCheck": { "type": "object" },
+        "functionalCheck": { "type": "object" },
+        "securityType": { "type": "string", "enum": ["pin", "pattern", "none"] },
+        "securityPin": { "type": "string", "maxLength": 80 },
+        "securityPattern": { "type": "array" },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "workDetail": { "type": "string", "maxLength": 2000 },
+        "checkoutState": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId",
+        "code",
+        "trackingCode",
+        "clientName",
+        "deviceType",
+        "brand",
+        "model",
+        "problem",
+        "priority",
+        "status",
+        "progress",
+        "dateIn",
+        "price",
+        "deposit",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PublicTicket": {
+      "title": "PublicTicket",
+      "description": "Vista pública sin PII para seguimiento de reparaciones por código.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "repairId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "trackingCode": { "type": "string", "minLength": 1, "maxLength": 40, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "repairCode": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "businessName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "businessPhone": { "type": "string", "maxLength": 50 },
+        "deviceType": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "brand": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "model": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "status": {
+          "type": "string",
+          "enum": ["recibido", "diagnostico", "espera_repuesto", "en_progreso", "listo", "entregado"]
+        },
+        "progress": { "type": "number" },
+        "dateIn": { "type": "string", "maxLength": 40 },
+        "dateEst": { "type": "string", "maxLength": 40 },
+        "problemSummary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "workDetail": { "type": "string", "maxLength": 2000 },
+        "price": { "type": "number" },
+        "deposit": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId",
+        "repairId",
+        "trackingCode",
+        "repairCode",
+        "businessName",
+        "deviceType",
+        "brand",
+        "model",
+        "status",
+        "progress",
+        "dateIn",
+        "problemSummary",
+        "price",
+        "deposit",
+        "updatedAt"
+      ]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Producto, repuesto o servicio del catálogo e inventario.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "metaDescription": { "type": "string", "maxLength": 200 },
+        "productType": { "type": "string", "maxLength": 40 },
+        "imageDataUrl": { "type": "string", "maxLength": 700000 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "subcategory": { "type": "string", "maxLength": 80 },
+        "brand": { "type": "string", "maxLength": 80 },
+        "supplierId": { "type": "string", "maxLength": 128 },
+        "supplierName": { "type": "string", "maxLength": 160 },
+        "sku": { "type": "string", "maxLength": 80 },
+        "barcode": { "type": "string", "maxLength": 80 },
+        "location": { "type": "string", "maxLength": 120 },
+        "internalCode": { "type": "string", "maxLength": 60 },
+        "cost": { "type": "number" },
+        "marginMode": { "type": "string", "enum": ["percent", "fixed"] },
+        "margin": { "type": "number" },
+        "vat": { "type": "number" },
+        "rounding": { "type": "number" },
+        "netPrice": { "type": "number" },
+        "price": { "type": "number" },
+        "trackStock": { "type": "boolean" },
+        "allowNoStock": { "type": "boolean" },
+        "usesSerial": { "type": "boolean" },
+        "stock": { "type": "number" },
+        "minStock": { "type": "number" },
+        "reorderCap": { "type": "number" },
+        "weight": { "type": "number" },
+        "height": { "type": "number" },
+        "width": { "type": "number" },
+        "depth": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId",
+        "name",
+        "productType",
+        "category",
+        "cost",
+        "marginMode",
+        "margin",
+        "vat",
+        "rounding",
+        "netPrice",
+        "price",
+        "trackStock",
+        "allowNoStock",
+        "usesSerial",
+        "stock",
+        "minStock",
+        "createdAt"
+      ]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Tarea de la agenda del taller.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "taskType": { "type": "string", "enum": ["seguimiento", "proveedor", "finanzas"] },
+        "priority": { "type": "string", "enum": ["alta", "media", "baja"] },
+        "assignee": { "type": "string", "maxLength": 100 },
+        "dueDate": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["pendiente", "hoy", "completado"] },
+        "notes": { "type": "string", "maxLength": 1500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "title", "taskType", "priority", "status", "createdAt"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Proveedor de repuestos e insumos.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "contact": { "type": "string", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 60 },
+        "email": { "type": "string", "maxLength": 200 },
+        "leadTime": { "type": "string", "maxLength": 60 },
+        "balance": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "name", "category", "balance", "createdAt"]
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "Venta y cobranza de mostrador o accesorios.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clientId": { "type": "string", "maxLength": 128 },
+        "clientName": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "invoice": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "productId": { "type": "string", "maxLength": 128 },
+        "productName": { "type": "string", "maxLength": 200 },
+        "quantity": { "type": "number" },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pendiente", "cobrado"] },
+        "dueDate": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "clientName", "invoice", "amount", "status", "createdAt"]
+    },
+    "Purchase": {
+      "title": "Purchase",
+      "description": "Compra y pago a proveedores.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "supplierId": { "type": "string", "maxLength": 128 },
+        "supplierName": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "invoice": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pendiente", "pagado"] },
+        "dueDate": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "supplierName", "invoice", "amount", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/workshopProfiles/{profileId}": {
+      "schema": { "$ref": "#/entities/WorkshopProfile" },
+      "description": "Perfil y configuración de marca por usuario autenticado."
+    },
+    "/clients/{clientId}": {
+      "schema": { "$ref": "#/entities/Client" },
+      "description": "Clientes pertenecientes al taller del usuario."
+    },
+    "/repairs/{repairId}": {
+      "schema": { "$ref": "#/entities/Repair" },
+      "description": "Órdenes de reparación del taller."
+    },
+    "/publicTickets/{trackingCode}": {
+      "schema": { "$ref": "#/entities/PublicTicket" },
+      "description": "Tickets públicos de seguimiento indexados por código sin PII."
+    },
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Productos, repuestos y servicios del inventario."
+    },
+    "/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "Tareas y recordatorios de agenda."
+    },
+    "/suppliers/{supplierId}": {
+      "schema": { "$ref": "#/entities/Supplier" },
+      "description": "Proveedores del taller."
+    },
+    "/sales/{saleId}": {
+      "schema": { "$ref": "#/entities/Sale" },
+      "description": "Ventas y cobranzas."
+    },
+    "/purchases/{purchaseId}": {
+      "schema": { "$ref": "#/entities/Purchase" },
+      "description": "Compras y pagos a proveedores."
+    }
+  }
+}

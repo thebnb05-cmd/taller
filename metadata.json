@@ -1,0 +1,6 @@
+{
+  "name": "TH3 BNB Servicio Técnico",
+  "description": "Sistema integral de gestión para taller técnico de celulares, equipos, clientes, inventario, ventas y seguimiento en tiempo real.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": []
+}

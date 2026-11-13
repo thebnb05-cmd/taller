@@ -1,0 +1,17 @@
+{
+  "name": "TH3 BNB Servicio Técnico",
+  "short_name": "TH3 BNB",
+  "description": "App de gestión para taller técnico y stock.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f8f9fa",
+  "theme_color": "#0072BB",
+  "icons": [
+    {
+      "src": "assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
