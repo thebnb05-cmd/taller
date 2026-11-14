@@ -22,6 +22,7 @@ import {
 } from '../utils/pdfReport';
 import { BrandMark } from './BrandMark';
 import { useToast } from './ToastProvider';
+import { parseWorkshopMeta } from '../utils/workshopMeta';
 
 export type PrintDocKey = 'client' | 'workshop' | 'label';
 export type PrintFormat = 'a4' | 'thermal80';
@@ -99,6 +100,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
   justPaid = false,
 }) => {
   const { notify } = useToast();
+  const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
   const [printFormat, setPrintFormat] = useState<PrintFormat>('a4');
   const [trackingQrDataUrl, setTrackingQrDataUrl] = useState('');
   const [generatingPdf, setGeneratingPdf] = useState(false);
@@ -299,10 +301,25 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
               <BrandMark profile={profile} size="lg" forceLight />
             )}
           </div>
-          <p className="flex flex-col gap-0.5 text-xs text-slate-600">
+          {workshopMeta.subtitle && (
+            <div className="text-[11px] font-semibold text-[#0072BB]">
+              {workshopMeta.subtitle}
+            </div>
+          )}
+          <div className="flex flex-col gap-0.5 text-xs text-slate-600">
             <span>{profile?.businessAddress || 'Servicio técnico especializado'}</span>
-            {profile?.businessPhone && <span>Tel: {profile.businessPhone}</span>}
-          </p>
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
+              {profile?.businessPhone && <span>Tel: {profile.businessPhone}</span>}
+              {workshopMeta.businessEmail && <span>{workshopMeta.businessEmail}</span>}
+              {workshopMeta.taxId && <span>{workshopMeta.taxId}</span>}
+            </div>
+            {(workshopMeta.hours || workshopMeta.social) && (
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] text-slate-500">
+                {workshopMeta.hours && <span>Horarios: {workshopMeta.hours}</span>}
+                {workshopMeta.social && <span>{workshopMeta.social}</span>}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="text-right">
@@ -445,6 +462,12 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
           <div className="whitespace-pre-line text-[8px] leading-snug text-slate-600">
             {profile?.receiptTerms ?? DEFAULT_RECEIPT_TERMS}
           </div>
+        </div>
+      )}
+
+      {workshopMeta.footerNote && (
+        <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50/70 px-3 py-2 text-center text-[10.5px] font-semibold text-sky-900">
+          {workshopMeta.footerNote}
         </div>
       )}
 
@@ -713,12 +736,21 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
           <div className="text-sm font-black uppercase tracking-tight">
             {profile?.brandName || 'TH3 BNB Servicio Técnico'}
           </div>
+          {workshopMeta.subtitle && (
+            <div className="text-[9.5px] font-bold uppercase">{workshopMeta.subtitle}</div>
+          )}
           {profile?.businessAddress && (
             <div className="text-[10px]">{profile.businessAddress}</div>
           )}
           {profile?.businessPhone && (
             <div className="text-[10px]">Tel: {profile.businessPhone}</div>
           )}
+          {workshopMeta.businessEmail && (
+            <div className="text-[9.5px]">{workshopMeta.businessEmail}</div>
+          )}
+          {workshopMeta.taxId && <div className="text-[9.5px]">{workshopMeta.taxId}</div>}
+          {workshopMeta.hours && <div className="text-[9px]">Horarios: {workshopMeta.hours}</div>}
+          {workshopMeta.social && <div className="text-[9px]">{workshopMeta.social}</div>}
           <div className="mt-1.5 inline-block border border-black px-2 py-0.5 text-[10px] font-bold uppercase">
             Boleta Cliente
           </div>
@@ -818,6 +850,12 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
             <div className="whitespace-pre-line">
               {profile?.receiptTerms ?? DEFAULT_RECEIPT_TERMS}
             </div>
+          </div>
+        )}
+
+        {workshopMeta.footerNote && (
+          <div className="border-b border-dashed border-black py-1.5 text-center text-[9.5px] font-bold">
+            {workshopMeta.footerNote}
           </div>
         )}
 

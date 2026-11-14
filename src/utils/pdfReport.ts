@@ -12,20 +12,32 @@ import type {
 import { formatCurrency, formatDateShort, getStatusLabel, todayISO } from './formatters';
 import { parsePaymentInfo } from './payment';
 import { parseSalePaymentInfo } from './saleMeta';
+import { parseWorkshopMeta } from './workshopMeta';
 
 interface PdfBrandHeader {
   brandName: string;
   subtitle?: string;
   businessPhone?: string;
   businessAddress?: string;
+  businessEmail?: string;
+  taxId?: string;
+  hours?: string;
+  social?: string;
+  footerNote?: string;
 }
 
 function resolveBrand(profile?: WorkshopProfile | null): PdfBrandHeader {
+  const meta = parseWorkshopMeta(profile);
   return {
     brandName: profile?.brandName || 'TH3 BNB Servicio Técnico',
-    subtitle: profile?.subtitle || 'Servicio técnico',
+    subtitle: meta.subtitle || 'Servicio técnico',
     businessPhone: profile?.businessPhone,
     businessAddress: profile?.businessAddress,
+    businessEmail: meta.businessEmail,
+    taxId: meta.taxId,
+    hours: meta.hours,
+    social: meta.social,
+    footerNote: meta.footerNote,
   };
 }
 
@@ -462,16 +474,43 @@ export async function buildClientRepairReceiptPdf(params: {
   doc.setTextColor(15, 23, 42);
   doc.text(brand.brandName, headerTextX, 20.5);
 
+  let leftHeaderY = 24.8;
+  if (brand.subtitle) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.2);
+    doc.setTextColor(0, 114, 187);
+    doc.text(brand.subtitle, headerTextX, leftHeaderY);
+    leftHeaderY += 4;
+  }
+
   const contactLine = [
     brand.businessAddress || 'Servicio técnico especializado',
     brand.businessPhone ? `Tel: ${brand.businessPhone}` : '',
+    brand.businessEmail || '',
+    brand.taxId || '',
   ]
     .filter(Boolean)
     .join(' · ');
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.2);
+  doc.setFontSize(7.8);
   doc.setTextColor(71, 85, 105);
-  doc.text(contactLine, headerTextX, 25.5);
+  const wrappedContact = doc.splitTextToSize(contactLine, contentWidth - (headerTextX - margin) - 52);
+  doc.text(wrappedContact, headerTextX, leftHeaderY);
+  leftHeaderY += wrappedContact.length * 3.6;
+
+  const extraLine = [
+    brand.hours ? `Horarios: ${brand.hours}` : '',
+    brand.social || '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  if (extraLine) {
+    doc.setFontSize(7.4);
+    doc.setTextColor(100, 116, 139);
+    const wrappedExtra = doc.splitTextToSize(extraLine, contentWidth - (headerTextX - margin) - 52);
+    doc.text(wrappedExtra, headerTextX, leftHeaderY + 0.5);
+    leftHeaderY += wrappedExtra.length * 3.5 + 0.5;
+  }
 
   // Right order meta
   doc.setFont('helvetica', 'bold');
@@ -490,16 +529,19 @@ export async function buildClientRepairReceiptPdf(params: {
   doc.text(`Ingreso: ${formatDateShort(repair.dateIn)}`, pageWidth - margin, 23.8, {
     align: 'right',
   });
+  let rightHeaderBottom = 25;
   if (repair.dateEst) {
     doc.text(`Entrega est.: ${formatDateShort(repair.dateEst)}`, pageWidth - margin, 28, {
       align: 'right',
     });
+    rightHeaderBottom = 29.5;
   }
 
+  const headerSepY = Math.max(31.5, leftHeaderY + 1.5, rightHeaderBottom + 2);
   doc.setDrawColor(226, 232, 240);
-  doc.line(margin, 31.5, pageWidth - margin, 31.5);
+  doc.line(margin, headerSepY, pageWidth - margin, headerSepY);
 
-  let cursorY = 36;
+  let cursorY = headerSepY + 4.5;
 
   // Client & Device side-by-side cards
   const colGap = 5;
@@ -706,7 +748,24 @@ export async function buildClientRepairReceiptPdf(params: {
     doc.setFontSize(6.6);
     doc.setTextColor(71, 85, 105);
     doc.text(termsLines, margin + 3, cursorY + 8);
-    cursorY += termsH + 5;
+    cursorY += termsH + 4;
+  }
+
+  if (brand.footerNote) {
+    const noteLines = doc.splitTextToSize(brand.footerNote, contentWidth - 8);
+    const noteH = Math.max(8, 4.5 + noteLines.length * 3.6);
+    if (cursorY + noteH > pageHeight - 36) {
+      doc.addPage();
+      cursorY = 16;
+    }
+    doc.setFillColor(240, 249, 255);
+    doc.setDrawColor(186, 230, 253);
+    doc.roundedRect(margin, cursorY, contentWidth, noteH, 1.8, 1.8, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.8);
+    doc.setTextColor(12, 74, 110);
+    doc.text(noteLines, pageWidth / 2, cursorY + 5, { align: 'center' });
+    cursorY += noteH + 4;
   }
 
   // QR + Signature footer
@@ -816,14 +875,44 @@ export async function buildBatchRepairReceiptPdf(params: {
   doc.setTextColor(15, 23, 42);
   doc.text(brand.brandName, margin, 21.5);
 
-  const subParts = [brand.businessAddress, brand.businessPhone ? `Tel: ${brand.businessPhone}` : '']
+  let batchHeaderY = 25.8;
+  if (brand.subtitle) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.2);
+    doc.setTextColor(0, 114, 187);
+    doc.text(brand.subtitle, margin, batchHeaderY);
+    batchHeaderY += 4;
+  }
+
+  const subParts = [
+    brand.businessAddress,
+    brand.businessPhone ? `Tel: ${brand.businessPhone}` : '',
+    brand.businessEmail || '',
+    brand.taxId || '',
+  ]
     .filter(Boolean)
     .join(' · ');
   if (subParts) {
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8.2);
+    doc.setFontSize(7.8);
     doc.setTextColor(71, 85, 105);
-    doc.text(subParts, margin, 26.5);
+    const wrappedSub = doc.splitTextToSize(subParts, contentWidth - 52);
+    doc.text(wrappedSub, margin, batchHeaderY);
+    batchHeaderY += wrappedSub.length * 3.6;
+  }
+
+  const batchExtra = [
+    brand.hours ? `Horarios: ${brand.hours}` : '',
+    brand.social || '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  if (batchExtra) {
+    doc.setFontSize(7.4);
+    doc.setTextColor(100, 116, 139);
+    const wrappedExtra = doc.splitTextToSize(batchExtra, contentWidth - 52);
+    doc.text(wrappedExtra, margin, batchHeaderY + 0.5);
+    batchHeaderY += wrappedExtra.length * 3.5 + 0.5;
   }
 
   doc.setFont('helvetica', 'bold');
@@ -843,10 +932,11 @@ export async function buildBatchRepairReceiptPdf(params: {
     align: 'right',
   });
 
+  const batchSepY = Math.max(30, batchHeaderY + 1.5);
   doc.setDrawColor(226, 232, 240);
-  doc.line(margin, 30, pageWidth - margin, 30);
+  doc.line(margin, batchSepY, pageWidth - margin, batchSepY);
 
-  let cursorY = 34;
+  let cursorY = batchSepY + 4;
 
   // Client summary card
   const clientInfo = [
@@ -966,7 +1056,24 @@ export async function buildBatchRepairReceiptPdf(params: {
     doc.setFontSize(6.6);
     doc.setTextColor(71, 85, 105);
     doc.text(termsLines, margin + 3, cursorY + 8);
-    cursorY += termsH + 6;
+    cursorY += termsH + 5;
+  }
+
+  if (brand.footerNote) {
+    const noteLines = doc.splitTextToSize(brand.footerNote, contentWidth - 8);
+    const noteH = Math.max(8, 4.5 + noteLines.length * 3.6);
+    if (cursorY + noteH > pageHeight - 25) {
+      doc.addPage();
+      cursorY = 16;
+    }
+    doc.setFillColor(240, 249, 255);
+    doc.setDrawColor(186, 230, 253);
+    doc.roundedRect(margin, cursorY, contentWidth, noteH, 1.8, 1.8, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.8);
+    doc.setTextColor(12, 74, 110);
+    doc.text(noteLines, pageWidth / 2, cursorY + 5, { align: 'center' });
+    cursorY += noteH + 5;
   }
 
   if (cursorY > pageHeight - 25) {

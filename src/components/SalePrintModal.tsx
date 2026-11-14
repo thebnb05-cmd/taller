@@ -14,6 +14,7 @@ import { BrandMark } from './BrandMark';
 import { ModalShell } from './ModalShell';
 import type { PrintFormat } from './RepairPrintDocuments';
 import { useToast } from './ToastProvider';
+import { parseWorkshopMeta } from '../utils/workshopMeta';
 
 interface SalePrintModalProps {
   sale: SaleRecord | null;
@@ -29,6 +30,7 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
   clients = [],
 }) => {
   const { notify } = useToast();
+  const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
   const [printFormat, setPrintFormat] = useState<PrintFormat>('a4');
   const [transferQrDataUrl, setTransferQrDataUrl] = useState('');
 
@@ -146,10 +148,25 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
           <div>
             <BrandMark profile={profile} size="lg" forceLight />
           </div>
-          <p className="flex flex-col gap-0.5 text-xs text-slate-600">
+          {workshopMeta.subtitle && (
+            <div className="text-[11px] font-semibold text-[#0072BB]">
+              {workshopMeta.subtitle}
+            </div>
+          )}
+          <div className="flex flex-col gap-0.5 text-xs text-slate-600">
             <span>{profile?.businessAddress || 'Servicio técnico especializado y accesorios'}</span>
-            {profile?.businessPhone && <span>Tel: {profile.businessPhone}</span>}
-          </p>
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
+              {profile?.businessPhone && <span>Tel: {profile.businessPhone}</span>}
+              {workshopMeta.businessEmail && <span>{workshopMeta.businessEmail}</span>}
+              {workshopMeta.taxId && <span>{workshopMeta.taxId}</span>}
+            </div>
+            {(workshopMeta.hours || workshopMeta.social) && (
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] text-slate-500">
+                {workshopMeta.hours && <span>Horarios: {workshopMeta.hours}</span>}
+                {workshopMeta.social && <span>{workshopMeta.social}</span>}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="text-right">
@@ -384,6 +401,12 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
         </div>
       )}
 
+      {workshopMeta.footerNote && (
+        <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50/70 px-3 py-2 text-center text-[10.5px] font-semibold text-sky-900">
+          {workshopMeta.footerNote}
+        </div>
+      )}
+
       <div className="mt-6 flex flex-wrap items-end justify-between gap-4 border-t border-dashed border-slate-300 pt-4 text-[11px] text-slate-500">
         <div>Gracias por su compra · Conserve este comprobante</div>
         <div className="w-56 border-t border-slate-400 pt-1 text-center text-[10px] text-slate-600">
@@ -405,12 +428,21 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
         <div className="text-sm font-black uppercase tracking-tight">
           {profile?.brandName || 'TH3 BNB Servicio Técnico'}
         </div>
+        {workshopMeta.subtitle && (
+          <div className="text-[9.5px] font-bold uppercase">{workshopMeta.subtitle}</div>
+        )}
         {profile?.businessAddress && (
           <div className="mt-0.5 text-[10px]">{profile.businessAddress}</div>
         )}
         {profile?.businessPhone && (
           <div className="text-[10px]">Tel: {profile.businessPhone}</div>
         )}
+        {workshopMeta.businessEmail && (
+          <div className="text-[9.5px]">{workshopMeta.businessEmail}</div>
+        )}
+        {workshopMeta.taxId && <div className="text-[9.5px]">{workshopMeta.taxId}</div>}
+        {workshopMeta.hours && <div className="text-[9px]">Horarios: {workshopMeta.hours}</div>}
+        {workshopMeta.social && <div className="text-[9px]">{workshopMeta.social}</div>}
         <div className="mt-1.5 border border-black px-1.5 py-0.5 text-[10px] font-bold uppercase">
           Boleta de Venta
         </div>
@@ -581,6 +613,11 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
       )}
 
       <div className="pt-2 text-center text-[9.5px]">
+        {workshopMeta.footerNote && (
+          <div className="mb-1.5 border-b border-dashed border-black pb-1.5 font-bold">
+            {workshopMeta.footerNote}
+          </div>
+        )}
         <div>¡Gracias por su compra!</div>
         <div className="mt-6 border-t border-black pt-1">Firma y aclaración del cliente</div>
         <div className="mt-2 text-[9px] tracking-widest">--------------------------------</div>

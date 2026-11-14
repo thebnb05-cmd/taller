@@ -22,6 +22,7 @@ import { BrandMark } from './BrandMark';
 import { ModalShell } from './ModalShell';
 import type { PrintFormat } from './RepairPrintDocuments';
 import { useToast } from './ToastProvider';
+import { parseWorkshopMeta } from '../utils/workshopMeta';
 
 interface BatchReceiptModalProps {
   open: boolean;
@@ -65,6 +66,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
   onSelectRepair,
 }) => {
   const { notify } = useToast();
+  const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
   const [printFormat, setPrintFormat] = useState<PrintFormat>('a4');
   const [includeClientReceipt, setIncludeClientReceipt] = useState(true);
   const [includeLabels, setIncludeLabels] = useState(true);
@@ -200,10 +202,25 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
               <BrandMark profile={profile} size="lg" forceLight />
             )}
           </div>
-          <p className="flex flex-col gap-0.5 text-xs text-slate-600">
+          {workshopMeta.subtitle && (
+            <div className="text-[11px] font-semibold text-[#0072BB]">
+              {workshopMeta.subtitle}
+            </div>
+          )}
+          <div className="flex flex-col gap-0.5 text-xs text-slate-600">
             <span>{profile?.businessAddress || 'Servicio técnico especializado'}</span>
-            {profile?.businessPhone && <span>Tel: {profile.businessPhone}</span>}
-          </p>
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
+              {profile?.businessPhone && <span>Tel: {profile.businessPhone}</span>}
+              {workshopMeta.businessEmail && <span>{workshopMeta.businessEmail}</span>}
+              {workshopMeta.taxId && <span>{workshopMeta.taxId}</span>}
+            </div>
+            {(workshopMeta.hours || workshopMeta.social) && (
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] text-slate-500">
+                {workshopMeta.hours && <span>Horarios: {workshopMeta.hours}</span>}
+                {workshopMeta.social && <span>{workshopMeta.social}</span>}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="text-right">
@@ -336,6 +353,12 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
         </div>
       )}
 
+      {workshopMeta.footerNote && (
+        <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50/70 px-3 py-2 text-center text-[10.5px] font-semibold text-sky-900">
+          {workshopMeta.footerNote}
+        </div>
+      )}
+
       <div className="mt-5 flex flex-wrap items-end justify-between gap-4 border-t border-dashed border-slate-300 pt-4 text-[11px] text-slate-600">
         <div>
           <div className="font-semibold text-slate-800">Referencia de lote: {batchRef}</div>
@@ -366,8 +389,15 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
         <div className="mt-0.5 text-sm font-black uppercase">
           {profile?.brandName || 'TH3 BNB Servicio Técnico'}
         </div>
+        {workshopMeta.subtitle && (
+          <div className="text-[9.5px] font-bold uppercase">{workshopMeta.subtitle}</div>
+        )}
         {profile?.businessAddress && <div className="text-[10px]">{profile.businessAddress}</div>}
         {profile?.businessPhone && <div className="text-[10px]">Tel: {profile.businessPhone}</div>}
+        {workshopMeta.businessEmail && <div className="text-[9.5px]">{workshopMeta.businessEmail}</div>}
+        {workshopMeta.taxId && <div className="text-[9.5px]">{workshopMeta.taxId}</div>}
+        {workshopMeta.hours && <div className="text-[9px]">Horarios: {workshopMeta.hours}</div>}
+        {workshopMeta.social && <div className="text-[9px]">{workshopMeta.social}</div>}
       </div>
 
       <div className="border-b border-dashed border-black py-2 text-[10px]">
@@ -427,8 +457,13 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
         </div>
       </div>
 
-      <div className="pt-4 text-center text-[9.5px]">
-        <div className="mx-auto mb-1 w-44 border-b border-black" />
+      <div className="pt-3 text-center text-[9.5px]">
+        {workshopMeta.footerNote && (
+          <div className="mb-2 border-b border-dashed border-black pb-1.5 font-bold">
+            {workshopMeta.footerNote}
+          </div>
+        )}
+        <div className="mx-auto mb-1 mt-2 w-44 border-b border-black" />
         <div>Firma y aclaración</div>
       </div>
     </div>

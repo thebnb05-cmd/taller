@@ -392,8 +392,8 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
             <button
               type="button"
               onClick={() => setShowBrandSettings(true)}
-              aria-label="Configurar marca y comprobantes"
-              title="Marca y comprobantes"
+              aria-label="Configuración"
+              title="Configuración"
               className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <Settings className="h-4 w-4" />

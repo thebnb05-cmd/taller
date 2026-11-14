@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Image as ImageIcon, Trash2, UploadCloud } from 'lucide-react';
+import { Image as ImageIcon, Store, Trash2, UploadCloud } from 'lucide-react';
 import { clampStr, handleDbError, OperationType, stripUndefined, updateRow } from '../lib/db';
 import { DEFAULT_RECEIPT_TERMS } from '../data/catalog';
 import { compressImageToDataUrl } from '../utils/formatters';
@@ -8,6 +8,7 @@ import {
   normalizeTrackingBaseUrl,
   resolveTrackingBaseUrl,
 } from '../utils/tracking';
+import { parseWorkshopMeta, serializeWorkshopSubtitle } from '../utils/workshopMeta';
 import type { WorkshopProfile } from '../types/workshop';
 import { ModalShell } from './ModalShell';
 import { BrandMark } from './BrandMark';
@@ -25,9 +26,16 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
   profile,
 }) => {
   const { notify } = useToast();
+  const initialMeta = parseWorkshopMeta(profile);
   const [brandName, setBrandName] = useState(profile.brandName || 'TH3 BNB');
+  const [subtitleText, setSubtitleText] = useState(initialMeta.subtitle);
   const [businessPhone, setBusinessPhone] = useState(profile.businessPhone || '');
   const [businessAddress, setBusinessAddress] = useState(profile.businessAddress || '');
+  const [hours, setHours] = useState(initialMeta.hours);
+  const [social, setSocial] = useState(initialMeta.social);
+  const [taxId, setTaxId] = useState(initialMeta.taxId);
+  const [businessEmail, setBusinessEmail] = useState(initialMeta.businessEmail);
+  const [footerNote, setFooterNote] = useState(initialMeta.footerNote);
   const [wordColors, setWordColors] = useState<string[]>(
     profile.wordColors || ['#0F172A', '#0072BB']
   );
@@ -45,9 +53,16 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
 
   useEffect(() => {
     if (!open) return;
+    const meta = parseWorkshopMeta(profile);
     setBrandName(profile.brandName || 'TH3 BNB');
+    setSubtitleText(meta.subtitle);
     setBusinessPhone(profile.businessPhone || '');
     setBusinessAddress(profile.businessAddress || '');
+    setHours(meta.hours);
+    setSocial(meta.social);
+    setTaxId(meta.taxId);
+    setBusinessEmail(meta.businessEmail);
+    setFooterNote(meta.footerNote);
     setWordColors(profile.wordColors || ['#0F172A', '#0072BB']);
     setLogoDataUrl(profile.logoDataUrl || '');
     setLogoScale(profile.logoScale ?? 100);
@@ -85,8 +100,17 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
       const safeTrackingBaseUrl = isPrivatePreviewOrigin(cleanedTrackingUrl)
         ? ''
         : clampStr(cleanedTrackingUrl, 250);
+      const encodedSubtitle = serializeWorkshopSubtitle({
+        subtitle: subtitleText,
+        hours,
+        social,
+        taxId,
+        businessEmail,
+        footerNote,
+      });
       const payload = stripUndefined({
         brandName: clampStr(brandName || 'TH3 BNB', 80) || 'TH3 BNB',
+        subtitle: clampStr(encodedSubtitle, 900),
         businessPhone: clampStr(businessPhone, 50),
         businessAddress: clampStr(businessAddress, 200),
         wordColors: wordColors.slice(0, 12),
@@ -98,7 +122,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
         updatedAt: new Date().toISOString(),
       });
       await updateRow('workshop_profiles', profile.id, payload);
-      notify('Marca y comprobantes actualizados.');
+      notify('Configuración del taller actualizada.');
       onClose();
     } catch (err) {
       notify('Error al guardar la configuración.', 'error');
@@ -112,13 +136,27 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
     <ModalShell
       open={open}
       onClose={onClose}
-      title="Marca y comprobantes"
-      subtitle="Personalizá el encabezado, el logo y las condiciones legales de tus boletas."
+      title="Configuración"
+      subtitle="Administrá tu taller, marca, logo y los datos visibles en cada boleta."
       maxWidth="2xl"
     >
       <form onSubmit={handleSave} className="space-y-5">
+        <div className="flex items-center gap-2 border-b border-slate-200 pb-2.5 dark:border-slate-800">
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-50 text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300">
+            <Store className="h-4 w-4" />
+          </span>
+          <div>
+            <div className="text-sm font-bold text-slate-900 dark:text-white font-display">
+              Taller · Marca y comprobantes
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+              Todos estos datos se reflejan automáticamente en tus boletas A4, 80mm y PDF.
+            </div>
+          </div>
+        </div>
+
         <div className="grid gap-4 sm:grid-cols-2">
-          <div className="sm:col-span-2">
+          <div>
             <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
               Nombre o marca del taller
             </label>
@@ -127,6 +165,20 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
               maxLength={60}
               value={brandName}
               onChange={(e) => setBrandName(e.target.value)}
+              className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Subtítulo / Rubro del taller
+            </label>
+            <input
+              type="text"
+              maxLength={80}
+              value={subtitleText}
+              onChange={(e) => setSubtitleText(e.target.value)}
+              placeholder="Ej: Servicio técnico especializado"
               className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
           </div>
@@ -155,6 +207,89 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
               onChange={(e) => setBusinessAddress(e.target.value)}
               className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
+          </div>
+        </div>
+
+        <div className="space-y-3 rounded-2xl border border-sky-200/80 bg-sky-50/40 p-4 dark:border-sky-900/50 dark:bg-sky-950/20">
+          <div>
+            <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
+              Opciones extra para mostrar en cada boleta
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+              Completá las que quieras imprimir en boletas de reparación, ventas, lotes y PDF.
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Horarios de atención
+              </label>
+              <input
+                type="text"
+                maxLength={100}
+                value={hours}
+                onChange={(e) => setHours(e.target.value)}
+                placeholder="Ej: Lun a Vie 9:30 a 19:00 · Sáb 10 a 14"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Instagram / Web
+              </label>
+              <input
+                type="text"
+                maxLength={100}
+                value={social}
+                onChange={(e) => setSocial(e.target.value)}
+                placeholder="Ej: @th3bnb.servicio · www.th3bnb.com"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                CUIT / Documento comercial (opcional)
+              </label>
+              <input
+                type="text"
+                maxLength={60}
+                value={taxId}
+                onChange={(e) => setTaxId(e.target.value)}
+                placeholder="Ej: CUIT 20-12345678-9"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Email de contacto
+              </label>
+              <input
+                type="email"
+                maxLength={100}
+                value={businessEmail}
+                onChange={(e) => setBusinessEmail(e.target.value)}
+                placeholder="Ej: contacto@tutaller.com"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Garantía o mensaje destacado al pie de boleta
+              </label>
+              <input
+                type="text"
+                maxLength={180}
+                value={footerNote}
+                onChange={(e) => setFooterNote(e.target.value)}
+                placeholder="Ej: Garantía 30 días sobre el trabajo realizado · ¡Gracias por elegirnos!"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
+            </div>
           </div>
         </div>
 
@@ -338,7 +473,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
             disabled={saving}
             className="h-11 flex-1 rounded-xl bg-[#0072BB] text-sm font-semibold text-white transition hover:bg-[#005f9c] disabled:opacity-60"
           >
-            {saving ? 'Guardando...' : 'Guardar condiciones'}
+            {saving ? 'Guardando...' : 'Guardar configuración'}
           </button>
         </div>
       </form>
