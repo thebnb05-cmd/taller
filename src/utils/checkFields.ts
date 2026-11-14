@@ -32,6 +32,17 @@ export const PHYSICAL_PC_FIELDS: CheckFieldOption[] = [
   { key: 'Golpes visibles', label: 'Golpes visibles', options: ['No', 'Leves', 'Severos'] },
 ];
 
+export const PHYSICAL_SPEAKER_FIELDS: CheckFieldOption[] = [
+  { key: 'Carcasa / Gabinete', label: 'Carcasa / Gabinete', options: ['OK', 'Rayada', 'Abollada', 'Rota'] },
+  { key: 'Rejilla / Tela frontal', label: 'Rejilla / Tela frontal', options: ['OK', 'Hundida', 'Rota', 'Sin rejilla'] },
+  { key: 'Cono / Membrana', label: 'Cono / Membrana', options: ['OK', 'Despegado', 'Roto', 'No visible'] },
+  { key: 'Pin / Puerto de carga', label: 'Pin / Puerto de carga', options: ['OK', 'Flojo', 'Sucio', 'Dañado'] },
+  { key: 'Botones / Perillas', label: 'Botones / Perillas', options: ['OK', 'Faltante', 'Hundidos'] },
+  { key: 'Humedad / Óxido', label: 'Humedad / Óxido', options: ['No', 'Leve', 'Severa'] },
+  { key: 'Reparación anterior', label: 'Reparación anterior', options: ['No', 'Sí'] },
+  { key: 'Golpes visibles', label: 'Golpes visibles', options: ['No', 'Leves', 'Severos'] },
+];
+
 export const FUNCTIONAL_DEFAULT_FIELDS: CheckFieldOption[] = [
   { key: 'Enciende', label: 'Enciende', options: ['OK', 'No', 'No probado'] },
   { key: 'Touch / Táctil', label: 'Touch / Táctil', options: ['OK', 'Falla', 'No probado'] },
@@ -69,15 +80,23 @@ export const FUNCTIONAL_CONSOLE_FIELDS: CheckFieldOption[] = [
   { key: 'Ventilador', label: 'Ventilador', options: ['OK', 'Ruidoso', 'No funciona'] },
 ];
 
+export const FUNCTIONAL_SPEAKER_FIELDS: CheckFieldOption[] = [
+  { key: 'Enciende', label: 'Enciende', options: ['OK', 'No', 'No probado'] },
+  { key: 'Carga / Batería', label: 'Carga / Batería', options: ['OK', 'No carga', 'Dura poco', 'Solo enchufado'] },
+  { key: 'Sonido / Audio', label: 'Sonido / Audio', options: ['OK', 'Distorsiona', 'Sin graves', 'Mudo'] },
+  { key: 'Bluetooth', label: 'Bluetooth', options: ['OK', 'No conecta', 'No tiene'] },
+  { key: 'Entrada Aux / USB / SD', label: 'Entrada Aux / USB / SD', options: ['OK', 'Falla', 'No probado'] },
+  { key: 'Luces LED', label: 'Luces LED', options: ['OK', 'No prenden', 'No tiene'] },
+  { key: 'Entrada micrófono', label: 'Entrada micrófono', options: ['OK', 'Falla', 'No tiene'] },
+  { key: 'Botones / Volumen', label: 'Botones / Volumen', options: ['OK', 'Falla', 'No probado'] },
+];
+
 export function getPhysicalCheckFields(deviceType?: string): CheckFieldOption[] {
   if (deviceType === 'PC de escritorio') {
     return PHYSICAL_PC_FIELDS;
   }
   if (deviceType === 'Parlante') {
-    return [
-      ...PHYSICAL_SIMPLE_FIELDS,
-      { key: 'Prende luz', label: 'Prende luz', options: ['Sí', 'No'] },
-    ];
+    return PHYSICAL_SPEAKER_FIELDS;
   }
   if (deviceType === 'Notebook' || deviceType === 'Consola / joystick') {
     return PHYSICAL_SIMPLE_FIELDS;
@@ -88,6 +107,9 @@ export function getPhysicalCheckFields(deviceType?: string): CheckFieldOption[] 
 export function getFunctionalCheckFields(deviceType?: string): CheckFieldOption[] {
   if (deviceType === 'PC de escritorio') {
     return FUNCTIONAL_PC_FIELDS;
+  }
+  if (deviceType === 'Parlante') {
+    return FUNCTIONAL_SPEAKER_FIELDS;
   }
   if (deviceType === 'Notebook') {
     return FUNCTIONAL_NOTEBOOK_FIELDS;

@@ -64,6 +64,38 @@ const PC_ACCESSORIES = [
   'Monitor',
   'Otro',
 ];
+const SPEAKER_ACCESSORIES = [
+  'Cargador',
+  'Cable USB / Tipo C',
+  'Cable poder (220V)',
+  'Cable Auxiliar',
+  'Micrófono',
+  'Control remoto',
+  'Caja',
+  'Otro',
+];
+const SPEAKER_BRAND_SUGGESTIONS = [
+  'JBL',
+  'Sony',
+  'Marshall',
+  'Bose',
+  'Xiaomi',
+  'Philips',
+  'Noblex',
+  'Philco',
+  'Aiwa',
+  'Stromberg',
+  'Logitech',
+  'Genérico',
+];
+const SPEAKER_FORMAT_OPTIONS = [
+  'Portátil Bluetooth',
+  'Torre / Bafle',
+  'Barra de sonido',
+  'Subwoofer / Auto',
+  'Parlante inteligente',
+  'Otro',
+];
 
 export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   open,
@@ -187,6 +219,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   const isConsole = deviceType === 'Consola / joystick';
   const isNotebook = deviceType === 'Notebook';
   const isDesktopPc = deviceType === 'PC de escritorio';
+  const isSpeaker = deviceType === 'Parlante';
   const showCapacity =
     deviceType === 'Celular' || deviceType === 'Tablet' || deviceType === 'Smartwatch';
 
@@ -308,7 +341,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
         brand: cleanBrand,
         model: cleanModel,
         color: clampStr(color, 60),
-        capacity: showCapacity ? clampStr(capacity, 40) : '',
+        capacity: showCapacity || isSpeaker ? clampStr(capacity, 40) : '',
         imei: clampStr(imei, 80),
         problem: cleanProblem,
         priority,
@@ -430,6 +463,12 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                     type="button"
                     aria-pressed={selected}
                     onClick={() => {
+                      if (deviceType !== opt.type) {
+                        setAccessories([]);
+                        setPhysicalCheck({});
+                        setFunctionalCheck({});
+                        setCapacity(opt.type === 'Parlante' ? 'Portátil Bluetooth' : '128 GB');
+                      }
                       setDeviceType(opt.type);
                       setDeviceIcon(opt.icon);
                     }}
@@ -587,13 +626,27 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                   Marca
                 </label>
                 {isNotebookOrCustom ? (
-                  <input
-                    type="text"
-                    value={customBrand}
-                    onChange={(e) => setCustomBrand(e.target.value)}
-                    placeholder={`Marca de ${deviceType}`}
-                    className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                  />
+                  <>
+                    <input
+                      type="text"
+                      list={isSpeaker ? 'speaker-brands-datalist' : undefined}
+                      value={customBrand}
+                      onChange={(e) => setCustomBrand(e.target.value)}
+                      placeholder={
+                        isSpeaker
+                          ? 'Ej: JBL, Sony, Noblex, Philips...'
+                          : `Marca de ${deviceType}`
+                      }
+                      className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                    {isSpeaker && (
+                      <datalist id="speaker-brands-datalist">
+                        {SPEAKER_BRAND_SUGGESTIONS.map((b) => (
+                          <option key={b} value={b} />
+                        ))}
+                      </datalist>
+                    )}
+                  </>
                 ) : (
                   <div className="space-y-2">
                     <select
@@ -632,7 +685,11 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                     type="text"
                     value={customModel}
                     onChange={(e) => setCustomModel(e.target.value)}
-                    placeholder={`Modelo de ${deviceType}`}
+                    placeholder={
+                      isSpeaker
+                        ? 'Ej: Flip 6, Charge 5, Torre 15"...'
+                        : `Modelo de ${deviceType}`
+                    }
                     className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
                 ) : (
@@ -675,26 +732,26 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                 />
               </div>
 
-              {showCapacity && (
+              {(showCapacity || isSpeaker) && (
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                    Capacidad
+                    {isSpeaker ? 'Tipo / Formato' : 'Capacidad'}
                   </label>
                   <select
                     value={capacity}
                     onChange={(e) => setCapacity(e.target.value)}
                     className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   >
-                    {CAPACITY_OPTIONS.map((cap) => (
-                      <option key={cap} value={cap}>
-                        {cap}
+                    {(isSpeaker ? SPEAKER_FORMAT_OPTIONS : CAPACITY_OPTIONS).map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
                       </option>
                     ))}
                   </select>
                 </div>
               )}
 
-              <div className={showCapacity ? 'sm:col-span-2' : ''}>
+              <div className={showCapacity || isSpeaker ? 'sm:col-span-2' : ''}>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
                   {deviceType === 'Celular' || deviceType === 'Tablet'
                     ? 'IMEI'
@@ -898,9 +955,11 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               <div className="flex flex-wrap gap-2">
                 {(isDesktopPc
                   ? PC_ACCESSORIES
-                  : isNotebook
-                    ? NOTEBOOK_ACCESSORIES
-                    : DEFAULT_ACCESSORIES
+                  : isSpeaker
+                    ? SPEAKER_ACCESSORIES
+                    : isNotebook
+                      ? NOTEBOOK_ACCESSORIES
+                      : DEFAULT_ACCESSORIES
                 ).map((acc) => {
                   const active = accessories.includes(acc);
                   return (
