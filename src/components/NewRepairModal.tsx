@@ -55,7 +55,50 @@ const DEFAULT_ACCESSORIES = [
   'Vidrio',
   'Otro',
 ];
-const NOTEBOOK_ACCESSORIES = ['Caja', 'Cable', 'Funda'];
+const NOTEBOOK_ACCESSORIES = [
+  'Cargador / Fuente',
+  'Cable poder',
+  'Funda / Mochila',
+  'Mouse',
+  'Adaptador / Dongle',
+  'Caja',
+  'Otro',
+];
+const NOTEBOOK_BRAND_SUGGESTIONS = [
+  'Lenovo',
+  'HP',
+  'Dell',
+  'Asus',
+  'Acer',
+  'Apple (MacBook)',
+  'Banghó',
+  'Exo',
+  'Noblex',
+  'Samsung',
+  'MSI',
+  'Toshiba',
+  'Positivo BGH',
+  'Genérico',
+];
+const NOTEBOOK_MODEL_SUGGESTIONS = [
+  'IdeaPad / ThinkPad',
+  'HP 15 / Pavilion / Victus',
+  'Dell Inspiron / Latitude',
+  'Asus VivoBook / TUF / ROG',
+  'Acer Aspire / Nitro',
+  'MacBook Air / Pro',
+  'Exo Smart / Banghó Max',
+];
+const NOTEBOOK_STORAGE_OPTIONS = [
+  '240 / 256 GB SSD',
+  '480 / 512 GB SSD',
+  '1 TB SSD / HDD',
+  '120 / 128 GB SSD',
+  '500 GB HDD',
+  '64 GB eMMC',
+  'Sin disco',
+  'No indica',
+];
 const PC_ACCESSORIES = [
   'Cable poder',
   'Cable HDMI / VGA',
@@ -458,7 +501,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
         model: cleanModel,
         color: clampStr(color, 60),
         capacity:
-          showCapacity || isSpeaker || isConsole || isHeadphones ? clampStr(capacity, 40) : '',
+          showCapacity || isSpeaker || isConsole || isHeadphones || isNotebook
+            ? clampStr(capacity, 40)
+            : '',
         imei: clampStr(imei, 80),
         problem: cleanProblem,
         priority,
@@ -593,7 +638,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                                 ? '44 / 45 mm'
                                 : opt.type === 'Auriculares'
                                   ? 'In-ear TWS (Bluetooth)'
-                                  : '128 GB'
+                                  : opt.type === 'Notebook'
+                                    ? '240 / 256 GB SSD'
+                                    : '128 GB'
                         );
                       }
                       setDeviceType(opt.type);
@@ -765,7 +812,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                               ? 'smartwatch-brands-datalist'
                               : isHeadphones
                                 ? 'headphones-brands-datalist'
-                                : undefined
+                                : isNotebook
+                                  ? 'notebook-brands-datalist'
+                                  : undefined
                       }
                       value={customBrand}
                       onChange={(e) => setCustomBrand(e.target.value)}
@@ -778,7 +827,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                               ? 'Ej: Apple, Samsung, Xiaomi, Amazfit...'
                               : isHeadphones
                                 ? 'Ej: Apple, JBL, Sony, Xiaomi, HyperX...'
-                                : `Marca de ${deviceType}`
+                                : isNotebook
+                                  ? 'Ej: Lenovo, HP, Dell, Asus, MacBook...'
+                                  : `Marca de ${deviceType}`
                       }
                       className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     />
@@ -806,6 +857,13 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                     {isHeadphones && (
                       <datalist id="headphones-brands-datalist">
                         {HEADPHONES_BRAND_SUGGESTIONS.map((b) => (
+                          <option key={b} value={b} />
+                        ))}
+                      </datalist>
+                    )}
+                    {isNotebook && (
+                      <datalist id="notebook-brands-datalist">
+                        {NOTEBOOK_BRAND_SUGGESTIONS.map((b) => (
                           <option key={b} value={b} />
                         ))}
                       </datalist>
@@ -855,7 +913,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                             ? 'smartwatch-models-datalist'
                             : isHeadphones
                               ? 'headphones-models-datalist'
-                              : undefined
+                              : isNotebook
+                                ? 'notebook-models-datalist'
+                                : undefined
                       }
                       value={customModel}
                       onChange={(e) => setCustomModel(e.target.value)}
@@ -868,7 +928,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                               ? 'Ej: Watch Series 8, Galaxy Watch 5, Amazfit GTS...'
                               : isHeadphones
                                 ? 'Ej: AirPods Pro, Galaxy Buds, JBL Tune 510...'
-                                : `Modelo de ${deviceType}`
+                                : isNotebook
+                                  ? 'Ej: IdeaPad 3, Pavilion 15, Inspiron, MacBook Air...'
+                                  : `Modelo de ${deviceType}`
                       }
                       className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     />
@@ -889,6 +951,13 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                     {isHeadphones && (
                       <datalist id="headphones-models-datalist">
                         {HEADPHONES_MODEL_SUGGESTIONS.map((m) => (
+                          <option key={m} value={m} />
+                        ))}
+                      </datalist>
+                    )}
+                    {isNotebook && (
+                      <datalist id="notebook-models-datalist">
+                        {NOTEBOOK_MODEL_SUGGESTIONS.map((m) => (
                           <option key={m} value={m} />
                         ))}
                       </datalist>
@@ -934,7 +1003,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                 />
               </div>
 
-              {(showCapacity || isSpeaker || isConsole || isHeadphones) && (
+              {(showCapacity || isSpeaker || isConsole || isHeadphones || isNotebook) && (
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
                     {isSpeaker || isHeadphones
@@ -943,7 +1012,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                         ? 'Edición / Capacidad'
                         : isSmartwatch
                           ? 'Medida / Caja'
-                          : 'Capacidad'}
+                          : isNotebook
+                            ? 'Almacenamiento'
+                            : 'Capacidad'}
                   </label>
                   <select
                     value={capacity}
@@ -958,7 +1029,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                           ? CONSOLE_EDITION_OPTIONS
                           : isSmartwatch
                             ? SMARTWATCH_SIZE_OPTIONS
-                            : CAPACITY_OPTIONS
+                            : isNotebook
+                              ? NOTEBOOK_STORAGE_OPTIONS
+                              : CAPACITY_OPTIONS
                     ).map((opt) => (
                       <option key={opt} value={opt}>
                         {opt}
@@ -970,7 +1043,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
 
               <div
                 className={
-                  showCapacity || isSpeaker || isConsole || isHeadphones ? 'sm:col-span-2' : ''
+                  showCapacity || isSpeaker || isConsole || isHeadphones || isNotebook
+                    ? 'sm:col-span-2'
+                    : ''
                 }
               >
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">

@@ -77,6 +77,19 @@ export const PHYSICAL_HEADPHONES_FIELDS: CheckFieldOption[] = [
   { key: 'Reparación anterior', label: 'Reparación anterior', options: ['No', 'Sí'] },
 ];
 
+export const PHYSICAL_NOTEBOOK_FIELDS: CheckFieldOption[] = [
+  { key: 'Pantalla / Display', label: 'Pantalla / Display', options: ['OK', 'Rayada', 'Manchas / Líneas', 'Rota'] },
+  { key: 'Bisagras / Apertura', label: 'Bisagras / Apertura', options: ['OK', 'Duras', 'Flojas', 'Rotas'] },
+  { key: 'Carcasa / Tapa / Base', label: 'Carcasa / Tapa / Base', options: ['OK', 'Rayada', 'Partida', 'Falta tapa'] },
+  { key: 'Teclado físico', label: 'Teclado físico', options: ['OK', 'Teclas faltantes', 'Gastado', 'Con líquido'] },
+  { key: 'Touchpad / Palmrest', label: 'Touchpad / Palmrest', options: ['OK', 'Rayado', 'Hundido', 'Despegado'] },
+  { key: 'Puerto de carga / Pin', label: 'Puerto de carga / Pin', options: ['OK', 'Flojo', 'Sucio', 'Dañado'] },
+  { key: 'Puertos USB / HDMI', label: 'Puertos USB / HDMI', options: ['OK', 'Dañados', 'Uno o más rotos'] },
+  { key: 'Tornillos completos', label: 'Tornillos completos', options: ['Sí', 'Faltan algunos', 'Sin tornillos'] },
+  { key: 'Humedad / Óxido', label: 'Humedad / Óxido', options: ['No', 'Leve', 'Severa'] },
+  { key: 'Reparación anterior', label: 'Reparación anterior', options: ['No', 'Sí'] },
+];
+
 export const FUNCTIONAL_DEFAULT_FIELDS: CheckFieldOption[] = [
   { key: 'Enciende', label: 'Enciende', options: ['OK', 'No', 'No probado'] },
   { key: 'Touch / Táctil', label: 'Touch / Táctil', options: ['OK', 'Falla', 'No probado'] },
@@ -89,10 +102,16 @@ export const FUNCTIONAL_DEFAULT_FIELDS: CheckFieldOption[] = [
 ];
 
 export const FUNCTIONAL_NOTEBOOK_FIELDS: CheckFieldOption[] = [
-  { key: 'Enciende', label: 'Enciende', options: ['OK', 'No', 'No probado'] },
-  { key: 'Lector de discos', label: 'Lector de discos', options: ['OK', 'Falla', 'No tiene'] },
-  { key: 'Imagen HDMI', label: 'Imagen HDMI', options: ['OK', 'Falla', 'No probado'] },
-  { key: 'Ventilador', label: 'Ventilador', options: ['OK', 'Falla', 'No probado'] },
+  { key: 'Enciende / Arranca', label: 'Enciende / Arranca', options: ['OK', 'No enciende', 'Se apaga', 'Solo con cargador'] },
+  { key: 'Imagen en pantalla', label: 'Imagen en pantalla', options: ['OK', 'Sin imagen', 'Parpadea / Líneas', 'Oscura / Backlight'] },
+  { key: 'Salida HDMI / Video ext.', label: 'Salida HDMI / Video ext.', options: ['OK', 'Sin señal', 'No probado'] },
+  { key: 'Batería / Carga', label: 'Batería / Carga', options: ['OK', 'No carga', 'Dura poco', 'Sin batería / Hinchada'] },
+  { key: 'Teclado y Touchpad', label: 'Teclado y Touchpad', options: ['OK', 'Falla teclado', 'Falla touchpad', 'Fallan ambos'] },
+  { key: 'Cooler / Temperatura', label: 'Cooler / Temperatura', options: ['OK', 'Ruidoso', 'Sobrecalienta', 'No gira'] },
+  { key: 'Disco (SSD / HDD)', label: 'Disco (SSD / HDD)', options: ['OK', 'Lento / Falla', 'No detecta', 'Sin disco'] },
+  { key: 'WiFi / Bluetooth / Red', label: 'WiFi / Bluetooth / Red', options: ['OK', 'Falla', 'No probado'] },
+  { key: 'Audio / Mic / Webcam', label: 'Audio / Mic / Webcam', options: ['OK', 'Sin audio', 'Falla mic/cam', 'No probado'] },
+  { key: 'Sistema operativo', label: 'Sistema operativo', options: ['OK', 'No inicia', 'Lento / Virus', 'Sin SO'] },
 ];
 
 export const FUNCTIONAL_PC_FIELDS: CheckFieldOption[] = [
@@ -169,7 +188,7 @@ export function getPhysicalCheckFields(deviceType?: string): CheckFieldOption[] 
     return PHYSICAL_HEADPHONES_FIELDS;
   }
   if (deviceType === 'Notebook') {
-    return PHYSICAL_SIMPLE_FIELDS;
+    return PHYSICAL_NOTEBOOK_FIELDS;
   }
   return PHYSICAL_DEFAULT_FIELDS;
 }
