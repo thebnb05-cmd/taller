@@ -343,7 +343,11 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         <header className="no-print sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur-md sm:h-16 sm:gap-4 sm:px-6 dark:border-slate-800 dark:bg-slate-900/90">
           <div className="flex shrink-0 items-center gap-3">
             <div className="lg:hidden">
-              <BrandMark profile={profile} size="sm" />
+              <BrandMark
+                profile={profile}
+                size="sm"
+                wordClassNames={{ 2: 'text-[10px] text-center', 3: 'text-[10px]' }}
+              />
             </div>
             <span className="hidden text-sm font-semibold text-slate-500 lg:inline dark:text-slate-400">
               {NAV_ITEMS.find((n) => n.id === page)?.label}

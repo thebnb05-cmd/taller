@@ -6,6 +6,7 @@ interface BrandMarkProps {
   size?: 'sm' | 'md' | 'lg';
   showLogoImage?: boolean;
   forceLight?: boolean;
+  wordClassNames?: Record<number, string>;
 }
 
 function parseHexColor(hex: string): { r: number; g: number; b: number } | null {
@@ -59,6 +60,7 @@ export const BrandMark: React.FC<BrandMarkProps> = ({
   size = 'md',
   showLogoImage = true,
   forceLight = false,
+  wordClassNames,
 }) => {
   const brandName = (profile?.brandName || 'TH3 BNB').trim();
   const words = brandName.split(/\s+/).filter(Boolean);
@@ -117,13 +119,13 @@ export const BrandMark: React.FC<BrandMarkProps> = ({
           <React.Fragment key={`${word}-${idx}`}>
             {idx > 0 && ' '}
             <span
-              className={
+              className={`${
                 customColor
                   ? forceLight
                     ? 'text-(--brand-light)'
                     : 'text-(--brand-light) dark:text-(--brand-dark)'
                   : fallbackClass
-              }
+              }${wordClassNames?.[idx] ? ` ${wordClassNames[idx]}` : ''}`}
               style={
                 customColor
                   ? ({
