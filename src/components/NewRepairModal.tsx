@@ -312,6 +312,14 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     [products]
   );
 
+  const selectedPartsTotal = useMemo(
+    () =>
+      spareParts
+        .filter((p) => selectedPartIds.includes(p.id))
+        .reduce((sum, p) => sum + Math.max(0, Number(p.price || 0)), 0),
+    [spareParts, selectedPartIds]
+  );
+
   useEffect(() => {
     if (!open) return;
     setStep('device');
@@ -401,11 +409,23 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   };
 
   const togglePart = (part: ProductRecord) => {
-    setSelectedPartIds((prev) => {
-      const exists = prev.includes(part.id);
-      const next = exists ? prev.filter((idVal) => idVal !== part.id) : [...prev, part.id];
-      return next;
-    });
+    const exists = selectedPartIds.includes(part.id);
+    const partPrice = Math.max(0, Number(part.price || 0));
+
+    setSelectedPartIds((prev) =>
+      exists ? prev.filter((idVal) => idVal !== part.id) : [...prev, part.id]
+    );
+
+    if (partPrice > 0) {
+      setPrice((prevPrice) => {
+        const current = Math.max(0, Number(prevPrice || 0));
+        const nextTotal = exists
+          ? Math.max(0, current - partPrice)
+          : current + partPrice;
+        const rounded = Math.round(nextTotal * 100) / 100;
+        return rounded === 0 && exists ? '' : String(rounded);
+      });
+    }
   };
 
   const toggleAccessory = (acc: string) => {
@@ -1124,8 +1144,15 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
 
             {spareParts.length > 0 && (
               <div>
-                <div className="mb-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Repuestos asociados del inventario
+                <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  <span>Repuestos asociados del inventario</span>
+                  {selectedPartIds.length > 0 && (
+                    <span className="font-mono-num text-[#0072BB] dark:text-sky-300">
+                      {selectedPartIds.length}{' '}
+                      {selectedPartIds.length === 1 ? 'repuesto' : 'repuestos'} ·{' '}
+                      {formatCurrency(selectedPartsTotal)} sumado al total
+                    </span>
+                  )}
                 </div>
                 <div className="grid max-h-36 gap-2 overflow-y-auto rounded-xl border border-slate-200 p-2.5 sm:grid-cols-2 dark:border-slate-800">
                   {spareParts.map((part) => {
