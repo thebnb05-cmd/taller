@@ -96,6 +96,37 @@ const SPEAKER_FORMAT_OPTIONS = [
   'Parlante inteligente',
   'Otro',
 ];
+const CONSOLE_BRAND_SUGGESTIONS = [
+  'Sony PlayStation',
+  'Microsoft Xbox',
+  'Nintendo',
+  'Logitech',
+  'Redragon',
+  'Razer',
+  'Genérico',
+];
+const CONSOLE_MODEL_SUGGESTIONS = [
+  'PlayStation 5',
+  'DualSense (PS5)',
+  'PlayStation 4',
+  'DualShock 4 (PS4)',
+  'PlayStation 3',
+  'Xbox Series X / S',
+  'Xbox One',
+  'Xbox 360',
+  'Nintendo Switch',
+  'Joy-Con / Pro Controller',
+];
+const CONSOLE_EDITION_OPTIONS = [
+  'Joystick / Control',
+  'Consola · 500 GB',
+  'Consola · 825 GB / 1 TB',
+  'Consola · 2 TB',
+  'Consola · Digital (sin lectora)',
+  'Consola · Con lectora',
+  'Portátil (Switch / PSP)',
+  'Otro',
+];
 
 export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   open,
@@ -143,6 +174,8 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     'Joystick 2': 'No',
     'Cable HDMI': 'No',
     'Cable de poder': 'No',
+    'Cable USB / Carga': 'No',
+    'Fuente / Transformador': 'No',
   });
   const [physicalCheck, setPhysicalCheck] = useState<Record<string, string>>({});
   const [functionalCheck, setFunctionalCheck] = useState<Record<string, string>>({});
@@ -199,6 +232,8 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
       'Joystick 2': 'No',
       'Cable HDMI': 'No',
       'Cable de poder': 'No',
+      'Cable USB / Carga': 'No',
+      'Fuente / Transformador': 'No',
     });
     setPhysicalCheck({});
     setFunctionalCheck({});
@@ -341,7 +376,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
         brand: cleanBrand,
         model: cleanModel,
         color: clampStr(color, 60),
-        capacity: showCapacity || isSpeaker ? clampStr(capacity, 40) : '',
+        capacity: showCapacity || isSpeaker || isConsole ? clampStr(capacity, 40) : '',
         imei: clampStr(imei, 80),
         problem: cleanProblem,
         priority,
@@ -467,7 +502,13 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                         setAccessories([]);
                         setPhysicalCheck({});
                         setFunctionalCheck({});
-                        setCapacity(opt.type === 'Parlante' ? 'Portátil Bluetooth' : '128 GB');
+                        setCapacity(
+                          opt.type === 'Parlante'
+                            ? 'Portátil Bluetooth'
+                            : opt.type === 'Consola / joystick'
+                              ? 'Consola · 500 GB'
+                              : '128 GB'
+                        );
                       }
                       setDeviceType(opt.type);
                       setDeviceIcon(opt.icon);
@@ -629,19 +670,34 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                   <>
                     <input
                       type="text"
-                      list={isSpeaker ? 'speaker-brands-datalist' : undefined}
+                      list={
+                        isSpeaker
+                          ? 'speaker-brands-datalist'
+                          : isConsole
+                            ? 'console-brands-datalist'
+                            : undefined
+                      }
                       value={customBrand}
                       onChange={(e) => setCustomBrand(e.target.value)}
                       placeholder={
                         isSpeaker
                           ? 'Ej: JBL, Sony, Noblex, Philips...'
-                          : `Marca de ${deviceType}`
+                          : isConsole
+                            ? 'Ej: Sony PlayStation, Xbox, Nintendo...'
+                            : `Marca de ${deviceType}`
                       }
                       className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     />
                     {isSpeaker && (
                       <datalist id="speaker-brands-datalist">
                         {SPEAKER_BRAND_SUGGESTIONS.map((b) => (
+                          <option key={b} value={b} />
+                        ))}
+                      </datalist>
+                    )}
+                    {isConsole && (
+                      <datalist id="console-brands-datalist">
+                        {CONSOLE_BRAND_SUGGESTIONS.map((b) => (
                           <option key={b} value={b} />
                         ))}
                       </datalist>
@@ -681,17 +737,29 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                   Modelo
                 </label>
                 {isNotebookOrCustom ? (
-                  <input
-                    type="text"
-                    value={customModel}
-                    onChange={(e) => setCustomModel(e.target.value)}
-                    placeholder={
-                      isSpeaker
-                        ? 'Ej: Flip 6, Charge 5, Torre 15"...'
-                        : `Modelo de ${deviceType}`
-                    }
-                    className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                  />
+                  <>
+                    <input
+                      type="text"
+                      list={isConsole ? 'console-models-datalist' : undefined}
+                      value={customModel}
+                      onChange={(e) => setCustomModel(e.target.value)}
+                      placeholder={
+                        isSpeaker
+                          ? 'Ej: Flip 6, Charge 5, Torre 15"...'
+                          : isConsole
+                            ? 'Ej: PS4 Slim, PS5, DualSense, Xbox Series S...'
+                            : `Modelo de ${deviceType}`
+                      }
+                      className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                    {isConsole && (
+                      <datalist id="console-models-datalist">
+                        {CONSOLE_MODEL_SUGGESTIONS.map((m) => (
+                          <option key={m} value={m} />
+                        ))}
+                      </datalist>
+                    )}
+                  </>
                 ) : (
                   <div className="space-y-2">
                     <select
@@ -732,17 +800,26 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                 />
               </div>
 
-              {(showCapacity || isSpeaker) && (
+              {(showCapacity || isSpeaker || isConsole) && (
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                    {isSpeaker ? 'Tipo / Formato' : 'Capacidad'}
+                    {isSpeaker
+                      ? 'Tipo / Formato'
+                      : isConsole
+                        ? 'Edición / Capacidad'
+                        : 'Capacidad'}
                   </label>
                   <select
                     value={capacity}
                     onChange={(e) => setCapacity(e.target.value)}
                     className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   >
-                    {(isSpeaker ? SPEAKER_FORMAT_OPTIONS : CAPACITY_OPTIONS).map((opt) => (
+                    {(isSpeaker
+                      ? SPEAKER_FORMAT_OPTIONS
+                      : isConsole
+                        ? CONSOLE_EDITION_OPTIONS
+                        : CAPACITY_OPTIONS
+                    ).map((opt) => (
                       <option key={opt} value={opt}>
                         {opt}
                       </option>
@@ -751,7 +828,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                 </div>
               )}
 
-              <div className={showCapacity || isSpeaker ? 'sm:col-span-2' : ''}>
+              <div className={showCapacity || isSpeaker || isConsole ? 'sm:col-span-2' : ''}>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
                   {deviceType === 'Celular' || deviceType === 'Tablet'
                     ? 'IMEI'

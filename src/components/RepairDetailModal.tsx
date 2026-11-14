@@ -1030,7 +1030,11 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   {repair.capacity && (
                     <div className="flex justify-between">
                       <dt className="text-slate-500">
-                        {repair.deviceType === 'Parlante' ? 'Tipo / Formato:' : 'Capacidad:'}
+                        {repair.deviceType === 'Parlante'
+                          ? 'Tipo / Formato:'
+                          : repair.deviceType === 'Consola / joystick'
+                            ? 'Edición / Capacidad:'
+                            : 'Capacidad:'}
                       </dt>
                       <dd className="font-medium text-slate-900 dark:text-white">{repair.capacity}</dd>
                     </div>

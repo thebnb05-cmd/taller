@@ -250,10 +250,11 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
       return repair.accessories.join(', ');
     }
     if (repair.consoleAccessories && Object.keys(repair.consoleAccessories).length > 0) {
-      return Object.entries(repair.consoleAccessories)
+      const selected = Object.entries(repair.consoleAccessories)
         .filter(([, v]) => v === 'Sí')
         .map(([k]) => k)
         .join(', ');
+      return selected || 'Ninguno';
     }
     return 'Ninguno';
   }, [repair]);
