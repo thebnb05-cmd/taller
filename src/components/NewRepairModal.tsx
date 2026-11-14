@@ -390,7 +390,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   const showCapacity =
     deviceType === 'Celular' || deviceType === 'Tablet' || deviceType === 'Smartwatch';
 
-  const pendingBalance = Math.max(0, Number(price || 0) - Number(deposit || 0));
+  const manualBudget = Math.max(0, Number(price || 0));
+  const totalBudget = manualBudget + selectedPartsTotal;
+  const pendingBalance = Math.max(0, totalBudget - Math.max(0, Number(deposit || 0)));
 
   const physicalFields = useMemo(() => getPhysicalCheckFields(deviceType), [deviceType]);
 
@@ -409,23 +411,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   };
 
   const togglePart = (part: ProductRecord) => {
-    const exists = selectedPartIds.includes(part.id);
-    const partPrice = Math.max(0, Number(part.price || 0));
-
     setSelectedPartIds((prev) =>
-      exists ? prev.filter((idVal) => idVal !== part.id) : [...prev, part.id]
+      prev.includes(part.id) ? prev.filter((idVal) => idVal !== part.id) : [...prev, part.id]
     );
-
-    if (partPrice > 0) {
-      setPrice((prevPrice) => {
-        const current = Math.max(0, Number(prevPrice || 0));
-        const nextTotal = exists
-          ? Math.max(0, current - partPrice)
-          : current + partPrice;
-        const rounded = Math.round(nextTotal * 100) / 100;
-        return rounded === 0 && exists ? '' : String(rounded);
-      });
-    }
   };
 
   const toggleAccessory = (acc: string) => {
@@ -467,7 +455,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
       const repairId = generateDocId('repairs');
       const repairCode = clampStr(generateRepairCode(repairs), 40);
       const trackingCode = clampStr(generateTrackingCode(), 40);
-      const budget = Math.max(0, Number(price || 0));
+      const budget = totalBudget;
       const advance = Math.max(0, Number(deposit || 0));
       const selectedParts = products.filter((p) => selectedPartIds.includes(p.id)).slice(0, 30);
 
@@ -1237,6 +1225,18 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                 </select>
               </div>
             </div>
+
+            {selectedPartIds.length > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-200 bg-sky-50/70 px-3 py-2 text-xs text-slate-700 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-slate-200">
+                <span>
+                  Presupuesto (<strong className="font-mono-num">{formatCurrency(manualBudget)}</strong>) +
+                  Repuestos (<strong className="font-mono-num">{formatCurrency(selectedPartsTotal)}</strong>)
+                </span>
+                <span className="font-mono-num font-bold text-[#0072BB] dark:text-sky-300">
+                  Total: {formatCurrency(totalBudget)}
+                </span>
+              </div>
+            )}
           </section>
 
           <section className="space-y-3 border-t border-slate-100 pt-5 dark:border-slate-800">
