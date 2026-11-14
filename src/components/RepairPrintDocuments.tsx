@@ -208,8 +208,9 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
     }
     let cancelled = false;
     QRCode.toDataURL(trackingUrl, {
-      width: 200,
+      width: 220,
       margin: 1,
+      errorCorrectionLevel: 'M',
       color: { dark: '#0f172a', light: '#ffffff' },
     })
       .then((url) => {
@@ -462,6 +463,9 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
             </div>
             <div className="mt-0.5 font-mono-num text-[10px] font-bold text-[#0072BB]">
               Código: {repair.trackingCode}
+            </div>
+            <div className="mt-0.5 max-w-[260px] break-all text-[9px] text-slate-400">
+              {trackingUrl.replace(/^https?:\/\//, '')}
             </div>
           </div>
         </div>

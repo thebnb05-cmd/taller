@@ -3,6 +3,11 @@ import { Image as ImageIcon, Trash2, UploadCloud } from 'lucide-react';
 import { clampStr, handleDbError, OperationType, stripUndefined, updateRow } from '../lib/db';
 import { DEFAULT_RECEIPT_TERMS } from '../data/catalog';
 import { compressImageToDataUrl } from '../utils/formatters';
+import {
+  isPrivatePreviewOrigin,
+  normalizeTrackingBaseUrl,
+  resolveTrackingBaseUrl,
+} from '../utils/tracking';
 import type { WorkshopProfile } from '../types/workshop';
 import { ModalShell } from './ModalShell';
 import { BrandMark } from './BrandMark';
@@ -33,7 +38,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
     profile.receiptTerms ?? DEFAULT_RECEIPT_TERMS
   );
   const [trackingBaseUrl, setTrackingBaseUrl] = useState(
-    profile.trackingBaseUrl || window.location.origin
+    resolveTrackingBaseUrl(profile.trackingBaseUrl)
   );
   const [dragOver, setDragOver] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -48,7 +53,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
     setLogoScale(profile.logoScale ?? 100);
     setLogoTransparent(profile.logoTransparent ?? true);
     setReceiptTerms(profile.receiptTerms ?? DEFAULT_RECEIPT_TERMS);
-    setTrackingBaseUrl(profile.trackingBaseUrl || window.location.origin);
+    setTrackingBaseUrl(resolveTrackingBaseUrl(profile.trackingBaseUrl));
   }, [open, profile]);
 
   const words = (brandName || 'TH3 BNB').trim().split(/\s+/).filter(Boolean);
@@ -76,6 +81,10 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
     setSaving(true);
     const path = `workshop_profiles/${profile.id}`;
     try {
+      const cleanedTrackingUrl = normalizeTrackingBaseUrl(trackingBaseUrl);
+      const safeTrackingBaseUrl = isPrivatePreviewOrigin(cleanedTrackingUrl)
+        ? ''
+        : clampStr(cleanedTrackingUrl, 250);
       const payload = stripUndefined({
         brandName: clampStr(brandName || 'TH3 BNB', 80) || 'TH3 BNB',
         businessPhone: clampStr(businessPhone, 50),
@@ -85,7 +94,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
         logoScale,
         logoTransparent,
         receiptTerms: clampStr(receiptTerms, 2000),
-        trackingBaseUrl: clampStr(trackingBaseUrl || window.location.origin, 250),
+        trackingBaseUrl: safeTrackingBaseUrl,
         updatedAt: new Date().toISOString(),
       });
       await updateRow('workshop_profiles', profile.id, payload);

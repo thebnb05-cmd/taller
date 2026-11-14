@@ -10,6 +10,7 @@ import {
 } from '../lib/db';
 import { DEFAULT_RECEIPT_TERMS } from '../data/catalog';
 import { compressImageToDataUrl } from '../utils/formatters';
+import { isPrivatePreviewOrigin } from '../utils/tracking';
 import { useToast } from './ToastProvider';
 
 interface AuthScreenProps {
@@ -364,7 +365,9 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
         logoScale: 100,
         logoTransparent: true,
         receiptTerms: clampStr(DEFAULT_RECEIPT_TERMS, 2000),
-        trackingBaseUrl: clampStr(window.location.origin, 250),
+        trackingBaseUrl: isPrivatePreviewOrigin(window.location.origin)
+          ? ''
+          : clampStr(window.location.origin, 250),
         createdAt: nowIso,
         updatedAt: nowIso,
       });

@@ -61,6 +61,7 @@ import {
   serializeWorkDetailAndMedia,
   type TechMediaItem,
 } from '../utils/techMedia';
+import { buildTrackingUrl } from '../utils/tracking';
 import { ModalShell } from './ModalShell';
 import { PatternLock } from './PatternLock';
 import { RepairPrintDocuments } from './RepairPrintDocuments';
@@ -221,8 +222,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   const paymentInfo = parsePaymentInfo(repair);
   const detailWork = parseWorkDetailAndMedia(repair.workDetail);
   const editPendingBalance = Math.max(0, Number(price || 0) - Number(deposit || 0));
-  const baseUrl = (profile?.trackingBaseUrl || window.location.origin).replace(/\/$/, '');
-  const trackingUrl = `${baseUrl}/?track=${encodeURIComponent(repair.trackingCode)}`;
+  const trackingUrl = buildTrackingUrl(repair.trackingCode, profile?.trackingBaseUrl);
 
   const cleanPhoneForWa = (repair.clientPhone || '').replace(/[^\d]/g, '');
   const whatsappMessage = encodeURIComponent(
