@@ -78,22 +78,32 @@ export function saveTransferConfig(ownerId: string, config: TransferConfig): voi
 
 export function buildTransferQrPayload(
   cfg: TransferConfig,
-  brandName: string,
-  repairCode: string,
-  clientName: string,
-  amount: number
+  _brandName?: string,
+  _repairCode?: string,
+  _clientName?: string,
+  _amount?: number
 ): string {
-  if (cfg.paymentLink.trim()) {
-    return cfg.paymentLink.trim();
+  const link = cfg.paymentLink.trim();
+  return link || '';
+}
+
+export function buildTransferWhatsAppText(
+  cfg: TransferConfig,
+  params: {
+    brandName: string;
+    code: string;
+    clientName: string;
+    amount: number;
   }
+): string {
   const lines = [
-    `PAGO TRANSFERENCIA - ${brandName || 'TH3 BNB'}`,
-    `Orden: ${repairCode}`,
-    `Cliente: ${clientName}`,
-    `Monto: $${amount.toFixed(2)}`,
+    `Hola ${params.clientName}, te pasamos los datos de ${params.brandName || 'TH3 BNB'} para abonar por transferencia (${params.code}):`,
+    `• Monto: $${params.amount.toLocaleString('es-AR', { minimumFractionDigits: params.amount % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 })}`,
   ];
-  if (cfg.alias.trim()) lines.push(`Alias: ${cfg.alias.trim()}`);
-  if (cfg.cbu.trim()) lines.push(`CBU/CVU: ${cfg.cbu.trim()}`);
-  if (cfg.holder.trim()) lines.push(`Titular: ${cfg.holder.trim()}`);
+  if (cfg.alias.trim()) lines.push(`• Alias: ${cfg.alias.trim()}`);
+  if (cfg.cbu.trim()) lines.push(`• CBU/CVU: ${cfg.cbu.trim()}`);
+  if (cfg.holder.trim()) lines.push(`• Titular: ${cfg.holder.trim()}`);
+  if (cfg.paymentLink.trim()) lines.push(`• Link de pago: ${cfg.paymentLink.trim()}`);
+  lines.push('Cuando realices el pago, enviános el comprobante por acá.');
   return lines.join('\n');
 }

@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { Banknote, CreditCard, Landmark, Package, Printer } from 'lucide-react';
+import { Banknote, Copy, CreditCard, Landmark, Package, Printer, Settings2, Upload } from 'lucide-react';
 import {
   clampStr,
   generateDocId,
@@ -14,11 +14,13 @@ import type {
   SaleRecord,
   SupplierRecord,
 } from '../types/workshop';
-import { formatCurrency, todayISO } from '../utils/formatters';
+import { compressImageToDataUrl, formatCurrency, todayISO } from '../utils/formatters';
 import {
   buildTransferQrPayload,
   loadTransferConfig,
+  saveTransferConfig,
   type PaymentMethod,
+  type TransferConfig,
 } from '../utils/payment';
 import { serializeSaleStatus } from '../utils/saleMeta';
 import { ModalShell } from './ModalShell';
@@ -439,12 +441,13 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const [dueDate, setDueDate] = useState(todayISO());
   const [saving, setSaving] = useState(false);
   const [transferQrDataUrl, setTransferQrDataUrl] = useState('');
-
-  const transferCfg = useMemo(() => loadTransferConfig(ownerId), [ownerId, open]);
+  const [transferCfg, setTransferCfg] = useState<TransferConfig>(() => loadTransferConfig(ownerId));
+  const [editingTransferCfg, setEditingTransferCfg] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     const initialAmount = preselectedProduct ? String(preselectedProduct.price) : '';
+    const loadedCfg = loadTransferConfig(ownerId);
     setClientName('');
     setInvoice(`FV-${Math.floor(1000 + Math.random() * 9000)}`);
     setQuantity(1);
@@ -453,7 +456,14 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     setPaymentMethod('efectivo');
     setStatus('cobrado');
     setDueDate(todayISO());
-  }, [open, preselectedProduct]);
+    setTransferCfg(loadedCfg);
+    setEditingTransferCfg(
+      !loadedCfg.alias.trim() &&
+        !loadedCfg.cbu.trim() &&
+        !loadedCfg.paymentLink.trim() &&
+        !loadedCfg.qrImageDataUrl
+    );
+  }, [open, ownerId, preselectedProduct]);
 
   const numericAmount = Math.max(0, Number(amount || 0));
   const numericDeposit =
@@ -479,6 +489,10 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       clientName.trim() || 'Cliente',
       qrChargeAmount
     );
+    if (!payload) {
+      setTransferQrDataUrl('');
+      return;
+    }
     let cancelled = false;
     QRCode.toDataURL(payload, {
       width: 180,
@@ -571,6 +585,16 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       amount: cleanAmount,
     });
 
+    if (paymentMethod === 'transferencia') {
+      saveTransferConfig(ownerId, {
+        alias: transferCfg.alias.trim(),
+        cbu: transferCfg.cbu.trim(),
+        holder: transferCfg.holder.trim(),
+        paymentLink: transferCfg.paymentLink.trim(),
+        qrImageDataUrl: transferCfg.qrImageDataUrl,
+      });
+    }
+
     setSaving(true);
     try {
       let resolvedClientId = matchedClient?.id;
@@ -644,6 +668,53 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     e.preventDefault();
     await submitSale(false);
   };
+
+  const handleCopyTransferValue = async (value: string, label: string) => {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      notify(`${label} copiado.`);
+    } catch {
+      notify('No se pudo copiar al portapapeles.', 'error');
+    }
+  };
+
+  const handleSaveTransferCfg = () => {
+    const cleaned: TransferConfig = {
+      alias: transferCfg.alias.trim(),
+      cbu: transferCfg.cbu.trim(),
+      holder: transferCfg.holder.trim(),
+      paymentLink: transferCfg.paymentLink.trim(),
+      qrImageDataUrl: transferCfg.qrImageDataUrl,
+    };
+    setTransferCfg(cleaned);
+    saveTransferConfig(ownerId, cleaned);
+    setEditingTransferCfg(false);
+    notify('Datos de transferencia guardados.');
+  };
+
+  const handleUploadTransferQr = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const dataUrl = await compressImageToDataUrl(file, 480, 0.85);
+      const nextCfg = { ...transferCfg, qrImageDataUrl: dataUrl };
+      setTransferCfg(nextCfg);
+      saveTransferConfig(ownerId, nextCfg);
+      notify('Captura del QR guardada.');
+    } catch {
+      notify('No se pudo procesar la imagen del QR.', 'error');
+    }
+  };
+
+  const hasTransferData = Boolean(
+    transferCfg.alias.trim() ||
+      transferCfg.cbu.trim() ||
+      transferCfg.holder.trim() ||
+      transferCfg.paymentLink.trim() ||
+      transferCfg.qrImageDataUrl
+  );
 
   return (
     <ModalShell open={open} onClose={onClose} title="Nueva venta" maxWidth="lg">
@@ -767,17 +838,17 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-3">
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Medio de pago
+              Método de pago
             </label>
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-3 gap-2">
               {(
                 [
                   { id: 'efectivo', label: 'Efectivo', icon: Banknote },
-                  { id: 'transferencia', label: 'Transfer.', icon: Landmark },
                   { id: 'tarjeta', label: 'Tarjeta', icon: CreditCard },
+                  { id: 'transferencia', label: 'Transferencia', icon: Landmark },
                 ] as const
               ).map(({ id, label, icon: Icon }) => {
                 const active = paymentMethod === id;
@@ -786,14 +857,14 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                     key={id}
                     type="button"
                     onClick={() => setPaymentMethod(id)}
-                    className={`flex h-10 items-center justify-center gap-1 rounded-xl border px-2 text-xs font-semibold transition ${
+                    className={`flex h-10 items-center justify-center gap-1.5 rounded-xl border px-2 text-xs font-semibold transition ${
                       active
                         ? 'border-[#0072BB] bg-[#0072BB] text-white'
                         : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
                     }`}
                   >
                     <Icon className="h-3.5 w-3.5 shrink-0" />
-                    <span>{label}</span>
+                    <span className="truncate">{label}</span>
                   </button>
                 );
               })}
@@ -816,39 +887,174 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         </div>
 
         {paymentMethod === 'transferencia' && (
-          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-sky-200 bg-sky-50/70 p-3 dark:border-sky-900/60 dark:bg-sky-950/30">
-            {transferQrDataUrl && (
-              <img
-                src={transferQrDataUrl}
-                alt="QR de transferencia"
-                className="h-20 w-20 shrink-0 rounded-xl border border-slate-200 bg-white p-1"
-              />
-            )}
-            <div className="min-w-0 flex-1 text-xs">
-              <div className="font-bold text-slate-900 dark:text-white">
-                Transferencia · {formatCurrency(qrChargeAmount)}
+          <div className="space-y-3 rounded-2xl border border-sky-200 bg-sky-50/70 p-3.5 dark:border-sky-900/60 dark:bg-sky-950/30">
+            <div className="flex flex-wrap items-start gap-3">
+              {transferQrDataUrl && (
+                <img
+                  src={transferQrDataUrl}
+                  alt="QR de transferencia"
+                  className="h-20 w-20 shrink-0 rounded-xl border border-slate-200 bg-white object-contain p-1"
+                />
+              )}
+              <div className="min-w-0 flex-1 space-y-1.5 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-bold text-slate-900 dark:text-white">
+                    Datos de transferencia · {formatCurrency(qrChargeAmount)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setEditingTransferCfg((prev) => !prev)}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
+                  >
+                    <Settings2 className="h-3 w-3" />
+                    {editingTransferCfg ? 'Ocultar edición' : 'Editar Alias / CBU / QR'}
+                  </button>
+                </div>
+
+                {transferCfg.alias.trim() && (
+                  <div className="flex items-center justify-between gap-2 rounded-lg bg-white/80 px-2.5 py-1 dark:bg-slate-900/70">
+                    <span className="truncate text-slate-700 dark:text-slate-200">
+                      Alias: <strong className="font-mono-num">{transferCfg.alias}</strong>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyTransferValue(transferCfg.alias.trim(), 'Alias')}
+                      className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
+                    >
+                      <Copy className="h-3 w-3" />
+                      Copiar
+                    </button>
+                  </div>
+                )}
+
+                {transferCfg.cbu.trim() && (
+                  <div className="flex items-center justify-between gap-2 rounded-lg bg-white/80 px-2.5 py-1 dark:bg-slate-900/70">
+                    <span className="truncate text-slate-700 dark:text-slate-200">
+                      CBU/CVU: <strong className="font-mono-num">{transferCfg.cbu}</strong>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyTransferValue(transferCfg.cbu.trim(), 'CBU/CVU')}
+                      className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
+                    >
+                      <Copy className="h-3 w-3" />
+                      Copiar
+                    </button>
+                  </div>
+                )}
+
+                {transferCfg.holder.trim() && (
+                  <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                    Titular: <strong>{transferCfg.holder}</strong>
+                  </div>
+                )}
+
+                {!hasTransferData && !editingTransferCfg && (
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Cargá tu Alias o CBU/CVU para que aparezca en la boleta impresa.
+                  </div>
+                )}
               </div>
-              {transferCfg.alias && (
-                <div className="mt-0.5 text-slate-600 dark:text-slate-300">
-                  Alias: <strong className="font-mono-num">{transferCfg.alias}</strong>
-                </div>
-              )}
-              {transferCfg.cbu && (
-                <div className="text-slate-600 dark:text-slate-300">
-                  CBU/CVU: <strong className="font-mono-num">{transferCfg.cbu}</strong>
-                </div>
-              )}
-              {transferCfg.holder && (
-                <div className="text-slate-500 dark:text-slate-400">
-                  Titular: {transferCfg.holder}
-                </div>
-              )}
-              {!transferCfg.alias && !transferCfg.cbu && !transferCfg.paymentLink && (
-                <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                  Podés configurar tu Alias/CBU o QR propio desde el detalle de cualquier reparación al cobrar por transferencia.
-                </div>
-              )}
             </div>
+
+            {editingTransferCfg && (
+              <div className="space-y-2.5 border-t border-sky-200/80 pt-3 dark:border-sky-900/60">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      Alias
+                    </label>
+                    <input
+                      type="text"
+                      value={transferCfg.alias}
+                      onChange={(e) =>
+                        setTransferCfg((prev) => ({ ...prev, alias: e.target.value }))
+                      }
+                      placeholder="ej: taller.th3bnb"
+                      className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      CBU / CVU
+                    </label>
+                    <input
+                      type="text"
+                      value={transferCfg.cbu}
+                      onChange={(e) =>
+                        setTransferCfg((prev) => ({ ...prev, cbu: e.target.value }))
+                      }
+                      placeholder="22 dígitos"
+                      className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 font-mono-num text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      Titular (opcional)
+                    </label>
+                    <input
+                      type="text"
+                      value={transferCfg.holder}
+                      onChange={(e) =>
+                        setTransferCfg((prev) => ({ ...prev, holder: e.target.value }))
+                      }
+                      placeholder="Nombre o razón social"
+                      className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      Link de pago MP (opcional)
+                    </label>
+                    <input
+                      type="url"
+                      value={transferCfg.paymentLink}
+                      onChange={(e) =>
+                        setTransferCfg((prev) => ({ ...prev, paymentLink: e.target.value }))
+                      }
+                      placeholder="https://mpago.la/..."
+                      className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                      <Upload className="h-3.5 w-3.5" />
+                      Subir QR (MP / Banco)
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        onChange={handleUploadTransferQr}
+                        className="hidden"
+                      />
+                    </label>
+                    {transferCfg.qrImageDataUrl && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextCfg = { ...transferCfg, qrImageDataUrl: '' };
+                          setTransferCfg(nextCfg);
+                          saveTransferConfig(ownerId, nextCfg);
+                        }}
+                        className="text-[11px] font-semibold text-red-600 hover:underline dark:text-red-400"
+                      >
+                        Quitar QR
+                      </button>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleSaveTransferCfg}
+                    className="h-8 rounded-lg bg-[#0072BB] px-3 text-[11px] font-semibold text-white hover:bg-[#005f9c]"
+                  >
+                    Guardar datos
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

@@ -43,6 +43,7 @@ import {
 } from '../utils/formatters';
 import {
   buildTransferQrPayload,
+  buildTransferWhatsAppText,
   loadTransferConfig,
   PAYMENT_METHOD_LABELS,
   parsePaymentInfo,
@@ -185,7 +186,6 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       setQrDataUrl('');
       return;
     }
-    let cancelled = false;
     const payload = buildTransferQrPayload(
       transferConfig,
       profile?.brandName || 'TH3 BNB',
@@ -193,6 +193,11 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       repair.clientName,
       currentPendingBalance
     );
+    if (!payload) {
+      setQrDataUrl('');
+      return;
+    }
+    let cancelled = false;
     QRCode.toDataURL(payload, {
       width: 240,
       margin: 1,
@@ -746,179 +751,247 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                     </div>
                   </div>
 
-                  {paymentMethod === 'transferencia' && (
-                    <div className="rounded-xl border border-sky-200 bg-white p-3.5 dark:border-sky-900/60 dark:bg-slate-900">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                        <div className="flex shrink-0 flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-2">
-                          {transferConfig.qrImageDataUrl ? (
-                            <img
-                              src={transferConfig.qrImageDataUrl}
-                              alt="QR de transferencia"
-                              className="h-32 w-32 object-contain"
-                            />
-                          ) : qrDataUrl ? (
-                            <img
-                              src={qrDataUrl}
-                              alt="QR rápido de pago"
-                              className="h-32 w-32 object-contain"
-                            />
-                          ) : (
-                            <div className="flex h-32 w-32 items-center justify-center text-[11px] text-slate-400">
-                              Generando QR...
-                            </div>
-                          )}
-                        </div>
+                  {paymentMethod === 'transferencia' && (() => {
+                    const hasOfficialQr = Boolean(transferConfig.qrImageDataUrl);
+                    const hasLinkQr = Boolean(!hasOfficialQr && transferConfig.paymentLink.trim() && qrDataUrl);
+                    const hasAnyData = Boolean(
+                      transferConfig.alias.trim() ||
+                        transferConfig.cbu.trim() ||
+                        transferConfig.paymentLink.trim() ||
+                        hasOfficialQr
+                    );
+                    const transferWaText = buildTransferWhatsAppText(transferConfig, {
+                      brandName: profile?.brandName || 'TH3 BNB Servicio Técnico',
+                      code: repair.code,
+                      clientName: repair.clientName,
+                      amount: pendingBalance,
+                    });
+                    const transferWaHref = cleanPhoneForWa
+                      ? `https://wa.me/${cleanPhoneForWa}?text=${encodeURIComponent(transferWaText)}`
+                      : `https://wa.me/?text=${encodeURIComponent(transferWaText)}`;
 
-                        <div className="min-w-0 flex-1 space-y-1.5 text-xs">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-bold text-slate-900 dark:text-white">
-                              Pago rápido por transferencia
-                            </span>
-                            <span className="font-mono-num text-sm font-extrabold text-[#0072BB] dark:text-sky-400">
-                              {formatCurrency(pendingBalance)}
-                            </span>
-                          </div>
-
-                          {transferConfig.alias && (
-                            <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800">
-                              <span className="truncate text-slate-700 dark:text-slate-200">
-                                <strong>Alias:</strong> {transferConfig.alias}
+                    return (
+                      <div className="rounded-xl border border-sky-200 bg-white p-3.5 dark:border-sky-900/60 dark:bg-slate-900">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                          {(hasOfficialQr || hasLinkQr) && (
+                            <div className="flex shrink-0 flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-2">
+                              <img
+                                src={hasOfficialQr ? transferConfig.qrImageDataUrl : qrDataUrl}
+                                alt={
+                                  hasOfficialQr
+                                    ? 'QR oficial de Mercado Pago / Banco'
+                                    : 'QR de link de pago'
+                                }
+                                className="h-32 w-32 object-contain"
+                              />
+                              <span className="mt-1 text-center text-[10px] font-semibold text-slate-500">
+                                {hasOfficialQr ? 'QR oficial MP / Banco' : 'QR Link de pago'}
                               </span>
-                              <button
-                                type="button"
-                                onClick={() => void handleCopyText(transferConfig.alias, 'Alias')}
-                                className="inline-flex shrink-0 items-center gap-1 font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
-                              >
-                                <Copy className="h-3 w-3" />
-                                Copiar
-                              </button>
                             </div>
                           )}
 
-                          {transferConfig.cbu && (
-                            <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800">
-                              <span className="truncate font-mono-num text-slate-700 dark:text-slate-200">
-                                <strong>CBU/CVU:</strong> {transferConfig.cbu}
+                          <div className="min-w-0 flex-1 space-y-2 text-xs">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-bold text-slate-900 dark:text-white">
+                                Cobro por transferencia
                               </span>
-                              <button
-                                type="button"
-                                onClick={() => void handleCopyText(transferConfig.cbu, 'CBU/CVU')}
-                                className="inline-flex shrink-0 items-center gap-1 font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
-                              >
-                                <Copy className="h-3 w-3" />
-                                Copiar
-                              </button>
+                              <span className="font-mono-num text-sm font-extrabold text-[#0072BB] dark:text-sky-400">
+                                {formatCurrency(pendingBalance)}
+                              </span>
                             </div>
-                          )}
 
-                          {transferConfig.holder && (
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                              Titular: <strong>{transferConfig.holder}</strong>
-                            </div>
-                          )}
+                            {transferConfig.alias && (
+                              <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800">
+                                <span className="truncate text-slate-700 dark:text-slate-200">
+                                  <strong>Alias:</strong> {transferConfig.alias}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleCopyText(transferConfig.alias, 'Alias')}
+                                  className="inline-flex shrink-0 items-center gap-1 font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
+                                >
+                                  <Copy className="h-3 w-3" />
+                                  Copiar
+                                </button>
+                              </div>
+                            )}
 
-                          {!transferConfig.alias &&
-                            !transferConfig.cbu &&
-                            !transferConfig.qrImageDataUrl && (
-                              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                                Escaneá el QR con el detalle del monto, o cargá tu Alias/CBU o tu
-                                propio QR de MercadoPago/Banco para cobrar directo.
+                            {transferConfig.cbu && (
+                              <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800">
+                                <span className="truncate font-mono-num text-slate-700 dark:text-slate-200">
+                                  <strong>CBU/CVU:</strong> {transferConfig.cbu}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleCopyText(transferConfig.cbu, 'CBU/CVU')}
+                                  className="inline-flex shrink-0 items-center gap-1 font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
+                                >
+                                  <Copy className="h-3 w-3" />
+                                  Copiar
+                                </button>
+                              </div>
+                            )}
+
+                            {transferConfig.paymentLink.trim() && (
+                              <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800">
+                                <span className="truncate text-slate-700 dark:text-slate-200">
+                                  <strong>Link de pago:</strong> {transferConfig.paymentLink.trim()}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void handleCopyText(transferConfig.paymentLink.trim(), 'Link')
+                                  }
+                                  className="inline-flex shrink-0 items-center gap-1 font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
+                                >
+                                  <Copy className="h-3 w-3" />
+                                  Copiar
+                                </button>
+                              </div>
+                            )}
+
+                            {transferConfig.holder && (
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                Titular: <strong>{transferConfig.holder}</strong>
+                              </div>
+                            )}
+
+                            {!hasAnyData && (
+                              <p className="rounded-lg bg-amber-50/80 px-2.5 py-2 text-[11px] text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                                Cargá tu <strong>Alias / CBU</strong> para enviarlo al cliente por WhatsApp, o subí una captura de <strong>Tu QR de Mercado Pago</strong> / pegá un <strong>Link de pago</strong>.
                               </p>
                             )}
 
-                          <button
-                            type="button"
-                            onClick={() => setEditingTransferConfig((prev) => !prev)}
-                            className="inline-flex items-center gap-1 pt-0.5 text-[11px] font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
-                          >
-                            <Settings2 className="h-3 w-3" />
-                            {editingTransferConfig
-                              ? 'Ocultar configuración de QR / Alias'
-                              : 'Configurar Alias / CBU / QR propio'}
-                          </button>
-                        </div>
-                      </div>
+                            {hasAnyData && !hasOfficialQr && !hasLinkQr && (
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                Mercado Pago no genera QR directo desde un Alias: copiá los datos o envialos por WhatsApp, o subí la captura de tu QR oficial desde Configurar.
+                              </p>
+                            )}
 
-                      {editingTransferConfig && (
-                        <div className="mt-3 space-y-2.5 border-t border-slate-200 pt-3 dark:border-slate-800">
-                          <div className="grid gap-2 sm:grid-cols-2">
-                            <input
-                              type="text"
-                              value={transferConfig.alias}
-                              onChange={(e) =>
-                                setTransferConfig((p) => ({ ...p, alias: e.target.value }))
-                              }
-                              placeholder="Alias (ej: taller.th3bnb)"
-                              className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                            />
-                            <input
-                              type="text"
-                              value={transferConfig.cbu}
-                              onChange={(e) =>
-                                setTransferConfig((p) => ({ ...p, cbu: e.target.value }))
-                              }
-                              placeholder="CBU / CVU (22 dígitos)"
-                              className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 font-mono-num text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                            />
-                            <input
-                              type="text"
-                              value={transferConfig.holder}
-                              onChange={(e) =>
-                                setTransferConfig((p) => ({ ...p, holder: e.target.value }))
-                              }
-                              placeholder="Nombre del titular"
-                              className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                            />
-                            <input
-                              type="url"
-                              value={transferConfig.paymentLink}
-                              onChange={(e) =>
-                                setTransferConfig((p) => ({ ...p, paymentLink: e.target.value }))
-                              }
-                              placeholder="Link de pago QR (opcional)"
-                              className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                            />
-                          </div>
+                            <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                              {hasAnyData && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void handleCopyText(transferWaText, 'Datos de transferencia')
+                                    }
+                                    className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                                  >
+                                    <Copy className="h-3 w-3" />
+                                    Copiar datos + monto
+                                  </button>
 
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                                <Upload className="h-3.5 w-3.5" />
-                                Subir imagen QR
-                                <input
-                                  type="file"
-                                  accept="image/png,image/jpeg,image/webp"
-                                  onChange={handleUploadTransferQr}
-                                  className="hidden"
-                                />
-                              </label>
-                              {transferConfig.qrImageDataUrl && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const nextCfg = { ...transferConfig, qrImageDataUrl: '' };
-                                    setTransferConfig(nextCfg);
-                                    saveTransferConfig(repair.ownerId, nextCfg);
-                                  }}
-                                  className="text-[11px] font-semibold text-red-600 hover:underline dark:text-red-400"
-                                >
-                                  Usar QR automático
-                                </button>
+                                  <a
+                                    href={transferWaHref}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex h-8 items-center gap-1 rounded-lg bg-emerald-600 px-2.5 text-[11px] font-semibold text-white hover:bg-emerald-700"
+                                  >
+                                    <MessageCircle className="h-3 w-3" />
+                                    Enviar por WhatsApp
+                                  </a>
+                                </>
                               )}
+
+                              <button
+                                type="button"
+                                onClick={() => setEditingTransferConfig((prev) => !prev)}
+                                className="inline-flex h-8 items-center gap-1 text-[11px] font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
+                              >
+                                <Settings2 className="h-3 w-3" />
+                                {editingTransferConfig
+                                  ? 'Ocultar configuración'
+                                  : 'Configurar Alias / QR Mercado Pago'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {editingTransferConfig && (
+                          <div className="mt-3 space-y-2.5 border-t border-slate-200 pt-3 dark:border-slate-800">
+                            <div className="rounded-lg bg-sky-50/70 px-2.5 py-2 text-[11px] text-slate-600 dark:bg-sky-950/30 dark:text-slate-300">
+                              Para que funcione con el escáner de <strong>Mercado Pago</strong>, subí la imagen de <strong>Tu QR</strong> (descargada desde la app de Mercado Pago o tu banco) o pegá un <strong>Link de pago</strong> (<code>mpago.la/...</code>).
+                            </div>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              <input
+                                type="text"
+                                value={transferConfig.alias}
+                                onChange={(e) =>
+                                  setTransferConfig((p) => ({ ...p, alias: e.target.value }))
+                                }
+                                placeholder="Alias (ej: taller.th3bnb)"
+                                className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                              />
+                              <input
+                                type="text"
+                                value={transferConfig.cbu}
+                                onChange={(e) =>
+                                  setTransferConfig((p) => ({ ...p, cbu: e.target.value }))
+                                }
+                                placeholder="CBU / CVU (22 dígitos)"
+                                className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 font-mono-num text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                              />
+                              <input
+                                type="text"
+                                value={transferConfig.holder}
+                                onChange={(e) =>
+                                  setTransferConfig((p) => ({ ...p, holder: e.target.value }))
+                                }
+                                placeholder="Nombre del titular"
+                                className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                              />
+                              <input
+                                type="url"
+                                value={transferConfig.paymentLink}
+                                onChange={(e) =>
+                                  setTransferConfig((p) => ({ ...p, paymentLink: e.target.value }))
+                                }
+                                placeholder="Link de pago MP (https://mpago.la/...)"
+                                className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                              />
                             </div>
 
-                            <button
-                              type="button"
-                              onClick={handleSaveTransferConfig}
-                              className="h-8 rounded-lg bg-[#0072BB] px-3 text-[11px] font-semibold text-white hover:bg-[#005f9c]"
-                            >
-                              Guardar datos
-                            </button>
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                                  <Upload className="h-3.5 w-3.5" />
+                                  Subir captura QR (Mercado Pago / Banco)
+                                  <input
+                                    type="file"
+                                    accept="image/png,image/jpeg,image/webp"
+                                    onChange={handleUploadTransferQr}
+                                    className="hidden"
+                                  />
+                                </label>
+                                {transferConfig.qrImageDataUrl && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const nextCfg = { ...transferConfig, qrImageDataUrl: '' };
+                                      setTransferConfig(nextCfg);
+                                      saveTransferConfig(repair.ownerId, nextCfg);
+                                    }}
+                                    className="text-[11px] font-semibold text-red-600 hover:underline dark:text-red-400"
+                                  >
+                                    Quitar QR
+                                  </button>
+                                )}
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={handleSaveTransferConfig}
+                                className="h-8 rounded-lg bg-[#0072BB] px-3 text-[11px] font-semibold text-white hover:bg-[#005f9c]"
+                              >
+                                Guardar datos
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   <div className="flex justify-end">
                     <button
