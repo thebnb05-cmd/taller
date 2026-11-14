@@ -165,6 +165,46 @@ const SMARTWATCH_SIZE_OPTIONS = [
   'Rectangular estándar',
   'Otro',
 ];
+const HEADPHONES_ACCESSORIES = [
+  'Estuche de carga',
+  'Cable USB / Tipo C',
+  'Cable Auxiliar 3.5mm',
+  'Almohadillas extra',
+  'Adaptador / Dongle',
+  'Caja',
+  'Otro',
+];
+const HEADPHONES_BRAND_SUGGESTIONS = [
+  'Apple',
+  'Samsung',
+  'Sony',
+  'JBL',
+  'Xiaomi',
+  'Beats',
+  'HyperX',
+  'Logitech',
+  'Redragon',
+  'QCY',
+  'Soundpeats',
+  'Genérico',
+];
+const HEADPHONES_MODEL_SUGGESTIONS = [
+  'AirPods / AirPods Pro',
+  'Galaxy Buds',
+  'JBL Tune / Wave',
+  'Sony WH / WF',
+  'Redmi Buds',
+  'QCY T13 / HT05',
+  'Vincha Gamer',
+];
+const HEADPHONES_FORMAT_OPTIONS = [
+  'In-ear TWS (Bluetooth)',
+  'Vincha Bluetooth (Over/On-ear)',
+  'Vincha Gamer (Cable / USB)',
+  'Deportivos (Band / Neck)',
+  'Cableados 3.5mm / Tipo C',
+  'Otro',
+];
 
 export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   open,
@@ -295,6 +335,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   const isDesktopPc = deviceType === 'PC de escritorio';
   const isSpeaker = deviceType === 'Parlante';
   const isSmartwatch = deviceType === 'Smartwatch';
+  const isHeadphones = deviceType === 'Auriculares';
   const showCapacity =
     deviceType === 'Celular' || deviceType === 'Tablet' || deviceType === 'Smartwatch';
 
@@ -416,7 +457,8 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
         brand: cleanBrand,
         model: cleanModel,
         color: clampStr(color, 60),
-        capacity: showCapacity || isSpeaker || isConsole ? clampStr(capacity, 40) : '',
+        capacity:
+          showCapacity || isSpeaker || isConsole || isHeadphones ? clampStr(capacity, 40) : '',
         imei: clampStr(imei, 80),
         problem: cleanProblem,
         priority,
@@ -549,7 +591,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                               ? 'Consola · 500 GB'
                               : opt.type === 'Smartwatch'
                                 ? '44 / 45 mm'
-                                : '128 GB'
+                                : opt.type === 'Auriculares'
+                                  ? 'In-ear TWS (Bluetooth)'
+                                  : '128 GB'
                         );
                       }
                       setDeviceType(opt.type);
@@ -719,7 +763,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                             ? 'console-brands-datalist'
                             : isSmartwatch
                               ? 'smartwatch-brands-datalist'
-                              : undefined
+                              : isHeadphones
+                                ? 'headphones-brands-datalist'
+                                : undefined
                       }
                       value={customBrand}
                       onChange={(e) => setCustomBrand(e.target.value)}
@@ -730,7 +776,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                             ? 'Ej: Sony PlayStation, Xbox, Nintendo...'
                             : isSmartwatch
                               ? 'Ej: Apple, Samsung, Xiaomi, Amazfit...'
-                              : `Marca de ${deviceType}`
+                              : isHeadphones
+                                ? 'Ej: Apple, JBL, Sony, Xiaomi, HyperX...'
+                                : `Marca de ${deviceType}`
                       }
                       className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     />
@@ -751,6 +799,13 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                     {isSmartwatch && (
                       <datalist id="smartwatch-brands-datalist">
                         {SMARTWATCH_BRAND_SUGGESTIONS.map((b) => (
+                          <option key={b} value={b} />
+                        ))}
+                      </datalist>
+                    )}
+                    {isHeadphones && (
+                      <datalist id="headphones-brands-datalist">
+                        {HEADPHONES_BRAND_SUGGESTIONS.map((b) => (
                           <option key={b} value={b} />
                         ))}
                       </datalist>
@@ -798,7 +853,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                           ? 'console-models-datalist'
                           : isSmartwatch
                             ? 'smartwatch-models-datalist'
-                            : undefined
+                            : isHeadphones
+                              ? 'headphones-models-datalist'
+                              : undefined
                       }
                       value={customModel}
                       onChange={(e) => setCustomModel(e.target.value)}
@@ -809,7 +866,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                             ? 'Ej: PS4 Slim, PS5, DualSense, Xbox Series S...'
                             : isSmartwatch
                               ? 'Ej: Watch Series 8, Galaxy Watch 5, Amazfit GTS...'
-                              : `Modelo de ${deviceType}`
+                              : isHeadphones
+                                ? 'Ej: AirPods Pro, Galaxy Buds, JBL Tune 510...'
+                                : `Modelo de ${deviceType}`
                       }
                       className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     />
@@ -823,6 +882,13 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                     {isSmartwatch && (
                       <datalist id="smartwatch-models-datalist">
                         {SMARTWATCH_MODEL_SUGGESTIONS.map((m) => (
+                          <option key={m} value={m} />
+                        ))}
+                      </datalist>
+                    )}
+                    {isHeadphones && (
+                      <datalist id="headphones-models-datalist">
+                        {HEADPHONES_MODEL_SUGGESTIONS.map((m) => (
                           <option key={m} value={m} />
                         ))}
                       </datalist>
@@ -868,10 +934,10 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                 />
               </div>
 
-              {(showCapacity || isSpeaker || isConsole) && (
+              {(showCapacity || isSpeaker || isConsole || isHeadphones) && (
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                    {isSpeaker
+                    {isSpeaker || isHeadphones
                       ? 'Tipo / Formato'
                       : isConsole
                         ? 'Edición / Capacidad'
@@ -886,11 +952,13 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                   >
                     {(isSpeaker
                       ? SPEAKER_FORMAT_OPTIONS
-                      : isConsole
-                        ? CONSOLE_EDITION_OPTIONS
-                        : isSmartwatch
-                          ? SMARTWATCH_SIZE_OPTIONS
-                          : CAPACITY_OPTIONS
+                      : isHeadphones
+                        ? HEADPHONES_FORMAT_OPTIONS
+                        : isConsole
+                          ? CONSOLE_EDITION_OPTIONS
+                          : isSmartwatch
+                            ? SMARTWATCH_SIZE_OPTIONS
+                            : CAPACITY_OPTIONS
                     ).map((opt) => (
                       <option key={opt} value={opt}>
                         {opt}
@@ -900,7 +968,11 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                 </div>
               )}
 
-              <div className={showCapacity || isSpeaker || isConsole ? 'sm:col-span-2' : ''}>
+              <div
+                className={
+                  showCapacity || isSpeaker || isConsole || isHeadphones ? 'sm:col-span-2' : ''
+                }
+              >
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
                   {deviceType === 'Celular' || deviceType === 'Tablet'
                     ? 'IMEI'
@@ -1108,9 +1180,11 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                     ? SPEAKER_ACCESSORIES
                     : isSmartwatch
                       ? SMARTWATCH_ACCESSORIES
-                      : isNotebook
-                        ? NOTEBOOK_ACCESSORIES
-                        : DEFAULT_ACCESSORIES
+                      : isHeadphones
+                        ? HEADPHONES_ACCESSORIES
+                        : isNotebook
+                          ? NOTEBOOK_ACCESSORIES
+                          : DEFAULT_ACCESSORIES
                 ).map((acc) => {
                   const active = accessories.includes(acc);
                   return (

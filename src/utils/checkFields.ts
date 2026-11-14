@@ -65,6 +65,18 @@ export const PHYSICAL_SMARTWATCH_FIELDS: CheckFieldOption[] = [
   { key: 'Reparación anterior', label: 'Reparación anterior', options: ['No', 'Sí'] },
 ];
 
+export const PHYSICAL_HEADPHONES_FIELDS: CheckFieldOption[] = [
+  { key: 'Estuche / Caja de carga', label: 'Estuche / Caja de carga', options: ['OK', 'Rayado', 'Roto', 'Sin estuche'] },
+  { key: 'Carcasa / Auriculares', label: 'Carcasa / Auriculares', options: ['OK', 'Rayada', 'Rota', 'Despegada'] },
+  { key: 'Almohadillas / Gomas', label: 'Almohadillas / Gomas', options: ['OK', 'Gastadas', 'Faltantes', 'No tiene'] },
+  { key: 'Vincha / Diadema', label: 'Vincha / Diadema', options: ['OK', 'Floja', 'Quebrada', 'No tiene'] },
+  { key: 'Pines / Puerto de carga', label: 'Pines / Puerto de carga', options: ['OK', 'Sucios', 'Hundidos', 'Dañados'] },
+  { key: 'Cable / Ficha Jack 3.5', label: 'Cable / Ficha Jack 3.5', options: ['OK', 'Pelado', 'Doblada', 'No tiene'] },
+  { key: 'Malla / Rejilla acústica', label: 'Malla / Rejilla acústica', options: ['OK', 'Sucia / Tapada', 'Rota'] },
+  { key: 'Humedad / Óxido', label: 'Humedad / Óxido', options: ['No', 'Leve', 'Severa'] },
+  { key: 'Reparación anterior', label: 'Reparación anterior', options: ['No', 'Sí'] },
+];
+
 export const FUNCTIONAL_DEFAULT_FIELDS: CheckFieldOption[] = [
   { key: 'Enciende', label: 'Enciende', options: ['OK', 'No', 'No probado'] },
   { key: 'Touch / Táctil', label: 'Touch / Táctil', options: ['OK', 'Falla', 'No probado'] },
@@ -129,6 +141,17 @@ export const FUNCTIONAL_SMARTWATCH_FIELDS: CheckFieldOption[] = [
   { key: 'Vibración', label: 'Vibración', options: ['OK', 'Falla', 'No probado'] },
 ];
 
+export const FUNCTIONAL_HEADPHONES_FIELDS: CheckFieldOption[] = [
+  { key: 'Enciende / Vincula BT', label: 'Enciende / Vincula BT', options: ['OK', 'No enciende', 'No vincula', 'Cableado'] },
+  { key: 'Sonido lado Izq. (L)', label: 'Sonido lado Izq. (L)', options: ['OK', 'Bajo', 'Distorsiona', 'Sin audio'] },
+  { key: 'Sonido lado Der. (R)', label: 'Sonido lado Der. (R)', options: ['OK', 'Bajo', 'Distorsiona', 'Sin audio'] },
+  { key: 'Carga del estuche', label: 'Carga del estuche', options: ['OK', 'No carga', 'Dura poco', 'Sin estuche'] },
+  { key: 'Carga de auriculares', label: 'Carga de auriculares', options: ['OK', 'No carga L', 'No carga R', 'No cargan'] },
+  { key: 'Micrófono / Llamadas', label: 'Micrófono / Llamadas', options: ['OK', 'Falla', 'No tiene'] },
+  { key: 'Táctil / Botones', label: 'Táctil / Botones', options: ['OK', 'Falla', 'No probado'] },
+  { key: 'Cancelación ruido (ANC)', label: 'Cancelación ruido (ANC)', options: ['OK', 'Falla', 'No tiene'] },
+];
+
 export function getPhysicalCheckFields(deviceType?: string): CheckFieldOption[] {
   if (deviceType === 'PC de escritorio') {
     return PHYSICAL_PC_FIELDS;
@@ -141,6 +164,9 @@ export function getPhysicalCheckFields(deviceType?: string): CheckFieldOption[] 
   }
   if (deviceType === 'Smartwatch') {
     return PHYSICAL_SMARTWATCH_FIELDS;
+  }
+  if (deviceType === 'Auriculares') {
+    return PHYSICAL_HEADPHONES_FIELDS;
   }
   if (deviceType === 'Notebook') {
     return PHYSICAL_SIMPLE_FIELDS;
@@ -157,6 +183,9 @@ export function getFunctionalCheckFields(deviceType?: string): CheckFieldOption[
   }
   if (deviceType === 'Smartwatch') {
     return FUNCTIONAL_SMARTWATCH_FIELDS;
+  }
+  if (deviceType === 'Auriculares') {
+    return FUNCTIONAL_HEADPHONES_FIELDS;
   }
   if (deviceType === 'Notebook') {
     return FUNCTIONAL_NOTEBOOK_FIELDS;
