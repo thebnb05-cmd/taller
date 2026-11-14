@@ -787,3 +787,217 @@ export async function downloadClientRepairReceiptPdf(params: {
   return { fileName, blob };
 }
 
+export async function buildBatchRepairReceiptPdf(params: {
+  repairs: RepairRecord[];
+  batchRef: string;
+  profile?: WorkshopProfile | null;
+}): Promise<{ doc: jsPDF; fileName: string; blob: Blob }> {
+  const { repairs, batchRef, profile } = params;
+  const brand = resolveBrand(profile);
+  const first = repairs[0];
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 14;
+  const contentWidth = pageWidth - margin * 2;
+
+  doc.setFillColor(0, 114, 187);
+  doc.rect(0, 0, pageWidth, 6, 'F');
+
+  doc.setFillColor(224, 242, 254);
+  doc.roundedRect(margin, 10, 64, 5.5, 1.5, 1.5, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(0, 114, 187);
+  doc.text('BOLETA CLIENTE · INGRESO MÚLTIPLE', margin + 2, 13.8);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(15);
+  doc.setTextColor(15, 23, 42);
+  doc.text(brand.brandName, margin, 21.5);
+
+  const subParts = [brand.businessAddress, brand.businessPhone ? `Tel: ${brand.businessPhone}` : '']
+    .filter(Boolean)
+    .join(' · ');
+  if (subParts) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.2);
+    doc.setTextColor(71, 85, 105);
+    doc.text(subParts, margin, 26.5);
+  }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`Ref. ${batchRef || 'LOTE'}`, pageWidth - margin, 15, { align: 'right' });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.8);
+  doc.setTextColor(0, 114, 187);
+  doc.text(`${repairs.length} equipos ingresados`, pageWidth - margin, 19.8, { align: 'right' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.2);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Ingreso: ${formatDateShort(first?.dateIn)}`, pageWidth - margin, 24.3, {
+    align: 'right',
+  });
+
+  doc.setDrawColor(226, 232, 240);
+  doc.line(margin, 30, pageWidth - margin, 30);
+
+  let cursorY = 34;
+
+  // Client summary card
+  const clientInfo = [
+    first?.clientName || 'Cliente',
+    first?.clientPhone ? `Tel: ${first.clientPhone}` : '',
+    first?.clientDni ? `DNI: ${first.clientDni}` : '',
+    first?.clientAddress ? `Dir: ${first.clientAddress}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  const clientWrapped = doc.splitTextToSize(clientInfo, contentWidth - 6);
+  const clientH = 10 + clientWrapped.length * 4;
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(margin, cursorY, contentWidth, clientH, 2, 2, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('DATOS DEL CLIENTE / GREMIO', margin + 3, cursorY + 4.8);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(15, 23, 42);
+  doc.text(clientWrapped, margin + 3, cursorY + 9.6);
+
+  cursorY += clientH + 4;
+
+  autoTable(doc, {
+    startY: cursorY,
+    margin: { left: margin, right: margin },
+    theme: 'grid',
+    headStyles: { fillColor: [0, 114, 187], textColor: 255, fontSize: 8 },
+    bodyStyles: { fontSize: 7.8, textColor: [30, 41, 59], valign: 'top' },
+    head: [['Orden / Seg.', 'Equipo', 'Falla y Accesorios', 'Presup.', 'Seña', 'Saldo']],
+    body: repairs.map((r) => {
+      const acc =
+        r.accessories && r.accessories.length > 0
+          ? r.accessories.join(', ')
+          : r.consoleAccessories
+            ? Object.entries(r.consoleAccessories)
+                .filter(([, v]) => v === 'Sí')
+                .map(([k]) => k)
+                .join(', ')
+            : '';
+      const specs = [r.color, r.capacity, r.imei ? `IMEI/Serie: ${r.imei}` : '']
+        .filter(Boolean)
+        .join(' · ');
+      const pending = Math.max(0, Number(r.price || 0) - Number(r.deposit || 0));
+      return [
+        `${r.code}\n${r.trackingCode}`,
+        `${r.deviceType} · ${r.brand} ${r.model}${specs ? `\n${specs}` : ''}`,
+        `${r.problem || 'Sin detalle'}${acc ? `\nAcc: ${acc}` : ''}`,
+        formatCurrency(r.price),
+        formatCurrency(r.deposit),
+        formatCurrency(pending),
+      ];
+    }),
+    columnStyles: {
+      0: { cellWidth: 24, fontStyle: 'bold' },
+      3: { halign: 'right', cellWidth: 21 },
+      4: { halign: 'right', cellWidth: 20 },
+      5: { halign: 'right', fontStyle: 'bold', cellWidth: 21 },
+    },
+  });
+
+  cursorY = getFinalY(doc, cursorY + 30) + 5;
+
+  const totalBudget = repairs.reduce((s, r) => s + Number(r.price || 0), 0);
+  const totalDeposit = repairs.reduce((s, r) => s + Number(r.deposit || 0), 0);
+  const totalPending = Math.max(0, totalBudget - totalDeposit);
+
+  if (cursorY > pageHeight - 60) {
+    doc.addPage();
+    cursorY = 16;
+  }
+
+  doc.setDrawColor(203, 213, 225);
+  doc.line(margin, cursorY, pageWidth - margin, cursorY);
+  doc.line(margin, cursorY + 15, pageWidth - margin, cursorY + 15);
+
+  const third = contentWidth / 3;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Total Presupuesto', margin + third * 0.5, cursorY + 5.2, { align: 'center' });
+  doc.text('Total Seña / Anticipo', margin + third * 1.5, cursorY + 5.2, { align: 'center' });
+  doc.text('Saldo Pendiente Total', margin + third * 2.5, cursorY + 5.2, { align: 'center' });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.text(formatCurrency(totalBudget), margin + third * 0.5, cursorY + 11.2, { align: 'center' });
+  doc.setTextColor(4, 120, 87);
+  doc.text(formatCurrency(totalDeposit), margin + third * 1.5, cursorY + 11.2, { align: 'center' });
+  doc.setTextColor(15, 23, 42);
+  doc.text(formatCurrency(totalPending), margin + third * 2.5, cursorY + 11.2, { align: 'center' });
+
+  cursorY += 20;
+
+  const termsText = (profile?.receiptTerms ?? DEFAULT_RECEIPT_TERMS).trim();
+  if (termsText) {
+    const termsLines = doc.splitTextToSize(termsText, contentWidth - 6);
+    const termsH = Math.max(12, 8 + termsLines.length * 3.1);
+    if (cursorY + termsH > pageHeight - 30) {
+      doc.addPage();
+      cursorY = 16;
+    }
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(margin, cursorY, contentWidth, termsH, 2, 2, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.2);
+    doc.setTextColor(51, 65, 85);
+    doc.text('TÉRMINOS Y CONDICIONES', margin + 3, cursorY + 4.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.6);
+    doc.setTextColor(71, 85, 105);
+    doc.text(termsLines, margin + 3, cursorY + 8);
+    cursorY += termsH + 6;
+  }
+
+  if (cursorY > pageHeight - 25) {
+    doc.addPage();
+    cursorY = 18;
+  }
+
+  const sigW = 62;
+  const sigX = pageWidth - margin - sigW;
+  doc.setDrawColor(148, 163, 184);
+  doc.line(sigX, cursorY + 10, sigX + sigW, cursorY + 10);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text('Firma y aclaración del cliente', sigX + sigW / 2, cursorY + 14, { align: 'center' });
+
+  addPageFooters(doc, brand.brandName);
+
+  const safeBatch = (batchRef || 'lote').replace(/[^a-zA-Z0-9_-]/g, '-');
+  const fileName = `boleta-lote-${safeBatch}.pdf`;
+  const blob = doc.output('blob');
+  return { doc, fileName, blob };
+}
+
+export async function downloadBatchRepairReceiptPdf(params: {
+  repairs: RepairRecord[];
+  batchRef: string;
+  profile?: WorkshopProfile | null;
+}): Promise<{ fileName: string; blob: Blob }> {
+  const { doc, fileName, blob } = await buildBatchRepairReceiptPdf(params);
+  doc.save(fileName);
+  return { fileName, blob };
+}
+

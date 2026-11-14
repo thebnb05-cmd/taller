@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, ChevronLeft, UserCheck } from 'lucide-react';
+import { Check, ChevronLeft, Layers, Plus, Trash2, UserCheck } from 'lucide-react';
 import {
   clampStr,
   generateDocId,
@@ -28,6 +28,7 @@ import {
   generateTrackingCode,
   todayISO,
 } from '../utils/formatters';
+import { appendBatchRefToNotes, generateBatchRef } from '../utils/batchRef';
 import { getFunctionalCheckFields, getPhysicalCheckFields } from '../utils/checkFields';
 import { ModalShell } from './ModalShell';
 import { PatternLock } from './PatternLock';
@@ -37,12 +38,40 @@ interface NewRepairModalProps {
   open: boolean;
   onClose: () => void;
   onCreated?: (repair: RepairRecord) => void;
+  onBatchCreated?: (repairs: RepairRecord[], batchRef: string) => void;
   ownerId: string;
   profile?: WorkshopProfile | null;
   clients: ClientRecord[];
   repairs: RepairRecord[];
   products: ProductRecord[];
   preselectedClient?: ClientRecord | null;
+}
+
+interface DraftRepairItem {
+  id: string;
+  deviceType: DeviceType;
+  deviceIcon: string;
+  brand: string;
+  model: string;
+  color: string;
+  capacity: string;
+  imei: string;
+  problem: string;
+  priority: 'alta' | 'media' | 'baja';
+  dateIn: string;
+  dateEst: string;
+  selectedPartIds: string[];
+  budget: number;
+  deposit: number;
+  status: RepairStatus;
+  accessories: string[];
+  consoleAcc: Record<string, string>;
+  physicalCheck: Record<string, string>;
+  functionalCheck: Record<string, string>;
+  notes: string;
+  securityTab: 'pin' | 'pattern';
+  securityPin: string;
+  securityPattern: number[];
 }
 
 const DEFAULT_ACCESSORIES = [
@@ -253,6 +282,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   open,
   onClose,
   onCreated,
+  onBatchCreated,
   ownerId,
   profile,
   clients,
@@ -264,6 +294,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   const [step, setStep] = useState<'device' | 'details'>('device');
   const [deviceType, setDeviceType] = useState<DeviceType | ''>('');
   const [deviceIcon, setDeviceIcon] = useState('📱');
+  const [queuedItems, setQueuedItems] = useState<DraftRepairItem[]>([]);
 
   const [clientId, setClientId] = useState('');
   const [clientName, setClientName] = useState('');
@@ -325,6 +356,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     setStep('device');
     setDeviceType('');
     setDeviceIcon('📱');
+    setQueuedItems([]);
     if (preselectedClient) {
       setClientId(preselectedClient.id);
       setClientName(preselectedClient.name);
@@ -371,6 +403,38 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     setSecurityPin('');
     setSecurityPattern([]);
   }, [open, preselectedClient]);
+
+  const resetEquipmentFields = () => {
+    setDeviceType('');
+    setDeviceIcon('📱');
+    setBrand('Samsung');
+    setCustomBrand('');
+    setModelSelect('');
+    setCustomModel('');
+    setColor('');
+    setCapacity('128 GB');
+    setImei('');
+    setProblem('');
+    setSelectedPartIds([]);
+    setPrice('');
+    setDeposit('');
+    setStatus('recibido');
+    setAccessories([]);
+    setConsoleAcc({
+      'Joystick 1': 'No',
+      'Joystick 2': 'No',
+      'Cable HDMI': 'No',
+      'Cable de poder': 'No',
+      'Cable USB / Carga': 'No',
+      'Fuente / Transformador': 'No',
+    });
+    setPhysicalCheck({});
+    setFunctionalCheck({});
+    setNotes('');
+    setSecurityTab('pin');
+    setSecurityPin('');
+    setSecurityPattern([]);
+  };
 
   const isNotebookOrCustom =
     deviceType === 'Notebook' ||
@@ -422,15 +486,18 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     );
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const buildCurrentDraft = (): DraftRepairItem | null => {
     if (!deviceType) {
       notify('Seleccioná un tipo de equipo.', 'error');
-      return;
+      return null;
     }
     if (!clientName.trim()) {
       notify('Ingresá el nombre del cliente.', 'error');
-      return;
+      return null;
+    }
+    if (!problem.trim()) {
+      notify('Describí el problema reportado del equipo.', 'error');
+      return null;
     }
 
     const finalBrand = isNotebookOrCustom
@@ -445,22 +512,72 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
       ? customModel.trim() || modelSelect || deviceType
       : modelSelect;
 
-    if (!problem.trim()) {
-      notify('Describí el problema reportado del equipo.', 'error');
+    return {
+      id: generateDocId('draft'),
+      deviceType,
+      deviceIcon,
+      brand: clampStr(finalBrand, 80) || 'Genérico',
+      model: clampStr(finalModel, 120) || deviceType,
+      color: clampStr(color, 60),
+      capacity:
+        showCapacity || isSpeaker || isConsole || isHeadphones || isNotebook
+          ? clampStr(capacity, 40)
+          : '',
+      imei: clampStr(imei, 80),
+      problem: clampStr(problem, 2000),
+      priority,
+      dateIn: clampStr(dateIn || todayISO(), 40),
+      dateEst: clampStr(dateEst, 40),
+      selectedPartIds: [...selectedPartIds],
+      budget: totalBudget,
+      deposit: Math.max(0, Number(deposit || 0)),
+      status,
+      accessories: isConsole ? [] : accessories.slice(0, 30),
+      consoleAcc: { ...consoleAcc },
+      physicalCheck: { ...physicalCheck },
+      functionalCheck: { ...functionalCheck },
+      notes: clampStr(notes, 1800),
+      securityTab,
+      securityPin: securityTab === 'pin' ? clampStr(securityPin, 80) : '',
+      securityPattern: securityTab === 'pattern' ? securityPattern.slice(0, 9) : [],
+    };
+  };
+
+  const handleAddAnotherDevice = () => {
+    const draft = buildCurrentDraft();
+    if (!draft) return;
+    const nextCount = queuedItems.length + 1;
+    setQueuedItems((prev) => [...prev, draft]);
+    resetEquipmentFields();
+    setStep('device');
+    notify(`Equipo #${nextCount} sumado al lote. Elegí el siguiente equipo para ${clientName.trim()}.`);
+  };
+
+  const handleRemoveQueuedItem = (draftId: string) => {
+    setQueuedItems((prev) => prev.filter((item) => item.id !== draftId));
+  };
+
+  const saveAllRepairs = async (includeCurrentForm: boolean) => {
+    let itemsToSave: DraftRepairItem[] = [...queuedItems];
+
+    if (includeCurrentForm) {
+      const currentDraft = buildCurrentDraft();
+      if (!currentDraft) return;
+      itemsToSave = [...itemsToSave, currentDraft];
+    }
+
+    if (itemsToSave.length === 0) {
+      notify('Agregá al menos un equipo para guardar.', 'error');
+      return;
+    }
+    if (!clientName.trim()) {
+      notify('Ingresá el nombre del cliente.', 'error');
       return;
     }
 
     setSaving(true);
     try {
-      const repairId = generateDocId('repairs');
-      const repairCode = clampStr(generateRepairCode(repairs), 40);
-      const trackingCode = clampStr(generateTrackingCode(), 40);
-      const budget = totalBudget;
-      const advance = Math.max(0, Number(deposit || 0));
-      const selectedParts = products.filter((p) => selectedPartIds.includes(p.id)).slice(0, 30);
-
       let resolvedClientId = clientId;
-
       if (!resolvedClientId) {
         const matched = clients.find(
           (c) => c.name.trim().toLowerCase() === clientName.trim().toLowerCase()
@@ -484,120 +601,153 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
         }
       }
 
-      const defaultProgress = STATUS_META[status]?.defaultProgress ?? 15;
-      const paymentStatus =
-        budget === 0 ? 'pendiente' : advance >= budget ? 'pagado' : advance > 0 ? 'parcial' : 'pendiente';
-      const cleanBrand = clampStr(finalBrand, 80) || 'Genérico';
-      const cleanModel = clampStr(finalModel, 120) || deviceType;
-      const cleanProblem = clampStr(problem, 2000);
-      const cleanDateIn = clampStr(dateIn || todayISO(), 40);
-      const cleanDateEst = clampStr(dateEst, 40);
-
-      const repairPayload: Omit<RepairRecord, 'id' | 'createdAt' | 'updatedAt'> = {
-        ownerId,
-        code: repairCode,
-        trackingCode,
-        clientId: clampStr(resolvedClientId, 128),
-        clientName: clampStr(clientName, 160),
-        clientPhone: clampStr(clientPhone, 60),
-        clientDni: clampStr(clientDni, 40),
-        clientEmail: clampStr(clientEmail, 200),
-        clientAddress: clampStr(clientAddress, 240),
-        deviceType: clampStr(deviceType, 60),
-        deviceIcon: clampStr(deviceIcon, 16),
-        brand: cleanBrand,
-        model: cleanModel,
-        color: clampStr(color, 60),
-        capacity:
-          showCapacity || isSpeaker || isConsole || isHeadphones || isNotebook
-            ? clampStr(capacity, 40)
-            : '',
-        imei: clampStr(imei, 80),
-        problem: cleanProblem,
-        priority,
-        status,
-        progress: defaultProgress,
-        dateIn: cleanDateIn,
-        dateEst: cleanDateEst,
-        price: budget,
-        deposit: advance,
-        paidAmount: advance,
-        paymentStatus,
-        partIds: selectedParts.map((p) => p.id),
-        partNames: selectedParts.map((p) => p.name),
-        accessories: isConsole ? [] : accessories.slice(0, 30),
-        consoleAccessories: isConsole ? consoleAcc : undefined,
-        physicalCheck,
-        functionalCheck,
-        securityType:
-          securityTab === 'pattern' && securityPattern.length > 0
-            ? 'pattern'
-            : securityPin.trim()
-            ? 'pin'
-            : 'none',
-        securityPin: securityTab === 'pin' ? clampStr(securityPin, 80) : '',
-        securityPattern: securityTab === 'pattern' ? securityPattern.slice(0, 9) : [],
-        notes: clampStr(notes, 2000),
-        workDetail: '',
-        checkoutState: '',
-      };
-
-      const nowIso = new Date().toISOString();
-
-      await upsertRow(
-        'repairs',
-        stripUndefined({
-          id: repairId,
-          ...repairPayload,
-          createdAt: nowIso,
-          updatedAt: nowIso,
-        })
-      );
-
-      await upsertRow(
-        'public_tickets',
-        stripUndefined({
-          id: trackingCode,
-          ownerId,
-          repairId,
-          trackingCode,
-          repairCode,
-          businessName: clampStr(profile?.brandName || 'TH3 BNB Servicio Técnico', 80) || 'TH3 BNB Servicio Técnico',
-          businessPhone: clampStr(profile?.businessPhone, 50),
-          deviceType: clampStr(deviceType, 60),
-          brand: cleanBrand,
-          model: cleanModel,
-          status,
-          progress: defaultProgress,
-          dateIn: cleanDateIn,
-          dateEst: cleanDateEst,
-          problemSummary: cleanProblem,
-          workDetail: '',
-          price: budget,
-          deposit: advance,
-          updatedAt: nowIso,
-        })
-      );
-
-      // Deduct stock for used spare parts if trackStock is enabled
-      for (const part of selectedParts) {
-        if (part.trackStock && part.stock > 0) {
-          await updateRow('products', part.id, {
-            stock: Math.max(0, part.stock - 1),
-          });
-        }
+      const isBatch = itemsToSave.length > 1;
+      const batchRef = isBatch ? generateBatchRef(repairs) : '';
+      const runningRepairs: RepairRecord[] = [...repairs];
+      const stockRemaining = new Map<string, number>();
+      for (const p of products) {
+        stockRemaining.set(p.id, Number(p.stock || 0));
       }
 
-      notify(`Reparación ${repairCode} registrada con éxito.`);
-      const nowMs = Date.now();
-      const createdRepair: RepairRecord = {
-        id: repairId,
-        ...repairPayload,
-        createdAt: nowMs,
-        updatedAt: nowMs,
-      };
-      onClose();
-      onCreated?.(createdRepair);
+      const createdRepairs: RepairRecord[] = [];
+      const brandLabel =
+        clampStr(profile?.brandName || 'TH3 BNB Servicio Técnico', 80) || 'TH3 BNB Servicio Técnico';
+
+      for (let i = 0; i < itemsToSave.length; i++) {
+        const item = itemsToSave[i];
+        const repairId = generateDocId('repairs');
+        const repairCode = clampStr(generateRepairCode(runningRepairs), 40);
+        const trackingCode = clampStr(generateTrackingCode(), 40);
+        const selectedParts = products.filter((p) => item.selectedPartIds.includes(p.id)).slice(0, 30);
+        const defaultProgress = STATUS_META[item.status]?.defaultProgress ?? 15;
+        const paymentStatus =
+          item.budget === 0
+            ? 'pendiente'
+            : item.deposit >= item.budget
+              ? 'pagado'
+              : item.deposit > 0
+                ? 'parcial'
+                : 'pendiente';
+        const finalNotes = isBatch
+          ? clampStr(appendBatchRefToNotes(item.notes, batchRef, i + 1, itemsToSave.length), 2000)
+          : clampStr(item.notes, 2000);
+
+        const repairPayload: Omit<RepairRecord, 'id' | 'createdAt' | 'updatedAt'> = {
+          ownerId,
+          code: repairCode,
+          trackingCode,
+          clientId: clampStr(resolvedClientId, 128),
+          clientName: clampStr(clientName, 160),
+          clientPhone: clampStr(clientPhone, 60),
+          clientDni: clampStr(clientDni, 40),
+          clientEmail: clampStr(clientEmail, 200),
+          clientAddress: clampStr(clientAddress, 240),
+          deviceType: clampStr(item.deviceType, 60),
+          deviceIcon: clampStr(item.deviceIcon, 16),
+          brand: item.brand,
+          model: item.model,
+          color: item.color,
+          capacity: item.capacity,
+          imei: item.imei,
+          problem: item.problem,
+          priority: item.priority,
+          status: item.status,
+          progress: defaultProgress,
+          dateIn: item.dateIn,
+          dateEst: item.dateEst,
+          price: item.budget,
+          deposit: item.deposit,
+          paidAmount: item.deposit,
+          paymentStatus,
+          partIds: selectedParts.map((p) => p.id),
+          partNames: selectedParts.map((p) => p.name),
+          accessories: item.deviceType === 'Consola / joystick' ? [] : item.accessories,
+          consoleAccessories:
+            item.deviceType === 'Consola / joystick' ? item.consoleAcc : undefined,
+          physicalCheck: item.physicalCheck,
+          functionalCheck: item.functionalCheck,
+          securityType:
+            item.securityTab === 'pattern' && item.securityPattern.length > 0
+              ? 'pattern'
+              : item.securityPin.trim()
+                ? 'pin'
+                : 'none',
+          securityPin: item.securityTab === 'pin' ? item.securityPin : '',
+          securityPattern: item.securityTab === 'pattern' ? item.securityPattern : [],
+          notes: finalNotes,
+          workDetail: '',
+          checkoutState: '',
+        };
+
+        const nowIso = new Date().toISOString();
+        await upsertRow(
+          'repairs',
+          stripUndefined({
+            id: repairId,
+            ...repairPayload,
+            createdAt: nowIso,
+            updatedAt: nowIso,
+          })
+        );
+
+        await upsertRow(
+          'public_tickets',
+          stripUndefined({
+            id: trackingCode,
+            ownerId,
+            repairId,
+            trackingCode,
+            repairCode,
+            businessName: brandLabel,
+            businessPhone: clampStr(profile?.businessPhone, 50),
+            deviceType: clampStr(item.deviceType, 60),
+            brand: item.brand,
+            model: item.model,
+            status: item.status,
+            progress: defaultProgress,
+            dateIn: item.dateIn,
+            dateEst: item.dateEst,
+            problemSummary: item.problem,
+            workDetail: '',
+            price: item.budget,
+            deposit: item.deposit,
+            updatedAt: nowIso,
+          })
+        );
+
+        for (const part of selectedParts) {
+          const currentStock = stockRemaining.get(part.id) ?? 0;
+          if (part.trackStock && currentStock > 0) {
+            const nextStock = Math.max(0, currentStock - 1);
+            stockRemaining.set(part.id, nextStock);
+            await updateRow('products', part.id, { stock: nextStock });
+          }
+        }
+
+        const nowMs = Date.now();
+        const createdRepair: RepairRecord = {
+          id: repairId,
+          ...repairPayload,
+          createdAt: nowMs,
+          updatedAt: nowMs,
+        };
+        createdRepairs.push(createdRepair);
+        runningRepairs.push(createdRepair);
+      }
+
+      if (createdRepairs.length === 1) {
+        notify(`Reparación ${createdRepairs[0].code} registrada con éxito.`);
+        onClose();
+        onCreated?.(createdRepairs[0]);
+      } else {
+        notify(`Lote ${batchRef} guardado (${createdRepairs.length} órdenes creadas).`);
+        onClose();
+        if (onBatchCreated) {
+          onBatchCreated(createdRepairs, batchRef);
+        } else {
+          onCreated?.(createdRepairs[0]);
+        }
+      }
     } catch (err) {
       console.error(err);
       notify('No se pudo guardar la reparación.', 'error');
@@ -606,23 +756,95 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     }
   };
 
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await saveAllRepairs(true);
+  };
+
+  const queuedTotalBudget = useMemo(
+    () => queuedItems.reduce((sum, item) => sum + item.budget, 0),
+    [queuedItems]
+  );
+
+  const renderQueuedBatchSummary = () => {
+    if (queuedItems.length === 0) return null;
+    return (
+      <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3.5 dark:border-emerald-900/60 dark:bg-emerald-950/30">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Layers className="h-4 w-4 text-emerald-700 dark:text-emerald-300" />
+            <span className="text-xs font-bold text-emerald-950 dark:text-emerald-200">
+              Lote para {clientName.trim() || 'este cliente'} · {queuedItems.length}{' '}
+              {queuedItems.length === 1 ? 'equipo agregado' : 'equipos agregados'}
+            </span>
+          </div>
+          <span className="font-mono-num text-xs font-bold text-emerald-800 dark:text-emerald-300">
+            Subtotal lote: {formatCurrency(queuedTotalBudget)}
+          </span>
+        </div>
+        <div className="mt-2 space-y-1.5">
+          {queuedItems.map((item, idx) => (
+            <div
+              key={item.id}
+              className="flex items-center justify-between gap-2 rounded-xl border border-emerald-200/80 bg-white/90 px-2.5 py-1.5 text-xs dark:border-emerald-900/50 dark:bg-slate-900/80"
+            >
+              <div className="min-w-0 truncate text-slate-800 dark:text-slate-200">
+                <strong className="font-mono-num text-emerald-700 dark:text-emerald-300">
+                  #{idx + 1}
+                </strong>{' '}
+                {item.deviceIcon} {item.deviceType} · {item.brand} {item.model}
+                <span className="text-slate-500 dark:text-slate-400">
+                  {' '}
+                  — {item.problem}
+                </span>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="font-mono-num font-bold text-slate-900 dark:text-white">
+                  {formatCurrency(item.budget)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveQueuedItem(item.id)}
+                  title="Quitar equipo del lote"
+                  className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <ModalShell
       open={open}
       onClose={onClose}
-      title="Nueva reparación"
+      title={
+        queuedItems.length > 0
+          ? `Nueva reparación · Lote (${queuedItems.length + (step === 'details' ? 1 : 0)} equipos)`
+          : 'Nueva reparación'
+      }
       subtitle={
         step === 'device'
-          ? 'Paso 1 de 2 · Seleccioná el tipo de equipo'
+          ? queuedItems.length > 0
+            ? `Paso 1 de 2 · Elegí el próximo equipo para ${clientName.trim() || 'el mismo cliente'}`
+            : 'Paso 1 de 2 · Seleccioná el tipo de equipo'
           : `Paso 2 de 2 · ${deviceIcon} ${deviceType}`
       }
       maxWidth="3xl"
     >
       {step === 'device' ? (
         <div className="space-y-6">
+          {renderQueuedBatchSummary()}
+
           <div>
             <p className="mb-3 text-sm font-semibold text-slate-800 dark:text-slate-200">
-              ¿Qué equipo querés arreglar?
+              {queuedItems.length > 0
+                ? `¿Qué otro equipo querés agregar para ${clientName.trim() || 'este cliente'}?`
+                : '¿Qué equipo querés arreglar?'}
             </p>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               {DEVICE_OPTIONS.map((opt) => {
@@ -668,7 +890,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
             </div>
           </div>
 
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="flex flex-wrap justify-end gap-3 pt-2">
             <button
               type="button"
               onClick={onClose}
@@ -676,6 +898,19 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
             >
               Cancelar
             </button>
+            {queuedItems.length > 0 && (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => void saveAllRepairs(false)}
+                className="inline-flex h-11 items-center gap-1.5 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+              >
+                <Layers className="h-4 w-4" />
+                {saving
+                  ? 'Guardando...'
+                  : `Finalizar y emitir boleta (${queuedItems.length})`}
+              </button>
+            )}
             <button
               type="button"
               disabled={!deviceType}
@@ -688,22 +923,38 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="flex items-center justify-between rounded-2xl border border-sky-200 bg-sky-50/70 px-4 py-3 dark:border-sky-900/60 dark:bg-sky-950/30">
+          {renderQueuedBatchSummary()}
+
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-sky-200 bg-sky-50/70 px-4 py-3 dark:border-sky-900/60 dark:bg-sky-950/30">
             <div className="flex items-center gap-2.5">
               <span className="text-xl">{deviceIcon}</span>
               <div>
-                <div className="text-xs text-slate-500 dark:text-slate-400">Equipo seleccionado</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  {queuedItems.length > 0
+                    ? `Equipo #${queuedItems.length + 1} del lote`
+                    : 'Equipo seleccionado'}
+                </div>
                 <div className="text-sm font-bold text-slate-900 dark:text-white">{deviceType}</div>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setStep('device')}
-              className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-[#0072BB] hover:bg-sky-100 dark:text-sky-300 dark:hover:bg-sky-900/40"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-              Cambiar tipo
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleAddAnotherDevice}
+                className="inline-flex items-center gap-1 rounded-lg border border-[#0072BB]/30 bg-white px-3 py-1.5 text-xs font-semibold text-[#0072BB] hover:bg-sky-100 dark:border-sky-700/60 dark:bg-slate-900 dark:text-sky-300 dark:hover:bg-sky-900/40"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Sumar otro equipo
+              </button>
+              <button
+                type="button"
+                onClick={() => setStep('device')}
+                className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-[#0072BB] hover:bg-sky-100 dark:text-sky-300 dark:hover:bg-sky-900/40"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+                Cambiar tipo
+              </button>
+            </div>
           </div>
 
           <section className="space-y-3">
@@ -1449,20 +1700,33 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
             )}
           </section>
 
-          <div className="flex gap-3 border-t border-slate-100 pt-4 dark:border-slate-800">
+          <div className="flex flex-col gap-2.5 border-t border-slate-100 pt-4 sm:flex-row dark:border-slate-800">
             <button
               type="button"
               onClick={onClose}
-              className="h-11 flex-1 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="h-11 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               Cancelar
             </button>
             <button
+              type="button"
+              disabled={saving}
+              onClick={handleAddAnotherDevice}
+              className="inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-xl border border-[#0072BB] bg-sky-50 px-4 text-sm font-semibold text-[#0072BB] transition hover:bg-sky-100 disabled:opacity-60 dark:border-sky-400 dark:bg-sky-950/40 dark:text-sky-300 dark:hover:bg-sky-950/70"
+            >
+              <Plus className="h-4 w-4" />
+              Agregar otro equipo
+            </button>
+            <button
               type="submit"
               disabled={saving}
-              className="h-11 flex-1 rounded-xl bg-[#0072BB] text-sm font-semibold text-white transition hover:bg-[#005f9c] disabled:opacity-60"
+              className="inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-sm font-semibold text-white transition hover:bg-[#005f9c] disabled:opacity-60"
             >
-              {saving ? 'Guardando...' : 'Guardar reparación'}
+              {saving
+                ? 'Guardando...'
+                : queuedItems.length > 0
+                  ? `Guardar lote (${queuedItems.length + 1} equipos)`
+                  : 'Guardar reparación'}
             </button>
           </div>
         </form>

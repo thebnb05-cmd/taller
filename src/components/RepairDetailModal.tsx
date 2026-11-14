@@ -61,6 +61,7 @@ import {
   serializeWorkDetailAndMedia,
   type TechMediaItem,
 } from '../utils/techMedia';
+import { extractBatchRef } from '../utils/batchRef';
 import { buildTrackingUrl } from '../utils/tracking';
 import { getFunctionalCheckFields, getPhysicalCheckFields } from '../utils/checkFields';
 import { ModalShell } from './ModalShell';
@@ -74,6 +75,7 @@ interface RepairDetailModalProps {
   profile?: WorkshopProfile | null;
   initialTab?: 'detail' | 'edit' | 'receipt';
   justCreated?: boolean;
+  onOpenBatch?: (batchRef: string) => void;
   onClose: () => void;
 }
 
@@ -83,6 +85,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   profile,
   initialTab = 'detail',
   justCreated = false,
+  onOpenBatch,
   onClose,
 }) => {
   const { notify } = useToast();
@@ -629,6 +632,19 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
               Imprimir
             </button>
           </div>
+          {(() => {
+            const batchRef = extractBatchRef(repair.notes);
+            if (!batchRef || !onOpenBatch) return null;
+            return (
+              <button
+                type="button"
+                onClick={() => onOpenBatch(batchRef)}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 text-xs font-semibold text-[#0072BB] hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/50 dark:text-sky-300"
+              >
+                Boleta lote ({batchRef})
+              </button>
+            );
+          })()}
 
           <div className="flex items-center gap-2">
             <button

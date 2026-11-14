@@ -41,6 +41,7 @@ import type {
   WorkshopProfile,
 } from '../types/workshop';
 import { BrandMark } from './BrandMark';
+import { BatchReceiptModal } from './BatchReceiptModal';
 import { BrandSettingsModal } from './BrandSettingsModal';
 import { ClientDetailModal, NewClientModal } from './ClientModals';
 import { GlobalSearchBar } from './GlobalSearchBar';
@@ -198,6 +199,10 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   const [selectedRepairId, setSelectedRepairId] = useState<string | null>(null);
   const [justCreatedRepair, setJustCreatedRepair] = useState<RepairRecord | null>(null);
   const [repairModalInitialTab, setRepairModalInitialTab] = useState<'detail' | 'edit' | 'receipt'>('detail');
+  const [batchPrintData, setBatchPrintData] = useState<{
+    repairs: RepairRecord[];
+    batchRef: string;
+  } | null>(null);
 
   const [showClientModal, setShowClientModal] = useState(false);
   const [editClient, setEditClient] = useState<ClientRecord | null>(null);
@@ -677,6 +682,9 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
           setRepairModalInitialTab('receipt');
           setSelectedRepairId(created.id);
         }}
+        onBatchCreated={(createdList, batchRef) => {
+          setBatchPrintData({ repairs: createdList, batchRef });
+        }}
         ownerId={userId}
         profile={profile}
         clients={clients}
@@ -691,10 +699,32 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         profile={profile}
         initialTab={repairModalInitialTab}
         justCreated={Boolean(justCreatedRepair && justCreatedRepair.id === selectedRepairId)}
+        onOpenBatch={(batchRef) => {
+          const matching = repairs
+            .filter((r) => (r.notes || '').toUpperCase().includes(`[LOTE: ${batchRef.toUpperCase()}`))
+            .sort((a, b) => a.code.localeCompare(b.code));
+          if (matching.length > 0) {
+            setSelectedRepairId(null);
+            setBatchPrintData({ repairs: matching, batchRef });
+          }
+        }}
         onClose={() => {
           setSelectedRepairId(null);
           setJustCreatedRepair(null);
           setRepairModalInitialTab('detail');
+        }}
+      />
+
+      <BatchReceiptModal
+        open={Boolean(batchPrintData)}
+        repairs={batchPrintData?.repairs || []}
+        batchRef={batchPrintData?.batchRef || ''}
+        profile={profile}
+        onClose={() => setBatchPrintData(null)}
+        onSelectRepair={(r) => {
+          setBatchPrintData(null);
+          setRepairModalInitialTab('detail');
+          setSelectedRepairId(r.id);
         }}
       />
 

@@ -26,6 +26,7 @@ import type {
   RepairRecord,
   SaleRecord,
 } from '../types/workshop';
+import { extractBatchRef } from '../utils/batchRef';
 import {
   formatCompactCurrency,
   formatCurrency,
@@ -618,6 +619,7 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
           r.brand.toLowerCase().includes(q) ||
           r.model.toLowerCase().includes(q) ||
           (r.imei || '').toLowerCase().includes(q) ||
+          (r.notes || '').toLowerCase().includes(q) ||
           r.problem.toLowerCase().includes(q)
         );
       });
@@ -694,6 +696,7 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
           {filtered.map((r) => {
             const meta = getStatusMeta(r.status);
             const balance = Math.max(0, Number(r.price || 0) - Number(r.deposit || 0));
+            const batchRef = extractBatchRef(r.notes);
             return (
               <button
                 key={r.id}
@@ -703,10 +706,15 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                       <span className="font-mono-num font-bold text-slate-700 dark:text-slate-200">
                         {r.code}
                       </span>
+                      {batchRef && (
+                        <span className="rounded bg-sky-50 px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300">
+                          {batchRef}
+                        </span>
+                      )}
                       <span>·</span>
                       <span>{formatDateShort(r.dateIn)}</span>
                       <span>·</span>
