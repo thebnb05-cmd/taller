@@ -1,5 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import QRCode from 'qrcode';
+import { DEFAULT_RECEIPT_TERMS } from '../data/catalog';
 import type {
   ProductRecord,
   PurchaseRecord,
@@ -8,6 +10,8 @@ import type {
   WorkshopProfile,
 } from '../types/workshop';
 import { formatCurrency, formatDateShort, getStatusLabel, todayISO } from './formatters';
+import { parsePaymentInfo } from './payment';
+import { parseSalePaymentInfo } from './saleMeta';
 
 interface PdfBrandHeader {
   brandName: string;
@@ -119,9 +123,7 @@ export function downloadSalesSummaryPdf(params: {
   const repairIncome = repairs.reduce((s, r) => s + Number(r.price || 0), 0);
   const repairPaid = repairs.reduce((s, r) => s + Number(r.deposit || 0), 0);
   const salesIncome = sales.reduce((s, x) => s + Number(x.amount || 0), 0);
-  const salesPaid = sales
-    .filter((x) => x.status === 'cobrado')
-    .reduce((s, x) => s + Number(x.amount || 0), 0);
+  const salesPaid = sales.reduce((s, x) => s + parseSalePaymentInfo(x).deposit, 0);
   const totalRevenue = repairIncome + salesIncome;
   const totalCollected = repairPaid + salesPaid;
   const totalPending = Math.max(0, totalRevenue - totalCollected);
@@ -183,14 +185,22 @@ export function downloadSalesSummaryPdf(params: {
       headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 8 },
       bodyStyles: { fontSize: 8, textColor: [30, 41, 59] },
       head: [['Comprobante', 'Fecha', 'Cliente', 'Producto / Detalle', 'Estado', 'Monto']],
-      body: sortedSales.map((s) => [
-        s.invoice || '—',
-        formatDateShort(s.dueDate),
-        s.clientName,
-        s.productName ? `${s.productName}${s.quantity ? ` × ${s.quantity}` : ''}` : 'Venta general',
-        s.status === 'cobrado' ? 'Cobrado' : 'Pendiente',
-        formatCurrency(s.amount),
-      ]),
+      body: sortedSales.map((s) => {
+        const info = parseSalePaymentInfo(s);
+        const statusText = info.isPaid
+          ? `Cobrado${info.methodLabel ? ` (${info.methodLabel})` : ''}`
+          : info.deposit > 0
+            ? `Seña ${formatCurrency(info.deposit)}${info.methodLabel ? ` · ${info.methodLabel}` : ''}`
+            : `Pendiente${info.methodLabel ? ` (${info.methodLabel})` : ''}`;
+        return [
+          s.invoice || '—',
+          formatDateShort(s.dueDate),
+          s.clientName,
+          s.productName ? `${s.productName}${s.quantity ? ` × ${s.quantity}` : ''}` : 'Venta general',
+          statusText,
+          formatCurrency(s.amount),
+        ];
+      }),
       columnStyles: {
         5: { halign: 'right', fontStyle: 'bold' },
       },
@@ -380,3 +390,400 @@ export function downloadInventorySummaryPdf(params: {
   addPageFooters(doc, brand.brandName);
   doc.save(`resumen-inventario-${todayISO()}.pdf`);
 }
+
+async function toPngDataUrl(dataUrl: string): Promise<{ dataUrl: string; width: number; height: number } | null> {
+  if (!dataUrl || typeof Image === 'undefined') return null;
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const w = img.naturalWidth || img.width || 160;
+        const h = img.naturalHeight || img.height || 160;
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(null);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve({ dataUrl: canvas.toDataURL('image/png'), width: w, height: h });
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
+}
+
+export async function buildClientRepairReceiptPdf(params: {
+  repair: RepairRecord;
+  profile?: WorkshopProfile | null;
+  trackingUrl: string;
+  trackingQrDataUrl?: string;
+}): Promise<{ doc: jsPDF; fileName: string; blob: Blob }> {
+  const { repair, profile, trackingUrl } = params;
+  const brand = resolveBrand(profile);
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 14;
+  const contentWidth = pageWidth - margin * 2;
+
+  // Top brand accent
+  doc.setFillColor(0, 114, 187);
+  doc.rect(0, 0, pageWidth, 5, 'F');
+
+  let headerTextX = margin;
+  if (profile?.logoDataUrl) {
+    const pngLogo = await toPngDataUrl(profile.logoDataUrl);
+    if (pngLogo) {
+      const maxH = 14;
+      const ratio = pngLogo.width / Math.max(1, pngLogo.height);
+      const drawW = Math.min(28, maxH * ratio);
+      const drawH = drawW / Math.max(0.2, ratio);
+      doc.addImage(pngLogo.dataUrl, 'PNG', margin, 10, drawW, drawH);
+      headerTextX = margin + drawW + 4;
+    }
+  }
+
+  // Badge
+  doc.setFillColor(224, 242, 254);
+  doc.roundedRect(headerTextX, 9.5, 68, 5, 1.2, 1.2, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(0, 114, 187);
+  doc.text('BOLETA CLIENTE · COMPROBANTE DE INGRESO', headerTextX + 2, 13);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(15, 23, 42);
+  doc.text(brand.brandName, headerTextX, 20.5);
+
+  const contactLine = [
+    brand.businessAddress || 'Servicio técnico especializado',
+    brand.businessPhone ? `Tel: ${brand.businessPhone}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.2);
+  doc.setTextColor(71, 85, 105);
+  doc.text(contactLine, headerTextX, 25.5);
+
+  // Right order meta
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`Orden ${repair.code}`, pageWidth - margin, 14, { align: 'right' });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.8);
+  doc.setTextColor(0, 114, 187);
+  doc.text(`Seguimiento: ${repair.trackingCode}`, pageWidth - margin, 19.2, { align: 'right' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.2);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Ingreso: ${formatDateShort(repair.dateIn)}`, pageWidth - margin, 23.8, {
+    align: 'right',
+  });
+  if (repair.dateEst) {
+    doc.text(`Entrega est.: ${formatDateShort(repair.dateEst)}`, pageWidth - margin, 28, {
+      align: 'right',
+    });
+  }
+
+  doc.setDrawColor(226, 232, 240);
+  doc.line(margin, 31.5, pageWidth - margin, 31.5);
+
+  let cursorY = 36;
+
+  // Client & Device side-by-side cards
+  const colGap = 5;
+  const colW = (contentWidth - colGap) / 2;
+
+  const accessoriesText =
+    repair.accessories && repair.accessories.length > 0
+      ? repair.accessories.join(', ')
+      : repair.consoleAccessories && Object.keys(repair.consoleAccessories).length > 0
+        ? Object.entries(repair.consoleAccessories)
+            .filter(([, v]) => v === 'Sí')
+            .map(([k]) => k)
+            .join(', ') || 'Ninguno'
+        : 'Ninguno';
+
+  const clientLines = [
+    repair.clientName,
+    repair.clientPhone ? `Tel: ${repair.clientPhone}` : '',
+    repair.clientDni ? `DNI: ${repair.clientDni}` : '',
+    repair.clientAddress ? `Dir: ${repair.clientAddress}` : '',
+  ].filter(Boolean);
+
+  const deviceTitle = `${repair.deviceType} · ${repair.brand} ${repair.model}`;
+  const deviceSub = [repair.color, repair.capacity].filter(Boolean).join(' · ');
+  const deviceLines = [
+    deviceTitle,
+    deviceSub || 'Sin detalles físicos adicionales',
+    repair.imei ? `IMEI / Serie: ${repair.imei}` : '',
+    `Accesorios: ${accessoriesText}`,
+  ].filter(Boolean);
+
+  const wrappedClient = clientLines.flatMap((line, idx) =>
+    doc.splitTextToSize(line, colW - 6).map((t: string) => ({ text: t, bold: idx === 0 }))
+  );
+  const wrappedDevice = deviceLines.flatMap((line, idx) =>
+    doc.splitTextToSize(line, colW - 6).map((t: string) => ({ text: t, bold: idx === 0 }))
+  );
+
+  const cardH = Math.max(24, 10 + Math.max(wrappedClient.length, wrappedDevice.length) * 4.3);
+
+  doc.setDrawColor(203, 213, 225);
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(margin, cursorY, colW, cardH, 2, 2, 'FD');
+  doc.roundedRect(margin + colW + colGap, cursorY, colW, cardH, 2, 2, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('DATOS DEL CLIENTE', margin + 3, cursorY + 5);
+  doc.text('EQUIPO INGRESADO', margin + colW + colGap + 3, cursorY + 5);
+
+  wrappedClient.forEach((item: { text: string; bold: boolean }, idx: number) => {
+    doc.setFont('helvetica', item.bold ? 'bold' : 'normal');
+    doc.setFontSize(item.bold ? 9.5 : 8.2);
+    doc.setTextColor(item.bold ? 15 : 51, item.bold ? 23 : 65, item.bold ? 42 : 85);
+    doc.text(item.text, margin + 3, cursorY + 10.2 + idx * 4.3);
+  });
+
+  wrappedDevice.forEach((item: { text: string; bold: boolean }, idx: number) => {
+    doc.setFont('helvetica', item.bold ? 'bold' : 'normal');
+    doc.setFontSize(item.bold ? 9.2 : 8.2);
+    doc.setTextColor(item.bold ? 15 : 51, item.bold ? 23 : 65, item.bold ? 42 : 85);
+    doc.text(item.text, margin + colW + colGap + 3, cursorY + 10.2 + idx * 4.3);
+  });
+
+  cursorY += cardH + 4;
+
+  // Falla declarada
+  const problemLines = doc.splitTextToSize(repair.problem || 'Sin detalle', contentWidth - 6);
+  const problemH = Math.max(14, 9 + problemLines.length * 4.2);
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(margin, cursorY, contentWidth, problemH, 2, 2, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.8);
+  doc.setTextColor(71, 85, 105);
+  doc.text('Falla declarada / Motivo de ingreso', margin + 3, cursorY + 5);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text(problemLines, margin + 3, cursorY + 9.5);
+  cursorY += problemH + 4;
+
+  // Check out summary if present
+  const physicalEntries = Object.entries(repair.physicalCheck || {}).filter(
+    ([, v]) => Boolean(v && String(v).trim())
+  );
+  const functionalEntries = Object.entries(repair.functionalCheck || {}).filter(
+    ([, v]) => Boolean(v && String(v).trim())
+  );
+  if (physicalEntries.length > 0 || functionalEntries.length > 0) {
+    const checkSections: Array<{ title: string; lines: string[] }> = [];
+    if (physicalEntries.length > 0) {
+      const text = physicalEntries.map(([k, v]) => `${k}: ${v}`).join(' · ');
+      checkSections.push({
+        title: 'CHECK OUT · ESTADO FÍSICO',
+        lines: doc.splitTextToSize(text, contentWidth - 6),
+      });
+    }
+    if (functionalEntries.length > 0) {
+      const text = functionalEntries.map(([k, v]) => `${k}: ${v}`).join(' · ');
+      checkSections.push({
+        title: 'CHECK OUT · ESTADO FUNCIONAL',
+        lines: doc.splitTextToSize(text, contentWidth - 6),
+      });
+    }
+    const checkH = checkSections.reduce((acc, s) => acc + 5 + s.lines.length * 3.8, 3);
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(203, 213, 225);
+    doc.roundedRect(margin, cursorY, contentWidth, checkH, 2, 2, 'FD');
+    let innerY = cursorY + 4.5;
+    for (const sec of checkSections) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.2);
+      doc.setTextColor(100, 116, 139);
+      doc.text(sec.title, margin + 3, innerY);
+      innerY += 3.8;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.8);
+      doc.setTextColor(30, 41, 59);
+      doc.text(sec.lines, margin + 3, innerY);
+      innerY += sec.lines.length * 3.8 + 1.2;
+    }
+    cursorY += checkH + 4;
+  }
+
+  // Totals strip
+  const pendingBalance = Math.max(0, Number(repair.price || 0) - Number(repair.deposit || 0));
+  doc.setDrawColor(203, 213, 225);
+  doc.line(margin, cursorY, pageWidth - margin, cursorY);
+  doc.line(margin, cursorY + 15, pageWidth - margin, cursorY + 15);
+
+  const third = contentWidth / 3;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Presupuesto', margin + third * 0.5, cursorY + 5.2, { align: 'center' });
+  doc.text('Seña / Anticipo', margin + third * 1.5, cursorY + 5.2, { align: 'center' });
+  doc.text('Saldo pendiente', margin + third * 2.5, cursorY + 5.2, { align: 'center' });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.text(formatCurrency(repair.price), margin + third * 0.5, cursorY + 11.2, { align: 'center' });
+  doc.setTextColor(4, 120, 87);
+  doc.text(formatCurrency(repair.deposit), margin + third * 1.5, cursorY + 11.2, {
+    align: 'center',
+  });
+  doc.setTextColor(15, 23, 42);
+  doc.text(formatCurrency(pendingBalance), margin + third * 2.5, cursorY + 11.2, {
+    align: 'center',
+  });
+
+  cursorY += 19;
+
+  // Paid stamp if fully paid
+  const paymentInfo = parsePaymentInfo(repair);
+  if (paymentInfo.isPaid) {
+    const stampW = 68;
+    const stampH = 18;
+    const stampX = pageWidth - margin - stampW;
+    doc.setFillColor(236, 253, 245);
+    doc.setDrawColor(4, 120, 87);
+    doc.setLineWidth(0.6);
+    doc.roundedRect(stampX, cursorY, stampW, stampH, 2, 2, 'FD');
+    doc.setLineWidth(0.2);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(6, 95, 70);
+    doc.text('P A G O', stampX + stampW / 2, cursorY + 5.8, { align: 'center' });
+
+    doc.setFontSize(8.2);
+    doc.setTextColor(15, 23, 42);
+    const shortClient = repair.clientName.slice(0, 32).toUpperCase();
+    doc.text(shortClient, stampX + stampW / 2, cursorY + 10.6, { align: 'center' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.8);
+    doc.setTextColor(6, 95, 70);
+    const paidDetail = `${paymentInfo.methodLabel ? `${paymentInfo.methodLabel} · ` : ''}${formatCurrency(repair.price)}`;
+    doc.text(paidDetail, stampX + stampW / 2, cursorY + 15, { align: 'center' });
+
+    cursorY += stampH + 4;
+  }
+
+  // Terms & Conditions
+  const termsText = (profile?.receiptTerms ?? DEFAULT_RECEIPT_TERMS).trim();
+  if (termsText) {
+    const termsLines = doc.splitTextToSize(termsText, contentWidth - 6);
+    const termsH = Math.max(12, 8 + termsLines.length * 3.1);
+    if (cursorY + termsH > pageHeight - 40) {
+      doc.addPage();
+      cursorY = 16;
+    }
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(margin, cursorY, contentWidth, termsH, 2, 2, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.2);
+    doc.setTextColor(51, 65, 85);
+    doc.text('TÉRMINOS Y CONDICIONES', margin + 3, cursorY + 4.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.6);
+    doc.setTextColor(71, 85, 105);
+    doc.text(termsLines, margin + 3, cursorY + 8);
+    cursorY += termsH + 5;
+  }
+
+  // QR + Signature footer
+  if (cursorY > pageHeight - 38) {
+    doc.addPage();
+    cursorY = 18;
+  }
+
+  doc.setDrawColor(203, 213, 225);
+  doc.line(margin, cursorY, pageWidth - margin, cursorY);
+  cursorY += 4;
+
+  let qrUrl = params.trackingQrDataUrl || '';
+  if (!qrUrl && trackingUrl) {
+    try {
+      qrUrl = await QRCode.toDataURL(trackingUrl, {
+        width: 200,
+        margin: 1,
+        color: { dark: '#0f172a', light: '#ffffff' },
+      });
+    } catch {
+      qrUrl = '';
+    }
+  }
+
+  let qrTextX = margin;
+  if (qrUrl) {
+    doc.addImage(qrUrl, 'PNG', margin, cursorY, 22, 22);
+    qrTextX = margin + 25;
+  }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.8);
+  doc.setTextColor(30, 41, 59);
+  doc.text('Seguimiento en línea', qrTextX, cursorY + 4.5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.8);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Escaneá el QR para ver el estado de tu equipo', qrTextX, cursorY + 9);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(0, 114, 187);
+  doc.text(`Código: ${repair.trackingCode}`, qrTextX, cursorY + 13.5);
+
+  const wrappedTrackingUrl = doc.splitTextToSize(trackingUrl, 85);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.8);
+  doc.setTextColor(100, 116, 139);
+  doc.text(wrappedTrackingUrl.slice(0, 2), qrTextX, cursorY + 17.5);
+
+  // Signature line on right
+  const sigW = 58;
+  const sigX = pageWidth - margin - sigW;
+  doc.setDrawColor(148, 163, 184);
+  doc.line(sigX, cursorY + 17, sigX + sigW, cursorY + 17);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text('Firma y aclaración del cliente', sigX + sigW / 2, cursorY + 21, { align: 'center' });
+
+  const safeCode = (repair.code || 'orden').replace(/[^a-zA-Z0-9_-]/g, '-');
+  const fileName = `boleta-cliente-${safeCode}.pdf`;
+  const blob = doc.output('blob');
+
+  return { doc, fileName, blob };
+}
+
+export async function downloadClientRepairReceiptPdf(params: {
+  repair: RepairRecord;
+  profile?: WorkshopProfile | null;
+  trackingUrl: string;
+  trackingQrDataUrl?: string;
+}): Promise<{ fileName: string; blob: Blob }> {
+  const { doc, fileName, blob } = await buildClientRepairReceiptPdf(params);
+  doc.save(fileName);
+  return { fileName, blob };
+}
+

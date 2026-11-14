@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
-import { doc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { FileSpreadsheet, UploadCloud } from 'lucide-react';
 import {
   clampStr,
-  db,
   generateDocId,
-  handleFirestoreError,
+  handleDbError,
+  insertRows,
   OperationType,
   stripUndefined,
 } from '../lib/db';
@@ -143,48 +142,45 @@ export const ProductImportModal: React.FC<ProductImportModalProps> = ({
     setImporting(true);
     try {
       const BATCH_LIMIT = 400;
+      const nowIso = new Date().toISOString();
       for (let start = 0; start < toImport.length; start += BATCH_LIMIT) {
         const slice = toImport.slice(start, start + BATCH_LIMIT);
-        const batch = writeBatch(db);
-        for (const item of slice) {
-          const productId = generateDocId('products');
-          batch.set(
-            doc(db, 'products', productId),
-            stripUndefined({
-              ownerId,
-              name: clampStr(item.name, 200),
-              description: '',
-              metaDescription: '',
-              productType: 'Fisico',
-              category: clampStr(item.category || 'Repuesto', 80) || 'Repuesto',
-              subcategory: clampStr(item.subcategory, 80),
-              sku: clampStr(item.sku, 80),
-              barcode: clampStr(item.barcode, 80),
-              internalCode: clampStr(generateInternalProductCode(), 60),
-              cost: Math.max(0, Number(item.cost || 0)),
-              marginMode: 'fixed',
-              margin: Math.max(0, Number(item.price || 0) - Number(item.cost || 0)),
-              vat: 0,
-              rounding: 0,
-              netPrice: Math.max(0, Number(item.price || 0)),
-              price: Math.max(0, Number(item.price || 0)),
-              trackStock: true,
-              allowNoStock: false,
-              usesSerial: false,
-              stock: Math.max(0, Number(item.stock || 0)),
-              minStock: 1,
-              createdAt: serverTimestamp(),
-            })
-          );
-        }
-        await batch.commit();
+        const rows = slice.map((item) =>
+          stripUndefined({
+            id: generateDocId('products'),
+            ownerId,
+            name: clampStr(item.name, 200),
+            description: '',
+            metaDescription: '',
+            productType: 'Fisico',
+            category: clampStr(item.category || 'Repuesto', 80) || 'Repuesto',
+            subcategory: clampStr(item.subcategory, 80),
+            sku: clampStr(item.sku, 80),
+            barcode: clampStr(item.barcode, 80),
+            internalCode: clampStr(generateInternalProductCode(), 60),
+            cost: Math.max(0, Number(item.cost || 0)),
+            marginMode: 'fixed',
+            margin: Math.max(0, Number(item.price || 0) - Number(item.cost || 0)),
+            vat: 0,
+            rounding: 0,
+            netPrice: Math.max(0, Number(item.price || 0)),
+            price: Math.max(0, Number(item.price || 0)),
+            trackStock: true,
+            allowNoStock: false,
+            usesSerial: false,
+            stock: Math.max(0, Number(item.stock || 0)),
+            minStock: 1,
+            createdAt: nowIso,
+          })
+        );
+        await insertRows('products', rows);
       }
       notify(`Se importaron ${toImport.length} productos correctamente.`);
       reset();
       onClose();
     } catch (err) {
       notify('Ocurrió un error al importar los productos.', 'error');
-      handleFirestoreError(err, OperationType.WRITE, 'products');
+      await handleDbError(err, OperationType.WRITE, 'products');
     } finally {
       setImporting(false);
     }

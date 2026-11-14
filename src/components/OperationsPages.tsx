@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import {
   AlertTriangle,
   Boxes,
@@ -17,12 +16,13 @@ import {
   Minus,
   Package,
   Plus,
+  Printer,
   Search,
   ShoppingBag,
   Trash2,
   Wrench,
 } from 'lucide-react';
-import { db, handleFirestoreError, OperationType } from '../lib/db';
+import { deleteRow, updateRow } from '../lib/db';
 import type {
   ClientRecord,
   ProductRecord,
@@ -45,6 +45,7 @@ import {
   downloadInventorySummaryPdf,
   downloadSalesSummaryPdf,
 } from '../utils/pdfReport';
+import { parseSalePaymentInfo, serializeSaleStatus } from '../utils/saleMeta';
 import { useToast } from './ToastProvider';
 
 interface ProductsPageProps {
@@ -253,12 +254,11 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({
 
   const adjustStock = async (p: ProductRecord, delta: number) => {
     const next = Math.max(0, Number(p.stock || 0) + delta);
-    const path = `products/${p.id}`;
     try {
-      await updateDoc(doc(db, 'products', p.id), { stock: next });
+      await updateRow('products', p.id, { stock: next });
     } catch (err) {
+      console.error(err);
       notify('No se pudo actualizar el stock.', 'error');
-      handleFirestoreError(err, OperationType.UPDATE, path);
     }
   };
 
@@ -577,23 +577,21 @@ export const AgendaPage: React.FC<AgendaPageProps> = ({
 
   const toggleTask = async (t: TaskRecord) => {
     const nextStatus = t.status === 'completado' ? 'pendiente' : 'completado';
-    const path = `tasks/${t.id}`;
     try {
-      await updateDoc(doc(db, 'tasks', t.id), { status: nextStatus });
+      await updateRow('tasks', t.id, { status: nextStatus });
     } catch (err) {
+      console.error(err);
       notify('No se pudo actualizar la tarea.', 'error');
-      handleFirestoreError(err, OperationType.UPDATE, path);
     }
   };
 
   const deleteTask = async (t: TaskRecord) => {
-    const path = `tasks/${t.id}`;
     try {
-      await deleteDoc(doc(db, 'tasks', t.id));
+      await deleteRow('tasks', t.id);
       notify('Tarea eliminada.');
     } catch (err) {
+      console.error(err);
       notify('No se pudo eliminar la tarea.', 'error');
-      handleFirestoreError(err, OperationType.DELETE, path);
     }
   };
 
@@ -1104,13 +1102,12 @@ export const SuppliersPage: React.FC<SuppliersPageProps> = ({
   const totalDebt = suppliers.reduce((s, x) => s + Number(x.balance || 0), 0);
 
   const handleDelete = async (s: SupplierRecord) => {
-    const path = `suppliers/${s.id}`;
     try {
-      await deleteDoc(doc(db, 'suppliers', s.id));
+      await deleteRow('suppliers', s.id);
       notify('Proveedor eliminado.');
     } catch (err) {
+      console.error(err);
       notify('No se pudo eliminar.', 'error');
-      handleFirestoreError(err, OperationType.DELETE, path);
     }
   };
 
@@ -1210,35 +1207,42 @@ export const SuppliersPage: React.FC<SuppliersPageProps> = ({
 interface SalesPageProps {
   sales: SaleRecord[];
   onNewSale: () => void;
+  onPrintSale?: (sale: SaleRecord) => void;
 }
 
-export const SalesPage: React.FC<SalesPageProps> = ({ sales, onNewSale }) => {
+export const SalesPage: React.FC<SalesPageProps> = ({
+  sales,
+  onNewSale,
+  onPrintSale,
+}) => {
   const { notify } = useToast();
   const total = sales.reduce((s, x) => s + Number(x.amount || 0), 0);
-  const collected = sales
-    .filter((x) => x.status === 'cobrado')
-    .reduce((s, x) => s + Number(x.amount || 0), 0);
+  const collected = sales.reduce((s, x) => s + parseSalePaymentInfo(x).deposit, 0);
   const pending = Math.max(0, total - collected);
 
   const toggleStatus = async (s: SaleRecord) => {
-    const next = s.status === 'cobrado' ? 'pendiente' : 'cobrado';
-    const path = `sales/${s.id}`;
+    const info = parseSalePaymentInfo(s);
+    const next = serializeSaleStatus({
+      status: info.isPaid ? 'pendiente' : 'cobrado',
+      method: info.method || 'efectivo',
+      deposit: info.isPaid ? 0 : Number(s.amount || 0),
+      amount: Number(s.amount || 0),
+    });
     try {
-      await updateDoc(doc(db, 'sales', s.id), { status: next });
+      await updateRow('sales', s.id, { status: next });
     } catch (err) {
+      console.error(err);
       notify('No se pudo actualizar la venta.', 'error');
-      handleFirestoreError(err, OperationType.UPDATE, path);
     }
   };
 
   const deleteSale = async (s: SaleRecord) => {
-    const path = `sales/${s.id}`;
     try {
-      await deleteDoc(doc(db, 'sales', s.id));
+      await deleteRow('sales', s.id);
       notify('Venta eliminada.');
     } catch (err) {
+      console.error(err);
       notify('No se pudo eliminar.', 'error');
-      handleFirestoreError(err, OperationType.DELETE, path);
     }
   };
 
@@ -1290,55 +1294,94 @@ export const SalesPage: React.FC<SalesPageProps> = ({ sales, onNewSale }) => {
         ) : (
           [...sales]
             .sort((a, b) => b.createdAt - a.createdAt)
-            .map((s) => (
-              <div
-                key={s.id}
-                className="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5"
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 text-xs text-slate-500">
-                    <span className="font-mono-num font-semibold text-slate-700 dark:text-slate-300">
-                      {s.invoice}
-                    </span>
-                    <span>·</span>
-                    <span>{formatDateShort(s.dueDate)}</span>
-                  </div>
-                  <div className="text-sm font-bold text-slate-900 dark:text-white">
-                    {s.clientName}
-                  </div>
-                  {s.productName && (
-                    <div className="text-xs text-slate-500 dark:text-slate-400">
-                      {s.productName} {s.quantity ? `× ${s.quantity}` : ''}
+            .map((s) => {
+              const info = parseSalePaymentInfo(s);
+              const badgeLabel = info.isPaid
+                ? 'Cobrado'
+                : info.deposit > 0
+                  ? 'Señado'
+                  : 'Pendiente';
+              return (
+                <div
+                  key={s.id}
+                  className="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                      <span className="font-mono-num font-semibold text-slate-700 dark:text-slate-300">
+                        {s.invoice}
+                      </span>
+                      <span>·</span>
+                      <span>{formatDateShort(s.dueDate)}</span>
+                      {info.methodLabel && (
+                        <>
+                          <span>·</span>
+                          <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                            {info.methodLabel}
+                          </span>
+                        </>
+                      )}
                     </div>
-                  )}
-                </div>
+                    <div className="text-sm font-bold text-slate-900 dark:text-white">
+                      {s.clientName}
+                    </div>
+                    {s.productName && (
+                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                        {s.productName} {s.quantity ? `× ${s.quantity}` : ''}
+                      </div>
+                    )}
+                    {!info.isPaid && info.deposit > 0 && (
+                      <div className="mt-0.5 text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                        Seña:{' '}
+                        <span className="font-mono-num font-semibold text-emerald-600 dark:text-emerald-400">
+                          {formatCurrency(info.deposit)}
+                        </span>{' '}
+                        · Pendiente:{' '}
+                        <span className="font-mono-num font-semibold text-amber-600 dark:text-amber-400">
+                          {formatCurrency(info.pending)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="font-mono-num text-sm font-bold text-slate-900 dark:text-white">
-                    {formatCurrency(s.amount)}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => toggleStatus(s)}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
-                      s.status === 'cobrado'
-                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
-                        : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
-                    }`}
-                  >
-                    {s.status === 'cobrado' ? 'Cobrado' : 'Pendiente'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => deleteSale(s)}
-                    aria-label="Eliminar venta"
-                    className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono-num text-sm font-bold text-slate-900 dark:text-white">
+                      {formatCurrency(s.amount)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => toggleStatus(s)}
+                      className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                        info.isPaid
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                          : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                      }`}
+                    >
+                      {badgeLabel}
+                    </button>
+                    {onPrintSale && (
+                      <button
+                        type="button"
+                        onClick={() => onPrintSale(s)}
+                        title="Imprimir boleta A4 o 80mm"
+                        className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-sky-400 dark:hover:text-sky-300"
+                      >
+                        <Printer className="h-3.5 w-3.5" />
+                        <span>Boleta</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => deleteSale(s)}
+                      aria-label="Eliminar venta"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
         )}
       </div>
     </div>
@@ -1360,23 +1403,21 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({ purchases, onNewPu
 
   const toggleStatus = async (p: PurchaseRecord) => {
     const next = p.status === 'pagado' ? 'pendiente' : 'pagado';
-    const path = `purchases/${p.id}`;
     try {
-      await updateDoc(doc(db, 'purchases', p.id), { status: next });
+      await updateRow('purchases', p.id, { status: next });
     } catch (err) {
+      console.error(err);
       notify('No se pudo actualizar la compra.', 'error');
-      handleFirestoreError(err, OperationType.UPDATE, path);
     }
   };
 
   const deletePurchase = async (p: PurchaseRecord) => {
-    const path = `purchases/${p.id}`;
     try {
-      await deleteDoc(doc(db, 'purchases', p.id));
+      await deleteRow('purchases', p.id);
       notify('Compra eliminada.');
     } catch (err) {
+      console.error(err);
       notify('No se pudo eliminar.', 'error');
-      handleFirestoreError(err, OperationType.DELETE, path);
     }
   };
 
@@ -1535,9 +1576,10 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
     const repairIncome = rFiltered.reduce((s, r) => s + Number(r.price || 0), 0);
     const repairPaid = rFiltered.reduce((s, r) => s + Number(r.deposit || 0), 0);
     const salesIncome = sFiltered.reduce((s, x) => s + Number(x.amount || 0), 0);
-    const salesPaid = sFiltered
-      .filter((x) => x.status === 'cobrado')
-      .reduce((s, x) => s + Number(x.amount || 0), 0);
+    const salesPaid = sFiltered.reduce(
+      (s, x) => s + parseSalePaymentInfo(x).deposit,
+      0
+    );
 
     const totalRevenue = repairIncome + salesIncome;
     const totalPending = Math.max(0, totalRevenue - (repairPaid + salesPaid));

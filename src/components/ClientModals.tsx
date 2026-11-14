@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { deleteDoc, doc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { Edit3, Plus, Trash2, Wrench } from 'lucide-react';
 import {
   clampStr,
-  db,
+  deleteRow,
   generateDocId,
-  handleFirestoreError,
+  handleDbError,
   OperationType,
   stripUndefined,
+  updateRow,
+  upsertRow,
 } from '../lib/db';
 import type { ClientRecord, RepairRecord, SaleRecord } from '../types/workshop';
 import { formatCurrency, formatDateShort, getStatusMeta } from '../utils/formatters';
@@ -62,25 +63,26 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
       if (editClient) {
         const path = `clients/${editClient.id}`;
         try {
-          await updateDoc(doc(db, 'clients', editClient.id), updatePayload);
+          await updateRow('clients', editClient.id, updatePayload);
           notify('Cliente actualizado.');
         } catch (err) {
           notify('No se pudo guardar el cliente.', 'error');
-          handleFirestoreError(err, OperationType.UPDATE, path);
+          await handleDbError(err, OperationType.UPDATE, path);
         }
       } else {
         const clientId = generateDocId('clients');
         const path = `clients/${clientId}`;
         try {
-          await setDoc(doc(db, 'clients', clientId), {
+          await upsertRow('clients', {
+            id: clientId,
             ...updatePayload,
             ownerId,
-            createdAt: serverTimestamp(),
+            createdAt: new Date().toISOString(),
           });
           notify('Cliente guardado.');
         } catch (err) {
           notify('No se pudo guardar el cliente.', 'error');
-          handleFirestoreError(err, OperationType.CREATE, path);
+          await handleDbError(err, OperationType.CREATE, path);
         }
       }
       onClose();
@@ -226,12 +228,12 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
   const handleDelete = async () => {
     const path = `clients/${client.id}`;
     try {
-      await deleteDoc(doc(db, 'clients', client.id));
+      await deleteRow('clients', client.id);
       notify('Cliente eliminado.');
       onClose();
     } catch (err) {
       notify('No se pudo eliminar el cliente.', 'error');
-      handleFirestoreError(err, OperationType.DELETE, path);
+      await handleDbError(err, OperationType.DELETE, path);
     }
   };
 

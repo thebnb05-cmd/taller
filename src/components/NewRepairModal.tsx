@@ -1,13 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { doc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { Check, ChevronLeft, UserCheck } from 'lucide-react';
 import {
   clampStr,
-  db,
   generateDocId,
-  handleFirestoreError,
-  OperationType,
   stripUndefined,
+  updateRow,
+  upsertRow,
 } from '../lib/db';
 import {
   BRAND_LIST,
@@ -37,6 +35,7 @@ import { useToast } from './ToastProvider';
 interface NewRepairModalProps {
   open: boolean;
   onClose: () => void;
+  onCreated?: (repair: RepairRecord) => void;
   ownerId: string;
   profile?: WorkshopProfile | null;
   clients: ClientRecord[];
@@ -103,6 +102,7 @@ const FUNCTIONAL_CONSOLE_FIELDS: Array<{ key: string; label: string; options: st
 export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   open,
   onClose,
+  onCreated,
   ownerId,
   profile,
   clients,
@@ -308,7 +308,6 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
       const advance = Math.max(0, Number(deposit || 0));
       const selectedParts = products.filter((p) => selectedPartIds.includes(p.id)).slice(0, 30);
 
-      const batch = writeBatch(db);
       let resolvedClientId = clientId;
 
       if (!resolvedClientId) {
@@ -319,16 +318,16 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
           resolvedClientId = matched.id;
         } else {
           resolvedClientId = generateDocId('clients');
-          batch.set(
-            doc(db, 'clients', resolvedClientId),
+          await upsertRow(
+            'clients',
             stripUndefined({
+              id: resolvedClientId,
               ownerId,
               name: clampStr(clientName, 160),
               phone: clampStr(clientPhone, 60),
               dni: clampStr(clientDni, 40),
               email: clampStr(clientEmail, 200),
               address: clampStr(clientAddress, 240),
-              createdAt: serverTimestamp(),
             })
           );
         }
@@ -343,60 +342,68 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
       const cleanDateIn = clampStr(dateIn || todayISO(), 40);
       const cleanDateEst = clampStr(dateEst, 40);
 
-      batch.set(
-        doc(db, 'repairs', repairId),
+      const repairPayload: Omit<RepairRecord, 'id' | 'createdAt' | 'updatedAt'> = {
+        ownerId,
+        code: repairCode,
+        trackingCode,
+        clientId: clampStr(resolvedClientId, 128),
+        clientName: clampStr(clientName, 160),
+        clientPhone: clampStr(clientPhone, 60),
+        clientDni: clampStr(clientDni, 40),
+        clientEmail: clampStr(clientEmail, 200),
+        clientAddress: clampStr(clientAddress, 240),
+        deviceType: clampStr(deviceType, 60),
+        deviceIcon: clampStr(deviceIcon, 16),
+        brand: cleanBrand,
+        model: cleanModel,
+        color: clampStr(color, 60),
+        capacity: showCapacity ? clampStr(capacity, 40) : '',
+        imei: clampStr(imei, 80),
+        problem: cleanProblem,
+        priority,
+        status,
+        progress: defaultProgress,
+        dateIn: cleanDateIn,
+        dateEst: cleanDateEst,
+        price: budget,
+        deposit: advance,
+        paidAmount: advance,
+        paymentStatus,
+        partIds: selectedParts.map((p) => p.id),
+        partNames: selectedParts.map((p) => p.name),
+        accessories: isConsole ? [] : accessories.slice(0, 30),
+        consoleAccessories: isConsole ? consoleAcc : undefined,
+        physicalCheck,
+        functionalCheck,
+        securityType:
+          securityTab === 'pattern' && securityPattern.length > 0
+            ? 'pattern'
+            : securityPin.trim()
+            ? 'pin'
+            : 'none',
+        securityPin: securityTab === 'pin' ? clampStr(securityPin, 80) : '',
+        securityPattern: securityTab === 'pattern' ? securityPattern.slice(0, 9) : [],
+        notes: clampStr(notes, 2000),
+        workDetail: '',
+        checkoutState: '',
+      };
+
+      const nowIso = new Date().toISOString();
+
+      await upsertRow(
+        'repairs',
         stripUndefined({
-          ownerId,
-          code: repairCode,
-          trackingCode,
-          clientId: clampStr(resolvedClientId, 128),
-          clientName: clampStr(clientName, 160),
-          clientPhone: clampStr(clientPhone, 60),
-          clientDni: clampStr(clientDni, 40),
-          clientEmail: clampStr(clientEmail, 200),
-          clientAddress: clampStr(clientAddress, 240),
-          deviceType: clampStr(deviceType, 60),
-          deviceIcon: clampStr(deviceIcon, 16),
-          brand: cleanBrand,
-          model: cleanModel,
-          color: clampStr(color, 60),
-          capacity: showCapacity ? clampStr(capacity, 40) : '',
-          imei: clampStr(imei, 80),
-          problem: cleanProblem,
-          priority,
-          status,
-          progress: defaultProgress,
-          dateIn: cleanDateIn,
-          dateEst: cleanDateEst,
-          price: budget,
-          deposit: advance,
-          paidAmount: advance,
-          paymentStatus,
-          partIds: selectedParts.map((p) => p.id),
-          partNames: selectedParts.map((p) => p.name),
-          accessories: isConsole ? [] : accessories.slice(0, 30),
-          consoleAccessories: isConsole ? consoleAcc : undefined,
-          physicalCheck,
-          functionalCheck,
-          securityType:
-            securityTab === 'pattern' && securityPattern.length > 0
-              ? 'pattern'
-              : securityPin.trim()
-              ? 'pin'
-              : 'none',
-          securityPin: securityTab === 'pin' ? clampStr(securityPin, 80) : '',
-          securityPattern: securityTab === 'pattern' ? securityPattern.slice(0, 9) : [],
-          notes: clampStr(notes, 2000),
-          workDetail: '',
-          checkoutState: '',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
+          id: repairId,
+          ...repairPayload,
+          createdAt: nowIso,
+          updatedAt: nowIso,
         })
       );
 
-      batch.set(
-        doc(db, 'publicTickets', trackingCode),
+      await upsertRow(
+        'public_tickets',
         stripUndefined({
+          id: trackingCode,
           ownerId,
           repairId,
           trackingCode,
@@ -414,25 +421,32 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
           workDetail: '',
           price: budget,
           deposit: advance,
-          updatedAt: serverTimestamp(),
+          updatedAt: nowIso,
         })
       );
 
       // Deduct stock for used spare parts if trackStock is enabled
       for (const part of selectedParts) {
         if (part.trackStock && part.stock > 0) {
-          batch.update(doc(db, 'products', part.id), {
+          await updateRow('products', part.id, {
             stock: Math.max(0, part.stock - 1),
           });
         }
       }
 
-      await batch.commit();
       notify(`Reparación ${repairCode} registrada con éxito.`);
+      const nowMs = Date.now();
+      const createdRepair: RepairRecord = {
+        id: repairId,
+        ...repairPayload,
+        createdAt: nowMs,
+        updatedAt: nowMs,
+      };
       onClose();
+      onCreated?.(createdRepair);
     } catch (err) {
+      console.error(err);
       notify('No se pudo guardar la reparación.', 'error');
-      handleFirestoreError(err, OperationType.WRITE, 'repairs');
     } finally {
       setSaving(false);
     }

@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { deleteField, doc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { Camera, StopCircle, Upload } from 'lucide-react';
 import {
   clampStr,
-  db,
   generateDocId,
-  handleFirestoreError,
+  handleDbError,
   OperationType,
   stripUndefined,
+  updateRow,
+  upsertRow,
 } from '../lib/db';
 import {
   PRODUCT_BRANDS,
@@ -301,25 +301,29 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
       if (editProduct) {
         const path = `products/${editProduct.id}`;
-        const updatePayload = stripUndefined({
-          ...baseFields,
-          reorderCap: reorderCap ? Number(reorderCap) : deleteField(),
-          weight: weight ? Number(weight) : deleteField(),
-          height: height ? Number(height) : deleteField(),
-          width: width ? Number(width) : deleteField(),
-          depth: depth ? Number(depth) : deleteField(),
-        });
+        const updatePayload = stripUndefined(
+          {
+            ...baseFields,
+            reorderCap: reorderCap ? Number(reorderCap) : null,
+            weight: weight ? Number(weight) : null,
+            height: height ? Number(height) : null,
+            width: width ? Number(width) : null,
+            depth: depth ? Number(depth) : null,
+          },
+          true
+        );
         try {
-          await updateDoc(doc(db, 'products', editProduct.id), updatePayload);
+          await updateRow('products', editProduct.id, updatePayload, true);
           notify('Producto actualizado.');
         } catch (err) {
           notify('No se pudo guardar el producto.', 'error');
-          handleFirestoreError(err, OperationType.UPDATE, path);
+          await handleDbError(err, OperationType.UPDATE, path);
         }
       } else {
         const productId = generateDocId('products');
         const path = `products/${productId}`;
         const createPayload = stripUndefined({
+          id: productId,
           ...baseFields,
           ownerId,
           reorderCap: reorderCap ? Number(reorderCap) : undefined,
@@ -327,14 +331,14 @@ export const ProductModal: React.FC<ProductModalProps> = ({
           height: height ? Number(height) : undefined,
           width: width ? Number(width) : undefined,
           depth: depth ? Number(depth) : undefined,
-          createdAt: serverTimestamp(),
+          createdAt: new Date().toISOString(),
         });
         try {
-          await setDoc(doc(db, 'products', productId), createPayload);
+          await upsertRow('products', createPayload);
           notify('Producto guardado.');
         } catch (err) {
           notify('No se pudo guardar el producto.', 'error');
-          handleFirestoreError(err, OperationType.CREATE, path);
+          await handleDbError(err, OperationType.CREATE, path);
         }
       }
       onClose();

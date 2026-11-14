@@ -1,6 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { signOut } from 'firebase/auth';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import {
   BarChart3,
   Bell,
@@ -22,7 +20,14 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import { auth, db, handleFirestoreError, OperationType, toMillis } from '../lib/db';
+import {
+  fetchOwnerRows,
+  handleDbError,
+  OperationType,
+  subscribeTableChanges,
+  supabase,
+  type TableName,
+} from '../lib/db';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import type {
   ClientRecord,
@@ -61,6 +66,7 @@ import { ProductImportModal } from './ProductImportModal';
 import { ProductModal } from './ProductModal';
 import { PWAInstallButton } from './PWAInstallButton';
 import { RepairDetailModal } from './RepairDetailModal';
+import { SalePrintModal } from './SalePrintModal';
 
 interface WorkshopAppProps {
   userId: string;
@@ -115,63 +121,71 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
     setLoadingCount(7);
     setSyncError(null);
 
-    const markLoaded = (colName: string) => {
-      if (!active || loadedSet.has(colName)) return;
-      loadedSet.add(colName);
+    const markLoaded = (tableName: string) => {
+      if (!active || loadedSet.has(tableName)) return;
+      loadedSet.add(tableName);
       setLoadingCount((prev) => Math.max(0, prev - 1));
     };
 
-    const subscribeCollection = <T extends { id: string }>(
-      colName: string,
-      setter: React.Dispatch<React.SetStateAction<T[]>>,
-      mapExtra?: (data: Record<string, unknown>) => Record<string, unknown>
+    const loadTable = async <T,>(
+      tableName: TableName,
+      setter: React.Dispatch<React.SetStateAction<T[]>>
     ) => {
-      const q = query(collection(db, colName), where('ownerId', '==', userId));
-      return onSnapshot(
-        q,
-        (snapshot) => {
-          if (!active) return;
-          const items = snapshot.docs.map((docSnap) => {
-            const raw = docSnap.data() as Record<string, unknown>;
-            const extra = mapExtra ? mapExtra(raw) : {};
-            return {
-              ...raw,
-              ...extra,
-              id: docSnap.id,
-              createdAt: toMillis(raw.createdAt),
-            } as unknown as T;
-          });
-          setter(items);
-          markLoaded(colName);
-        },
-        (err) => {
-          if (!active) return;
-          setSyncError(err.message || 'Error al sincronizar con Firestore.');
-          markLoaded(colName);
-          try {
-            handleFirestoreError(err, OperationType.LIST, colName);
-          } catch {
-            // Structured error already logged
-          }
-        }
-      );
+      try {
+        const items = await fetchOwnerRows<T>(tableName, userId);
+        if (!active) return;
+        setter(items);
+        markLoaded(tableName);
+      } catch (err) {
+        if (!active) return;
+        const msg =
+          err && typeof err === 'object' && 'message' in err
+            ? String((err as { message?: unknown }).message)
+            : 'Error al sincronizar con Supabase.';
+        setSyncError(msg);
+        markLoaded(tableName);
+        void handleDbError(err, OperationType.LIST, tableName).catch(() => {});
+      }
     };
 
-    const unsubscribers = [
-      subscribeCollection<ClientRecord>('clients', setClients),
-      subscribeCollection<RepairRecord>('repairs', setRepairs, (raw) => ({
-        updatedAt: toMillis(raw.updatedAt),
-      })),
-      subscribeCollection<ProductRecord>('products', setProducts),
-      subscribeCollection<TaskRecord>('tasks', setTasks),
-      subscribeCollection<SupplierRecord>('suppliers', setSuppliers),
-      subscribeCollection<SaleRecord>('sales', setSales),
-      subscribeCollection<PurchaseRecord>('purchases', setPurchases),
-    ];
+    const reloadByTable: Partial<Record<TableName, () => Promise<void>>> = {
+      clients: () => loadTable<ClientRecord>('clients', setClients),
+      repairs: () => loadTable<RepairRecord>('repairs', setRepairs),
+      products: () => loadTable<ProductRecord>('products', setProducts),
+      tasks: () => loadTable<TaskRecord>('tasks', setTasks),
+      suppliers: () => loadTable<SupplierRecord>('suppliers', setSuppliers),
+      sales: () => loadTable<SaleRecord>('sales', setSales),
+      purchases: () => loadTable<PurchaseRecord>('purchases', setPurchases),
+    };
+
+    const tables = Object.keys(reloadByTable) as TableName[];
+    tables.forEach((tbl) => {
+      void reloadByTable[tbl]?.();
+    });
+
+    const localUnsubs = tables.map((tbl) =>
+      subscribeTableChanges(tbl, () => {
+        void reloadByTable[tbl]?.();
+      })
+    );
+
+    const channel = supabase
+      .channel(`workshop_sync_${userId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public' },
+        (payload) => {
+          const tbl = payload.table as TableName;
+          const fn = reloadByTable[tbl];
+          if (fn) void fn();
+        }
+      )
+      .subscribe();
 
     return () => {
       active = false;
-      unsubscribers.forEach((unsub) => unsub());
+      localUnsubs.forEach((unsub) => unsub());
+      void supabase.removeChannel(channel);
     };
   }, [userId]);
 
@@ -182,6 +196,8 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   const [showNewRepair, setShowNewRepair] = useState(false);
   const [repairPreClient, setRepairPreClient] = useState<ClientRecord | null>(null);
   const [selectedRepairId, setSelectedRepairId] = useState<string | null>(null);
+  const [justCreatedRepair, setJustCreatedRepair] = useState<RepairRecord | null>(null);
+  const [repairModalInitialTab, setRepairModalInitialTab] = useState<'detail' | 'edit' | 'receipt'>('detail');
 
   const [showClientModal, setShowClientModal] = useState(false);
   const [editClient, setEditClient] = useState<ClientRecord | null>(null);
@@ -198,6 +214,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
 
   const [showNewSale, setShowNewSale] = useState(false);
   const [saleProduct, setSaleProduct] = useState<ProductRecord | null>(null);
+  const [selectedPrintSale, setSelectedPrintSale] = useState<SaleRecord | null>(null);
   const [showNewPurchase, setShowNewPurchase] = useState(false);
 
   const lowStockCount = useMemo(
@@ -206,8 +223,10 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   );
 
   const selectedRepair = useMemo(
-    () => repairs.find((r) => r.id === selectedRepairId) || null,
-    [repairs, selectedRepairId]
+    () =>
+      repairs.find((r) => r.id === selectedRepairId) ||
+      (justCreatedRepair?.id === selectedRepairId ? justCreatedRepair : null),
+    [repairs, selectedRepairId, justCreatedRepair]
   );
 
   const selectedClient = useMemo(
@@ -382,7 +401,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
 
             <button
               type="button"
-              onClick={() => signOut(auth)}
+              onClick={() => void supabase.auth.signOut()}
               aria-label="Cerrar sesión"
               title="Salir"
               className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
@@ -403,7 +422,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
 
           {syncError && (
             <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/50 dark:text-red-300">
-              Error al sincronizar con Firestore: {syncError}
+              Error al sincronizar con Supabase: {syncError}
             </div>
           )}
 
@@ -517,6 +536,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                     setSaleProduct(null);
                     setShowNewSale(true);
                   }}
+                  onPrintSale={(s) => setSelectedPrintSale(s)}
                 />
               )}
 
@@ -648,6 +668,11 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
           setShowNewRepair(false);
           setRepairPreClient(null);
         }}
+        onCreated={(created) => {
+          setJustCreatedRepair(created);
+          setRepairModalInitialTab('receipt');
+          setSelectedRepairId(created.id);
+        }}
         ownerId={userId}
         profile={profile}
         clients={clients}
@@ -660,7 +685,13 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         repair={selectedRepair}
         clients={clients}
         profile={profile}
-        onClose={() => setSelectedRepairId(null)}
+        initialTab={repairModalInitialTab}
+        justCreated={Boolean(justCreatedRepair && justCreatedRepair.id === selectedRepairId)}
+        onClose={() => {
+          setSelectedRepairId(null);
+          setJustCreatedRepair(null);
+          setRepairModalInitialTab('detail');
+        }}
       />
 
       <NewClientModal
@@ -743,6 +774,19 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         ownerId={userId}
         clients={clients}
         preselectedProduct={saleProduct}
+        brandName={profile.brandName}
+        onCreated={(createdSale) => setSelectedPrintSale(createdSale)}
+      />
+
+      <SalePrintModal
+        sale={
+          selectedPrintSale
+            ? sales.find((s) => s.id === selectedPrintSale.id) || selectedPrintSale
+            : null
+        }
+        onClose={() => setSelectedPrintSale(null)}
+        profile={profile}
+        clients={clients}
       />
 
       <NewPurchaseModal

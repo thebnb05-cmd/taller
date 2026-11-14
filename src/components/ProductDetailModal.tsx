@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { Edit3, Minus, Package, Plus, ShoppingCart, Trash2 } from 'lucide-react';
-import { db, handleFirestoreError, OperationType } from '../lib/db';
+import { deleteRow, handleDbError, OperationType, updateRow } from '../lib/db';
 import type { ProductRecord } from '../types/workshop';
 import { formatCurrency } from '../utils/formatters';
 import { ModalShell } from './ModalShell';
@@ -35,23 +34,23 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     const nextStock = Math.max(0, Number(product.stock || 0) + delta);
     const path = `products/${product.id}`;
     try {
-      await updateDoc(doc(db, 'products', product.id), { stock: nextStock });
+      await updateRow('products', product.id, { stock: nextStock });
       notify(`Stock actualizado: ${nextStock} u.`);
     } catch (err) {
       notify('No se pudo actualizar el stock.', 'error');
-      handleFirestoreError(err, OperationType.UPDATE, path);
+      await handleDbError(err, OperationType.UPDATE, path);
     }
   };
 
   const handleDelete = async () => {
     const path = `products/${product.id}`;
     try {
-      await deleteDoc(doc(db, 'products', product.id));
+      await deleteRow('products', product.id);
       notify('Producto eliminado.');
       onClose();
     } catch (err) {
       notify('No se pudo eliminar el producto.', 'error');
-      handleFirestoreError(err, OperationType.DELETE, path);
+      await handleDbError(err, OperationType.DELETE, path);
     }
   };
 

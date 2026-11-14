@@ -1,8 +1,28 @@
-import React, { useEffect, useState } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { ArrowLeft, CheckCircle2, Clock, Phone, Search, Smartphone, Wrench } from 'lucide-react';
-import { db, handleFirestoreError, OperationType, toMillis } from '../lib/db';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  ArrowLeft,
+  Camera,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  ExternalLink,
+  Phone,
+  RefreshCw,
+  Search,
+  Smartphone,
+  Video,
+  Wrench,
+  X,
+} from 'lucide-react';
+import {
+  fetchPublicTicketByCode,
+  handleDbError,
+  OperationType,
+  supabase,
+} from '../lib/db';
 import { formatCurrency, formatDateShort, getStatusMeta } from '../utils/formatters';
+import { getEmbedVideoUrl, parseWorkDetailAndMedia } from '../utils/techMedia';
 import type { PublicTicketRecord } from '../types/workshop';
 
 interface PublicTrackingViewProps {
@@ -29,54 +49,73 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
   const [activeCode, setActiveCode] = useState(initialCode.trim().toUpperCase());
   const [ticket, setTicket] = useState<PublicTicketRecord | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [lightboxImageId, setLightboxImageId] = useState<string | null>(null);
+
+  const loadTicket = useCallback(async (code: string, showLoader: boolean) => {
+    if (showLoader) setIsLoading(true);
+    setErrorMsg('');
+    try {
+      const data = await fetchPublicTicketByCode<PublicTicketRecord>(code);
+      setTicket(data ?? undefined);
+    } catch (err) {
+      const msg =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message?: unknown }).message)
+          : 'No se pudo consultar el seguimiento.';
+      setErrorMsg(msg);
+      try {
+        await handleDbError(err, OperationType.GET, `public_tickets/${code}`);
+      } catch {
+        // Error already logged in structured JSON format
+      }
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => {
-    if (!activeCode) {
+    if (!activeCode || !VALID_TRACKING_CODE_RE.test(activeCode)) {
       setTicket(undefined);
       setIsLoading(false);
       setErrorMsg('');
       return;
     }
 
-    if (!VALID_TRACKING_CODE_RE.test(activeCode)) {
-      setTicket(undefined);
-      setIsLoading(false);
-      setErrorMsg('');
-      return;
-    }
+    void loadTicket(activeCode, true);
 
-    setIsLoading(true);
-    setErrorMsg('');
-    const path = `publicTickets/${activeCode}`;
-    const unsubscribe = onSnapshot(
-      doc(db, 'publicTickets', activeCode),
-      (snap) => {
-        if (snap.exists()) {
-          const data = snap.data();
-          setTicket({
-            ...(data as Omit<PublicTicketRecord, 'id' | 'updatedAt'>),
-            id: snap.id,
-            updatedAt: toMillis(data.updatedAt),
-          });
-        } else {
-          setTicket(undefined);
+    const channel = supabase
+      .channel(`public-ticket-${activeCode}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'public_tickets',
+          filter: `id=eq.${activeCode}`,
+        },
+        () => {
+          void loadTicket(activeCode, false);
         }
-        setIsLoading(false);
-      },
-      (err) => {
-        setIsLoading(false);
-        setErrorMsg(err.message || 'No se pudo consultar el seguimiento.');
-        try {
-          handleFirestoreError(err, OperationType.GET, path);
-        } catch {
-          // Error already logged in structured JSON format
-        }
+      )
+      .subscribe();
+
+    const handleRefreshIfVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void loadTicket(activeCode, false);
       }
-    );
+    };
+    window.addEventListener('focus', handleRefreshIfVisible);
+    document.addEventListener('visibilitychange', handleRefreshIfVisible);
 
-    return () => unsubscribe();
-  }, [activeCode]);
+    return () => {
+      window.removeEventListener('focus', handleRefreshIfVisible);
+      document.removeEventListener('visibilitychange', handleRefreshIfVisible);
+      void supabase.removeChannel(channel);
+    };
+  }, [activeCode, loadTicket]);
 
   const statusMeta = ticket ? getStatusMeta(ticket.status) : null;
   const activeStepIndex = ticket
@@ -89,6 +128,32 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
   const pendingBalance = ticket
     ? Math.max(0, Number(ticket.price || 0) - Number(ticket.deposit || 0))
     : 0;
+  const parsedWork = ticket
+    ? parseWorkDetailAndMedia(ticket.workDetail)
+    : { text: '', media: [] };
+  const imageItems = parsedWork.media.filter((item) => item.type === 'image');
+  const activeLightboxIndex = lightboxImageId
+    ? imageItems.findIndex((img) => img.id === lightboxImageId)
+    : -1;
+  const activeLightboxItem =
+    activeLightboxIndex >= 0 ? imageItems[activeLightboxIndex] : null;
+
+  useEffect(() => {
+    if (!activeLightboxItem) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setLightboxImageId(null);
+      } else if (e.key === 'ArrowRight' && imageItems.length > 1) {
+        const nextIdx = (activeLightboxIndex + 1) % imageItems.length;
+        setLightboxImageId(imageItems[nextIdx].id);
+      } else if (e.key === 'ArrowLeft' && imageItems.length > 1) {
+        const prevIdx = (activeLightboxIndex - 1 + imageItems.length) % imageItems.length;
+        setLightboxImageId(imageItems[prevIdx].id);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [activeLightboxItem, activeLightboxIndex, imageItems]);
 
   const handleLookup = (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,16 +183,32 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
             </div>
           </div>
 
-          {onExitTracking && (
-            <button
-              type="button"
-              onClick={onExitTracking}
-              className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              Volver al taller
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {activeCode && VALID_TRACKING_CODE_RE.test(activeCode) && (
+              <button
+                type="button"
+                disabled={isRefreshing || isLoading}
+                onClick={() => {
+                  setIsRefreshing(true);
+                  void loadTicket(activeCode, false);
+                }}
+                className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">Actualizar</span>
+              </button>
+            )}
+            {onExitTracking && (
+              <button
+                type="button"
+                onClick={onExitTracking}
+                className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Volver al taller
+              </button>
+            )}
+          </div>
         </div>
 
         <form
@@ -258,12 +339,101 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
               </div>
             </div>
 
-            {ticket.workDetail && (
+            {parsedWork.text && (
               <div className="rounded-xl border border-slate-200 p-3.5 dark:border-slate-800">
                 <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
                   Detalle del trabajo realizado
                 </div>
-                <p className="mt-1 text-sm text-slate-800 dark:text-slate-200">{ticket.workDetail}</p>
+                <p className="mt-1 whitespace-pre-line text-sm text-slate-800 dark:text-slate-200">
+                  {parsedWork.text}
+                </p>
+              </div>
+            )}
+
+            {parsedWork.media.length > 0 && (
+              <div className="space-y-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                    <Camera className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
+                    <span>Fotos y videos del técnico</span>
+                  </div>
+                  <span className="font-mono-num text-[11px] font-semibold text-slate-400">
+                    {parsedWork.media.length} {parsedWork.media.length === 1 ? 'archivo' : 'archivos'}
+                  </span>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {parsedWork.media.map((item) => {
+                    const embedUrl = item.type === 'video' ? getEmbedVideoUrl(item.url) : null;
+                    const isDirectVideo =
+                      item.type === 'video' &&
+                      (item.url.startsWith('data:video/') ||
+                        /\.(mp4|webm|mov|m4v|ogg)(\?.*)?$/i.test(item.url));
+                    return (
+                      <div
+                        key={item.id}
+                        className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-800/50"
+                      >
+                        {item.type === 'image' ? (
+                          <button
+                            type="button"
+                            onClick={() => setLightboxImageId(item.id)}
+                            className="group relative block w-full overflow-hidden bg-slate-900/5 text-left"
+                          >
+                            <img
+                              src={item.url}
+                              alt={item.caption || 'Avance técnico'}
+                              className="h-48 w-full object-cover transition duration-200 group-hover:scale-[1.02]"
+                            />
+                            <span className="absolute top-2 left-2 rounded-md bg-slate-900/70 px-2 py-0.5 text-[10px] font-semibold text-white">
+                              Foto
+                            </span>
+                            <span className="absolute right-2 bottom-2 rounded-md bg-slate-900/75 px-2 py-0.5 text-[10px] font-semibold text-white">
+                              Ampliar
+                            </span>
+                          </button>
+                        ) : embedUrl ? (
+                          <div className="aspect-video w-full bg-black">
+                            <iframe
+                              src={embedUrl}
+                              title={item.caption || 'Video técnico'}
+                              className="h-full w-full"
+                              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                              allowFullScreen
+                            />
+                          </div>
+                        ) : isDirectVideo ? (
+                          <video
+                            src={item.url}
+                            controls
+                            playsInline
+                            preload="metadata"
+                            className="h-48 w-full bg-black object-contain"
+                          />
+                        ) : (
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex h-36 flex-col items-center justify-center gap-2 bg-slate-100 p-4 text-center text-xs font-semibold text-[#0072BB] hover:bg-slate-200/70 dark:bg-slate-800 dark:text-sky-400"
+                          >
+                            <Video className="h-6 w-6" />
+                            <span className="inline-flex items-center gap-1">
+                              Ver video adjunto
+                              <ExternalLink className="h-3.5 w-3.5" />
+                            </span>
+                          </a>
+                        )}
+
+                        {item.caption && (
+                          <div className="border-t border-slate-200/80 px-3 py-2 text-xs text-slate-700 dark:border-slate-700/70 dark:text-slate-200">
+                            {item.caption}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
@@ -303,6 +473,73 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
           </div>
         )}
       </div>
+
+      {activeLightboxItem && (
+        <div
+          onClick={() => setLightboxImageId(null)}
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/90 p-4 backdrop-blur-xs"
+        >
+          <button
+            type="button"
+            onClick={() => setLightboxImageId(null)}
+            aria-label="Cerrar imagen"
+            className="absolute top-4 right-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"
+          >
+            <X className="h-5 w-5" />
+          </button>
+
+          {imageItems.length > 1 && (
+            <>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const prevIdx =
+                    (activeLightboxIndex - 1 + imageItems.length) % imageItems.length;
+                  setLightboxImageId(imageItems[prevIdx].id);
+                }}
+                aria-label="Imagen anterior"
+                className="absolute left-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25 sm:left-5"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const nextIdx = (activeLightboxIndex + 1) % imageItems.length;
+                  setLightboxImageId(imageItems[nextIdx].id);
+                }}
+                aria-label="Siguiente imagen"
+                className="absolute right-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25 sm:right-5"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+            </>
+          )}
+
+          <img
+            src={activeLightboxItem.url}
+            alt={activeLightboxItem.caption || 'Vista ampliada'}
+            onClick={(e) => e.stopPropagation()}
+            className="max-h-[82vh] max-w-full rounded-2xl object-contain shadow-2xl"
+          />
+
+          {(activeLightboxItem.caption || imageItems.length > 1) && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="mt-3 max-w-lg rounded-xl bg-slate-900/80 px-4 py-2 text-center text-xs text-white"
+            >
+              {activeLightboxItem.caption && <p>{activeLightboxItem.caption}</p>}
+              {imageItems.length > 1 && (
+                <p className="mt-0.5 font-mono-num text-[11px] text-slate-300">
+                  {activeLightboxIndex + 1} / {imageItems.length}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

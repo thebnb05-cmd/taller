@@ -1,8 +1,14 @@
-import React, { useEffect, useState } from 'react';
-import { onAuthStateChanged, type User } from 'firebase/auth';
-import { doc, onSnapshot } from 'firebase/firestore';
+import React, { useCallback, useEffect, useState } from 'react';
+import type { User } from '@supabase/supabase-js';
 import { Smartphone } from 'lucide-react';
-import { auth, db, handleFirestoreError, OperationType, toMillis } from './lib/db';
+import {
+  fetchSingleById,
+  handleDbError,
+  isMissingTableError,
+  OperationType,
+  subscribeTableChanges,
+  supabase,
+} from './lib/db';
 import type { WorkshopProfile } from './types/workshop';
 import { AuthScreen, WorkshopOnboarding } from './components/AuthGate';
 import { PublicTrackingView } from './components/PublicTrackingView';
@@ -21,40 +27,61 @@ function AuthenticatedGate({
   const [profile, setProfile] = useState<WorkshopProfile | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
+  const [missingSchema, setMissingSchema] = useState(false);
+
+  const loadProfile = useCallback(async (showSpinner = false) => {
+    if (showSpinner) setIsLoading(true);
+    setErrorMsg('');
+    setMissingSchema(false);
+    try {
+      const data = await fetchSingleById<WorkshopProfile>('workshop_profiles', user.id);
+      setProfile(data ?? undefined);
+    } catch (err) {
+      if (isMissingTableError(err)) {
+        setMissingSchema(true);
+      }
+      const msg =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message?: unknown }).message)
+          : 'Error al cargar el perfil del taller.';
+      setErrorMsg(msg);
+      try {
+        await handleDbError(err, OperationType.GET, `workshop_profiles/${user.id}`);
+      } catch {
+        // Structured error logged in console
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user.id]);
 
   useEffect(() => {
-    setIsLoading(true);
-    setErrorMsg('');
-    const path = `workshopProfiles/${user.uid}`;
-    const unsubscribe = onSnapshot(
-      doc(db, 'workshopProfiles', user.uid),
-      (snap) => {
-        if (snap.exists()) {
-          const data = snap.data();
-          setProfile({
-            ...(data as Omit<WorkshopProfile, 'id' | 'createdAt' | 'updatedAt'>),
-            id: snap.id,
-            createdAt: toMillis(data.createdAt),
-            updatedAt: toMillis(data.updatedAt),
-          });
-        } else {
-          setProfile(undefined);
-        }
-        setIsLoading(false);
-      },
-      (err) => {
-        setIsLoading(false);
-        setErrorMsg(err.message || 'Error al cargar el perfil del taller.');
-        try {
-          handleFirestoreError(err, OperationType.GET, path);
-        } catch {
-          // Structured error logged in console
-        }
-      }
-    );
+    void loadProfile(true);
+    const unsubLocal = subscribeTableChanges('workshop_profiles', () => {
+      void loadProfile(false);
+    });
 
-    return () => unsubscribe();
-  }, [user.uid]);
+    const channel = supabase
+      .channel(`profile-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'workshop_profiles',
+          filter: `id=eq.${user.id}`,
+        },
+        () => {
+          void loadProfile(false);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      unsubLocal();
+      void supabase.removeChannel(channel);
+    };
+  }, [user.id, loadProfile]);
 
   if (isLoading) {
     return (
@@ -69,26 +96,55 @@ function AuthenticatedGate({
   if (errorMsg) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 dark:bg-slate-950">
-        <div className="max-w-md rounded-2xl border border-red-200 bg-white p-6 text-sm text-red-700 dark:border-red-900/60 dark:bg-slate-900 dark:text-red-300">
-          Error al cargar el perfil del taller: {errorMsg}
+        <div className="max-w-lg space-y-3 rounded-2xl border border-red-200 bg-white p-6 text-sm text-red-700 dark:border-red-900/60 dark:bg-slate-900 dark:text-red-300">
+          <div className="font-bold">Error al cargar el perfil del taller</div>
+          <p>{errorMsg}</p>
+          {missingSchema && (
+            <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
+              Las tablas aún no existen en tu proyecto de Supabase. Ejecutá el archivo{' '}
+              <code>supabase/schema.sql</code> en el <strong>SQL Editor</strong> de Supabase y luego
+              hacé clic en Reintentar.
+            </p>
+          )}
+          <div className="flex gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => void loadProfile(true)}
+              className="h-9 rounded-xl bg-[#0072BB] px-4 text-xs font-semibold text-white hover:bg-[#005f9c]"
+            >
+              Reintentar
+            </button>
+            <button
+              type="button"
+              onClick={() => void supabase.auth.signOut()}
+              className="h-9 rounded-xl border border-slate-200 px-4 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200"
+            >
+              Cerrar sesión
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
+  const displayName =
+    (typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name) ||
+    (typeof user.user_metadata?.name === 'string' && user.user_metadata.name) ||
+    null;
+
   if (!profile) {
     return (
       <WorkshopOnboarding
-        userId={user.uid}
+        userId={user.id}
         userEmail={user.email}
-        displayName={user.displayName}
+        displayName={displayName}
       />
     );
   }
 
   return (
     <WorkshopApp
-      userId={user.uid}
+      userId={user.id}
       userEmail={user.email}
       profile={profile}
       darkMode={darkMode}
@@ -150,11 +206,25 @@ function AuthRouter({
   const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
+    let active = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      setUser(data.session?.user ?? null);
       setAuthReady(true);
     });
-    return () => unsubscribe();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!active) return;
+      setUser(session?.user ?? null);
+      setAuthReady(true);
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   if (!authReady) {

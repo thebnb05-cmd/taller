@@ -1,16 +1,26 @@
-import React, { useEffect, useState } from 'react';
-import { doc, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
-import { Package } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import QRCode from 'qrcode';
+import { Banknote, CreditCard, Landmark, Package, Printer } from 'lucide-react';
 import {
   clampStr,
-  db,
   generateDocId,
-  handleFirestoreError,
-  OperationType,
   stripUndefined,
+  updateRow,
+  upsertRow,
 } from '../lib/db';
-import type { ClientRecord, ProductRecord, SupplierRecord } from '../types/workshop';
+import type {
+  ClientRecord,
+  ProductRecord,
+  SaleRecord,
+  SupplierRecord,
+} from '../types/workshop';
 import { formatCurrency, todayISO } from '../utils/formatters';
+import {
+  buildTransferQrPayload,
+  loadTransferConfig,
+  type PaymentMethod,
+} from '../utils/payment';
+import { serializeSaleStatus } from '../utils/saleMeta';
 import { ModalShell } from './ModalShell';
 import { useToast } from './ToastProvider';
 
@@ -50,11 +60,11 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({ open, onClose, owner
     }
     setSaving(true);
     const taskId = generateDocId('tasks');
-    const path = `tasks/${taskId}`;
     try {
-      await setDoc(
-        doc(db, 'tasks', taskId),
+      await upsertRow(
+        'tasks',
         stripUndefined({
+          id: taskId,
           ownerId,
           title: clampStr(title, 200),
           taskType,
@@ -63,14 +73,13 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({ open, onClose, owner
           dueDate: clampStr(dueDate, 40),
           status,
           notes: clampStr(notes, 1500),
-          createdAt: serverTimestamp(),
         })
       );
       notify('Tarea agregada a la agenda.');
       onClose();
     } catch (err) {
+      console.error(err);
       notify('No se pudo guardar la tarea.', 'error');
-      handleFirestoreError(err, OperationType.CREATE, path);
     } finally {
       setSaving(false);
     }
@@ -253,27 +262,25 @@ export const NewSupplierModal: React.FC<NewSupplierModalProps> = ({
         balance: Math.max(0, Number(balance || 0)),
       });
       if (editSupplier) {
-        const path = `suppliers/${editSupplier.id}`;
         try {
-          await updateDoc(doc(db, 'suppliers', editSupplier.id), baseFields);
+          await updateRow('suppliers', editSupplier.id, baseFields);
           notify('Proveedor actualizado.');
         } catch (err) {
+          console.error(err);
           notify('No se pudo guardar el proveedor.', 'error');
-          handleFirestoreError(err, OperationType.UPDATE, path);
         }
       } else {
         const supplierId = generateDocId('suppliers');
-        const path = `suppliers/${supplierId}`;
         try {
-          await setDoc(doc(db, 'suppliers', supplierId), {
+          await upsertRow('suppliers', {
+            id: supplierId,
             ...baseFields,
             ownerId,
-            createdAt: serverTimestamp(),
           });
           notify('Proveedor guardado.');
         } catch (err) {
+          console.error(err);
           notify('No se pudo guardar el proveedor.', 'error');
-          handleFirestoreError(err, OperationType.CREATE, path);
         }
       }
       onClose();
@@ -408,6 +415,8 @@ interface NewSaleModalProps {
   ownerId: string;
   clients: ClientRecord[];
   preselectedProduct?: ProductRecord | null;
+  brandName?: string;
+  onCreated?: (sale: SaleRecord) => void;
 }
 
 export const NewSaleModal: React.FC<NewSaleModalProps> = ({
@@ -416,31 +425,112 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   ownerId,
   clients,
   preselectedProduct,
+  brandName,
+  onCreated,
 }) => {
   const { notify } = useToast();
   const [clientName, setClientName] = useState('');
   const [invoice, setInvoice] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [amount, setAmount] = useState('');
+  const [deposit, setDeposit] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo');
   const [status, setStatus] = useState<'pendiente' | 'cobrado'>('cobrado');
   const [dueDate, setDueDate] = useState(todayISO());
   const [saving, setSaving] = useState(false);
+  const [transferQrDataUrl, setTransferQrDataUrl] = useState('');
+
+  const transferCfg = useMemo(() => loadTransferConfig(ownerId), [ownerId, open]);
 
   useEffect(() => {
     if (!open) return;
+    const initialAmount = preselectedProduct ? String(preselectedProduct.price) : '';
     setClientName('');
     setInvoice(`FV-${Math.floor(1000 + Math.random() * 9000)}`);
     setQuantity(1);
-    setAmount(preselectedProduct ? String(preselectedProduct.price) : '');
+    setAmount(initialAmount);
+    setDeposit(initialAmount);
+    setPaymentMethod('efectivo');
     setStatus('cobrado');
     setDueDate(todayISO());
   }, [open, preselectedProduct]);
+
+  const numericAmount = Math.max(0, Number(amount || 0));
+  const numericDeposit =
+    status === 'cobrado'
+      ? numericAmount
+      : Math.min(numericAmount > 0 ? numericAmount : Number(deposit || 0), Math.max(0, Number(deposit || 0)));
+  const pendingBalance = Math.max(0, numericAmount - numericDeposit);
+  const qrChargeAmount = status === 'cobrado' ? numericAmount : numericDeposit > 0 ? numericDeposit : numericAmount;
+
+  useEffect(() => {
+    if (!open || paymentMethod !== 'transferencia') {
+      setTransferQrDataUrl('');
+      return;
+    }
+    if (transferCfg.qrImageDataUrl) {
+      setTransferQrDataUrl(transferCfg.qrImageDataUrl);
+      return;
+    }
+    const payload = buildTransferQrPayload(
+      transferCfg,
+      brandName || 'TH3 BNB',
+      invoice || 'VENTA',
+      clientName.trim() || 'Cliente',
+      qrChargeAmount
+    );
+    let cancelled = false;
+    QRCode.toDataURL(payload, {
+      width: 180,
+      margin: 1,
+      color: { dark: '#0f172a', light: '#ffffff' },
+    })
+      .then((url) => {
+        if (!cancelled) setTransferQrDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setTransferQrDataUrl('');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, paymentMethod, transferCfg, brandName, invoice, clientName, qrChargeAmount]);
 
   const handleQtyChange = (val: number) => {
     const clean = Math.max(1, Math.floor(val || 1));
     setQuantity(clean);
     if (preselectedProduct) {
-      setAmount(String(preselectedProduct.price * clean));
+      const nextAmt = String(preselectedProduct.price * clean);
+      setAmount(nextAmt);
+      if (status === 'cobrado') {
+        setDeposit(nextAmt);
+      }
+    }
+  };
+
+  const handleAmountChange = (val: string) => {
+    setAmount(val);
+    if (status === 'cobrado') {
+      setDeposit(val);
+    }
+  };
+
+  const handleDepositChange = (val: string) => {
+    setDeposit(val);
+    const numVal = Math.max(0, Number(val || 0));
+    if (numericAmount > 0 && numVal >= numericAmount) {
+      setStatus('cobrado');
+    } else if (numericAmount > 0 && numVal < numericAmount) {
+      setStatus('pendiente');
+    }
+  };
+
+  const handleStatusChange = (nextStatus: 'pendiente' | 'cobrado') => {
+    setStatus(nextStatus);
+    if (nextStatus === 'cobrado') {
+      setDeposit(amount);
+    } else if (Number(deposit || 0) >= numericAmount) {
+      setDeposit('0');
     }
   };
 
@@ -448,8 +538,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     (c) => c.name.trim().toLowerCase() === clientName.trim().toLowerCase()
   );
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submitSale = async (openPrintAfter: boolean) => {
     if (!clientName.trim()) {
       notify('Ingresá el nombre del cliente.', 'error');
       return;
@@ -470,56 +559,90 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       return;
     }
 
+    const cleanDeposit =
+      status === 'cobrado'
+        ? cleanAmount
+        : Math.min(cleanAmount, Math.max(0, Number(deposit || 0)));
+
+    const serializedStatus = serializeSaleStatus({
+      status,
+      method: paymentMethod,
+      deposit: cleanDeposit,
+      amount: cleanAmount,
+    });
+
     setSaving(true);
     try {
-      const batch = writeBatch(db);
       let resolvedClientId = matchedClient?.id;
 
       if (!resolvedClientId) {
         resolvedClientId = generateDocId('clients');
-        batch.set(
-          doc(db, 'clients', resolvedClientId),
+        await upsertRow(
+          'clients',
           stripUndefined({
+            id: resolvedClientId,
             ownerId,
             name: clampStr(clientName, 160),
-            createdAt: serverTimestamp(),
           })
         );
       }
 
       const saleId = generateDocId('sales');
-      batch.set(
-        doc(db, 'sales', saleId),
-        stripUndefined({
-          ownerId,
-          clientId: clampStr(resolvedClientId, 128),
-          clientName: clampStr(clientName, 160),
-          invoice: clampStr(invoice || `FV-${Date.now().toString().slice(-4)}`, 60),
-          productId: clampStr(preselectedProduct?.id, 128),
-          productName: clampStr(preselectedProduct?.name, 200),
-          quantity: preselectedProduct ? quantity : undefined,
-          amount: cleanAmount,
-          status,
-          dueDate: clampStr(dueDate, 40),
-          createdAt: serverTimestamp(),
-        })
-      );
+      const finalInvoice = clampStr(invoice || `FV-${Date.now().toString().slice(-4)}`, 60);
+      const finalDueDate = clampStr(dueDate, 40);
+      const salePayload = stripUndefined({
+        id: saleId,
+        ownerId,
+        clientId: clampStr(resolvedClientId, 128),
+        clientName: clampStr(clientName, 160),
+        invoice: finalInvoice,
+        productId: clampStr(preselectedProduct?.id, 128),
+        productName: clampStr(preselectedProduct?.name, 200),
+        quantity: preselectedProduct ? quantity : undefined,
+        amount: cleanAmount,
+        status: serializedStatus,
+        dueDate: finalDueDate,
+      });
+
+      await upsertRow('sales', salePayload);
 
       if (preselectedProduct && preselectedProduct.trackStock) {
-        batch.update(doc(db, 'products', preselectedProduct.id), {
+        await updateRow('products', preselectedProduct.id, {
           stock: Math.max(0, preselectedProduct.stock - quantity),
         });
       }
 
-      await batch.commit();
+      const createdRecord: SaleRecord = {
+        id: saleId,
+        ownerId,
+        clientId: resolvedClientId,
+        clientName: clampStr(clientName, 160),
+        invoice: finalInvoice,
+        productId: preselectedProduct?.id,
+        productName: preselectedProduct?.name,
+        quantity: preselectedProduct ? quantity : undefined,
+        amount: cleanAmount,
+        status: serializedStatus,
+        dueDate: finalDueDate,
+        createdAt: Date.now(),
+      };
+
       notify('Venta registrada.');
       onClose();
+      if (openPrintAfter) {
+        onCreated?.(createdRecord);
+      }
     } catch (err) {
+      console.error(err);
       notify('No se pudo guardar la venta.', 'error');
-      handleFirestoreError(err, OperationType.WRITE, 'sales');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await submitSale(false);
   };
 
   return (
@@ -592,34 +715,6 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Monto *
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              required
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="25000"
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-mono-num text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Estado
-            </label>
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value as 'pendiente' | 'cobrado')}
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            >
-              <option value="cobrado">Cobrado</option>
-              <option value="pendiente">Pendiente</option>
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
               Fecha / Vencimiento
             </label>
             <input
@@ -629,22 +724,157 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
               className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
           </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+              Monto total *
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              required
+              value={amount}
+              onChange={(e) => handleAmountChange(e.target.value)}
+              placeholder="25000"
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-mono-num text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+              Anticipo / Seña
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={status === 'cobrado' ? amount : deposit}
+              onChange={(e) => handleDepositChange(e.target.value)}
+              placeholder="0"
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-mono-num text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            />
+            <div className="mt-1 flex items-center justify-between text-[11px]">
+              <span className="text-slate-500">Saldo pendiente:</span>
+              <span
+                className={`font-mono-num font-bold ${
+                  pendingBalance > 0
+                    ? 'text-amber-600 dark:text-amber-400'
+                    : 'text-emerald-600 dark:text-emerald-400'
+                }`}
+              >
+                {formatCurrency(pendingBalance)}
+              </span>
+            </div>
+          </div>
         </div>
 
-        <div className="flex gap-3 pt-2">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+              Medio de pago
+            </label>
+            <div className="grid grid-cols-3 gap-1.5">
+              {(
+                [
+                  { id: 'efectivo', label: 'Efectivo', icon: Banknote },
+                  { id: 'transferencia', label: 'Transfer.', icon: Landmark },
+                  { id: 'tarjeta', label: 'Tarjeta', icon: CreditCard },
+                ] as const
+              ).map(({ id, label, icon: Icon }) => {
+                const active = paymentMethod === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setPaymentMethod(id)}
+                    className={`flex h-10 items-center justify-center gap-1 rounded-xl border px-2 text-xs font-semibold transition ${
+                      active
+                        ? 'border-[#0072BB] bg-[#0072BB] text-white'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    <Icon className="h-3.5 w-3.5 shrink-0" />
+                    <span>{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+              Estado del cobro
+            </label>
+            <select
+              value={status}
+              onChange={(e) => handleStatusChange(e.target.value as 'pendiente' | 'cobrado')}
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            >
+              <option value="cobrado">Cobrado (total)</option>
+              <option value="pendiente">Pendiente / Con seña</option>
+            </select>
+          </div>
+        </div>
+
+        {paymentMethod === 'transferencia' && (
+          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-sky-200 bg-sky-50/70 p-3 dark:border-sky-900/60 dark:bg-sky-950/30">
+            {transferQrDataUrl && (
+              <img
+                src={transferQrDataUrl}
+                alt="QR de transferencia"
+                className="h-20 w-20 shrink-0 rounded-xl border border-slate-200 bg-white p-1"
+              />
+            )}
+            <div className="min-w-0 flex-1 text-xs">
+              <div className="font-bold text-slate-900 dark:text-white">
+                Transferencia · {formatCurrency(qrChargeAmount)}
+              </div>
+              {transferCfg.alias && (
+                <div className="mt-0.5 text-slate-600 dark:text-slate-300">
+                  Alias: <strong className="font-mono-num">{transferCfg.alias}</strong>
+                </div>
+              )}
+              {transferCfg.cbu && (
+                <div className="text-slate-600 dark:text-slate-300">
+                  CBU/CVU: <strong className="font-mono-num">{transferCfg.cbu}</strong>
+                </div>
+              )}
+              {transferCfg.holder && (
+                <div className="text-slate-500 dark:text-slate-400">
+                  Titular: {transferCfg.holder}
+                </div>
+              )}
+              {!transferCfg.alias && !transferCfg.cbu && !transferCfg.paymentLink && (
+                <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                  Podés configurar tu Alias/CBU o QR propio desde el detalle de cualquier reparación al cobrar por transferencia.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2.5 pt-2">
           <button
             type="button"
             onClick={onClose}
-            className="h-11 flex-1 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300"
+            className="h-11 flex-1 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300"
           >
             Cancelar
           </button>
           <button
             type="submit"
             disabled={saving}
-            className="h-11 flex-1 rounded-xl bg-[#0072BB] text-sm font-semibold text-white hover:bg-[#005f9c]"
+            className="h-11 flex-1 rounded-xl border border-[#0072BB] px-3 text-sm font-semibold text-[#0072BB] hover:bg-sky-50 dark:border-sky-500 dark:text-sky-400 dark:hover:bg-sky-950/40"
           >
-            {saving ? 'Guardando...' : 'Guardar venta'}
+            {saving ? 'Guardando...' : 'Guardar'}
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => void submitSale(true)}
+            className="inline-flex h-11 flex-[1.3] items-center justify-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-sm font-semibold text-white hover:bg-[#005f9c]"
+          >
+            <Printer className="h-4 w-4 shrink-0" />
+            <span>{saving ? 'Guardando...' : 'Guardar e imprimir'}</span>
           </button>
         </div>
       </form>
@@ -695,14 +925,14 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
     }
     setSaving(true);
     const purchaseId = generateDocId('purchases');
-    const path = `purchases/${purchaseId}`;
     try {
       const matched = suppliers.find(
         (s) => s.name.trim().toLowerCase() === supplierName.trim().toLowerCase()
       );
-      await setDoc(
-        doc(db, 'purchases', purchaseId),
+      await upsertRow(
+        'purchases',
         stripUndefined({
+          id: purchaseId,
           ownerId,
           supplierId: clampStr(matched?.id, 128),
           supplierName: clampStr(supplierName, 160),
@@ -710,14 +940,13 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
           amount: cleanAmount,
           status,
           dueDate: clampStr(dueDate, 40),
-          createdAt: serverTimestamp(),
         })
       );
       notify('Compra registrada.');
       onClose();
     } catch (err) {
+      console.error(err);
       notify('No se pudo guardar la compra.', 'error');
-      handleFirestoreError(err, OperationType.CREATE, path);
     } finally {
       setSaving(false);
     }

@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { Image as ImageIcon, Trash2, UploadCloud } from 'lucide-react';
-import { clampStr, db, handleFirestoreError, OperationType, stripUndefined } from '../lib/db';
+import { clampStr, handleDbError, OperationType, stripUndefined, updateRow } from '../lib/db';
 import { DEFAULT_RECEIPT_TERMS } from '../data/catalog';
 import { compressImageToDataUrl } from '../utils/formatters';
 import type { WorkshopProfile } from '../types/workshop';
@@ -75,7 +74,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    const path = `workshopProfiles/${profile.id}`;
+    const path = `workshop_profiles/${profile.id}`;
     try {
       const payload = stripUndefined({
         brandName: clampStr(brandName || 'TH3 BNB', 80) || 'TH3 BNB',
@@ -87,14 +86,14 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
         logoTransparent,
         receiptTerms: clampStr(receiptTerms, 2000),
         trackingBaseUrl: clampStr(trackingBaseUrl || window.location.origin, 250),
-        updatedAt: serverTimestamp(),
+        updatedAt: new Date().toISOString(),
       });
-      await updateDoc(doc(db, 'workshopProfiles', profile.id), payload);
+      await updateRow('workshop_profiles', profile.id, payload);
       notify('Marca y comprobantes actualizados.');
       onClose();
     } catch (err) {
       notify('Error al guardar la configuración.', 'error');
-      handleFirestoreError(err, OperationType.UPDATE, path);
+      await handleDbError(err, OperationType.UPDATE, path);
     } finally {
       setSaving(false);
     }
@@ -292,13 +291,14 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
 
         <div>
           <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-            Condiciones legales en boleta del cliente
+            Términos y condiciones
           </label>
           <textarea
             rows={4}
-            maxLength={1500}
+            maxLength={2000}
             value={receiptTerms}
             onChange={(e) => setReceiptTerms(e.target.value)}
+            placeholder="Escribí los términos y condiciones que aparecerán en la boleta del cliente..."
             className="w-full rounded-xl border border-slate-200 bg-white p-3 text-xs leading-relaxed text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
           />
         </div>

@@ -1,19 +1,30 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import {
-  collection,
-  doc,
-  getDocFromServer,
-  getFirestore,
-  Timestamp,
-} from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { createClient } from '@supabase/supabase-js';
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
-googleProvider.setCustomParameters({ prompt: 'select_account' });
+export const SUPABASE_URL =
+  import.meta.env.VITE_SUPABASE_URL || 'https://fjkxnvqqmhxfycqbkmqy.supabase.co';
+
+export const SUPABASE_ANON_KEY =
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  'sb_publishable_ZDUlk1JOyzUt-VpYIcnM2Q_5Vdqyyrz';
+
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+});
+
+export type TableName =
+  | 'workshop_profiles'
+  | 'clients'
+  | 'repairs'
+  | 'public_tickets'
+  | 'products'
+  | 'tasks'
+  | 'suppliers'
+  | 'sales'
+  | 'purchases';
 
 export enum OperationType {
   CREATE = 'create',
@@ -24,78 +35,63 @@ export enum OperationType {
   WRITE = 'write',
 }
 
-export interface FirestoreErrorInfo {
+export interface DbErrorInfo {
   error: string;
   operationType: OperationType;
   path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
-  };
+  userId?: string | null;
 }
 
-export function handleFirestoreError(
+export async function handleDbError(
   error: unknown,
   operationType: OperationType,
   path: string | null
-): never {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo:
-        auth.currentUser?.providerData?.map((provider) => ({
-          providerId: provider.providerId,
-          email: provider.email,
-        })) || [],
-    },
+): Promise<never> {
+  const { data } = await supabase.auth.getUser().catch(() => ({ data: { user: null } }));
+  const errInfo: DbErrorInfo = {
+    error:
+      error && typeof error === 'object' && 'message' in error
+        ? String((error as { message?: unknown }).message)
+        : String(error),
     operationType,
     path,
+    userId: data?.user?.id ?? null,
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  console.error('Supabase Error:', JSON.stringify(errInfo));
+  throw new Error(errInfo.error || 'Error de base de datos en Supabase.');
 }
 
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration.');
-    }
+export function isMissingTableError(error: unknown): boolean {
+  const msg =
+    error && typeof error === 'object' && 'message' in error
+      ? String((error as { message?: unknown }).message)
+      : String(error || '');
+  const code =
+    error && typeof error === 'object' && 'code' in error
+      ? String((error as { code?: unknown }).code)
+      : '';
+  return (
+    code === '42P01' ||
+    code === 'PGRST205' ||
+    msg.includes('Could not find the table') ||
+    msg.includes('does not exist')
+  );
+}
+
+export function generateDocId(_tableName?: string): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
   }
-}
-testConnection();
-
-export function generateDocId(collectionName: string): string {
-  return doc(collection(db, collectionName)).id;
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export function toMillis(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (value instanceof Timestamp) return value.toMillis();
-  if (
-    value &&
-    typeof value === 'object' &&
-    'toMillis' in value &&
-    typeof (value as { toMillis?: unknown }).toMillis === 'function'
-  ) {
-    return (value as { toMillis: () => number }).toMillis();
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) return parsed;
   }
-  if (value && typeof value === 'object' && 'seconds' in value) {
-    return Number((value as { seconds: number }).seconds) * 1000;
-  }
+  if (value instanceof Date) return value.getTime();
   return Date.now();
 }
 
@@ -103,12 +99,185 @@ export function clampStr(value: string | undefined | null, maxLen: number): stri
   return (value ?? '').trim().slice(0, maxLen);
 }
 
-export function stripUndefined<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
+export function stripUndefined<T extends Record<string, unknown>>(
+  obj: T,
+  keepNull = false
+): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(obj)) {
-    if (val === undefined || val === null) continue;
+    if (val === undefined) continue;
+    if (val === null && !keepNull) continue;
     if (typeof val === 'number' && !Number.isFinite(val)) continue;
     result[key] = val;
   }
   return result;
+}
+
+function camelToSnake(key: string): string {
+  return key.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`);
+}
+
+function snakeToCamel(key: string): string {
+  return key.replace(/_([a-z])/g, (_, ch: string) => ch.toUpperCase());
+}
+
+const NUMERIC_FIELDS = new Set([
+  'price',
+  'deposit',
+  'paidAmount',
+  'progress',
+  'cost',
+  'margin',
+  'vat',
+  'rounding',
+  'netPrice',
+  'stock',
+  'minStock',
+  'reorderCap',
+  'weight',
+  'height',
+  'width',
+  'depth',
+  'balance',
+  'amount',
+  'quantity',
+  'logoScale',
+]);
+
+export function toSnakeRecord(obj: Record<string, unknown>, keepNull = false): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(obj)) {
+    if (val === undefined) continue;
+    if (val === null && !keepNull) continue;
+    if (typeof val === 'number' && !Number.isFinite(val)) continue;
+    out[camelToSnake(key)] = val;
+  }
+  return out;
+}
+
+export function fromDbRow<T>(row: Record<string, unknown>): T {
+  const out: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(row)) {
+    const camel = snakeToCamel(key);
+    if (camel === 'createdAt' || camel === 'updatedAt') {
+      out[camel] = toMillis(val);
+    } else if (NUMERIC_FIELDS.has(camel) && val !== null && val !== undefined && val !== '') {
+      const n = Number(val);
+      out[camel] = Number.isFinite(n) ? n : val;
+    } else if (val !== null) {
+      out[camel] = val;
+    }
+  }
+  return out as T;
+}
+
+// Local pub/sub so mutations inside this tab update active views immediately
+const tableListeners = new Map<TableName, Set<() => void>>();
+
+export function notifyTableChanged(table: TableName): void {
+  const set = tableListeners.get(table);
+  if (!set) return;
+  for (const cb of set) {
+    try {
+      cb();
+    } catch {
+      // Ignore individual listener errors
+    }
+  }
+}
+
+export function subscribeTableChanges(table: TableName, callback: () => void): () => void {
+  let set = tableListeners.get(table);
+  if (!set) {
+    set = new Set();
+    tableListeners.set(table, set);
+  }
+  set.add(callback);
+  return () => {
+    set?.delete(callback);
+  };
+}
+
+export async function fetchOwnerRows<T>(table: TableName, ownerId: string): Promise<T[]> {
+  const { data, error } = await supabase
+    .from(table)
+    .select('*')
+    .eq('owner_id', ownerId);
+  if (error) {
+    throw error;
+  }
+  return (data || []).map((row) => fromDbRow<T>(row as Record<string, unknown>));
+}
+
+export async function fetchSingleById<T>(table: TableName, id: string): Promise<T | null> {
+  const { data, error } = await supabase
+    .from(table)
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) {
+    throw error;
+  }
+  if (!data) return null;
+  return fromDbRow<T>(data as Record<string, unknown>);
+}
+
+export async function fetchPublicTicketByCode<T>(trackingCode: string): Promise<T | null> {
+  const { data, error } = await supabase
+    .from('public_tickets')
+    .select('*')
+    .eq('id', trackingCode)
+    .maybeSingle();
+  if (error) {
+    throw error;
+  }
+  if (!data) return null;
+  return fromDbRow<T>(data as Record<string, unknown>);
+}
+
+export async function upsertRow(
+  table: TableName,
+  record: Record<string, unknown>
+): Promise<void> {
+  const payload = toSnakeRecord(record, false);
+  const { error } = await supabase.from(table).upsert(payload, { onConflict: 'id' });
+  if (error) {
+    await handleDbError(error, OperationType.WRITE, `${table}/${String(record.id ?? '')}`);
+  }
+  notifyTableChanged(table);
+}
+
+export async function insertRows(
+  table: TableName,
+  records: Array<Record<string, unknown>>
+): Promise<void> {
+  if (records.length === 0) return;
+  const payload = records.map((r) => toSnakeRecord(r, false));
+  const { error } = await supabase.from(table).insert(payload);
+  if (error) {
+    await handleDbError(error, OperationType.CREATE, table);
+  }
+  notifyTableChanged(table);
+}
+
+export async function updateRow(
+  table: TableName,
+  id: string,
+  patch: Record<string, unknown>,
+  keepNull = false
+): Promise<void> {
+  const payload = toSnakeRecord(patch, keepNull);
+  const { error } = await supabase.from(table).update(payload).eq('id', id);
+  if (error) {
+    await handleDbError(error, OperationType.UPDATE, `${table}/${id}`);
+  }
+  notifyTableChanged(table);
+}
+
+export async function deleteRow(table: TableName, id: string): Promise<void> {
+  const { error } = await supabase.from(table).delete().eq('id', id);
+  if (error) {
+    await handleDbError(error, OperationType.DELETE, `${table}/${id}`);
+  }
+  notifyTableChanged(table);
 }
