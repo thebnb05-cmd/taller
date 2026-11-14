@@ -62,6 +62,7 @@ import {
   type TechMediaItem,
 } from '../utils/techMedia';
 import { buildTrackingUrl } from '../utils/tracking';
+import { getFunctionalCheckFields, getPhysicalCheckFields } from '../utils/checkFields';
 import { ModalShell } from './ModalShell';
 import { PatternLock } from './PatternLock';
 import { RepairPrintDocuments } from './RepairPrintDocuments';
@@ -75,29 +76,6 @@ interface RepairDetailModalProps {
   justCreated?: boolean;
   onClose: () => void;
 }
-
-const CHECKOUT_PHYSICAL_FIELDS: Array<{ key: string; label: string; options: string[] }> = [
-  { key: 'Pantalla', label: 'Pantalla', options: ['OK', 'Rayada', 'Rota'] },
-  { key: 'Tapa trasera', label: 'Tapa trasera', options: ['OK', 'Despegada', 'Rayada', 'Rota'] },
-  { key: 'Marco / Bisel', label: 'Marco / Bisel', options: ['OK', 'Doblado', 'Dañado'] },
-  { key: 'Corrosión / Óxido', label: 'Corrosión / Óxido', options: ['No', 'Leve', 'Severa'] },
-  { key: 'Puerto de carga', label: 'Puerto de carga', options: ['OK', 'Sucio', 'Dañado'] },
-  { key: 'Reparación anterior', label: 'Reparación anterior', options: ['No', 'Sí'] },
-  { key: 'Estado general', label: 'Estado general', options: ['OK', 'Regular', 'Malo'] },
-  { key: 'Rayones', label: 'Rayones', options: ['No', 'Leves', 'Severos'] },
-  { key: 'Golpes visibles', label: 'Golpes visibles', options: ['No', 'Leves', 'Severos'] },
-];
-
-const CHECKOUT_FUNCTIONAL_FIELDS: Array<{ key: string; label: string; options: string[] }> = [
-  { key: 'Enciende', label: 'Enciende', options: ['OK', 'No', 'No probado'] },
-  { key: 'Touch / Táctil', label: 'Touch / Táctil', options: ['OK', 'Falla', 'No probado'] },
-  { key: 'Carga', label: 'Carga', options: ['OK', 'No', 'No probado'] },
-  { key: 'Sonido', label: 'Sonido', options: ['OK', 'Falla', 'No probado'] },
-  { key: 'Micrófono', label: 'Micrófono', options: ['OK', 'Falla', 'No probado'] },
-  { key: 'WiFi', label: 'WiFi', options: ['OK', 'Falla', 'No probado'] },
-  { key: 'Botones', label: 'Botones', options: ['OK', 'Falla', 'No probado'] },
-  { key: 'Huella / FaceID', label: 'Huella / FaceID', options: ['OK', 'Falla', 'No tiene'] },
-];
 
 export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   repair,
@@ -1609,7 +1587,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                 <div className="text-xs font-bold uppercase tracking-wide text-slate-700 dark:text-slate-300">
                   CHECK OUT · Estado físico
                 </div>
-                {CHECKOUT_PHYSICAL_FIELDS.map((field) => (
+                {getPhysicalCheckFields(repair.deviceType).map((field) => (
                   <div
                     key={field.key}
                     className="flex flex-wrap items-center justify-between gap-2"
@@ -1654,7 +1632,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                 <div className="text-xs font-bold uppercase tracking-wide text-slate-700 dark:text-slate-300">
                   CHECK OUT · Estado funcional
                 </div>
-                {CHECKOUT_FUNCTIONAL_FIELDS.map((field) => (
+                {getFunctionalCheckFields(repair.deviceType).map((field) => (
                   <div
                     key={field.key}
                     className="flex flex-wrap items-center justify-between gap-2"

@@ -28,6 +28,7 @@ import {
   generateTrackingCode,
   todayISO,
 } from '../utils/formatters';
+import { getFunctionalCheckFields, getPhysicalCheckFields } from '../utils/checkFields';
 import { ModalShell } from './ModalShell';
 import { PatternLock } from './PatternLock';
 import { useToast } from './ToastProvider';
@@ -55,48 +56,13 @@ const DEFAULT_ACCESSORIES = [
   'Otro',
 ];
 const NOTEBOOK_ACCESSORIES = ['Caja', 'Cable', 'Funda'];
-
-const PHYSICAL_DEFAULT_FIELDS: Array<{ key: string; label: string; options: string[] }> = [
-  { key: 'Pantalla', label: 'Pantalla', options: ['OK', 'Rayada', 'Rota'] },
-  { key: 'Tapa trasera', label: 'Tapa trasera', options: ['OK', 'Despegada', 'Rayada', 'Rota'] },
-  { key: 'Marco / Bisel', label: 'Marco / Bisel', options: ['OK', 'Doblado', 'Dañado'] },
-  { key: 'Corrosión / Óxido', label: 'Corrosión / Óxido', options: ['No', 'Leve', 'Severa'] },
-  { key: 'Puerto de carga', label: 'Puerto de carga', options: ['OK', 'Sucio', 'Dañado'] },
-  { key: 'Reparación anterior', label: 'Reparación anterior', options: ['No', 'Sí'] },
-  { key: 'Estado general', label: 'Estado general', options: ['OK', 'Regular', 'Malo'] },
-  { key: 'Rayones', label: 'Rayones', options: ['No', 'Leves', 'Severos'] },
-  { key: 'Golpes visibles', label: 'Golpes visibles', options: ['No', 'Leves', 'Severos'] },
-];
-
-const PHYSICAL_SIMPLE_FIELDS: Array<{ key: string; label: string; options: string[] }> = [
-  { key: 'Estado general', label: 'Estado general', options: ['OK', 'Regular', 'Malo'] },
-  { key: 'Rayones', label: 'Rayones', options: ['No', 'Leves', 'Severos'] },
-  { key: 'Golpes visibles', label: 'Golpes visibles', options: ['No', 'Leves', 'Severos'] },
-];
-
-const FUNCTIONAL_DEFAULT_FIELDS: Array<{ key: string; label: string; options: string[] }> = [
-  { key: 'Enciende', label: 'Enciende', options: ['OK', 'No', 'No probado'] },
-  { key: 'Touch / Táctil', label: 'Touch / Táctil', options: ['OK', 'Falla', 'No probado'] },
-  { key: 'Carga', label: 'Carga', options: ['OK', 'No', 'No probado'] },
-  { key: 'Sonido', label: 'Sonido', options: ['OK', 'Falla', 'No probado'] },
-  { key: 'Micrófono', label: 'Micrófono', options: ['OK', 'Falla', 'No probado'] },
-  { key: 'WiFi', label: 'WiFi', options: ['OK', 'Falla', 'No probado'] },
-  { key: 'Botones', label: 'Botones', options: ['OK', 'Falla', 'No probado'] },
-  { key: 'Huella / FaceID', label: 'Huella / FaceID', options: ['OK', 'Falla', 'No tiene'] },
-];
-
-const FUNCTIONAL_NOTEBOOK_FIELDS: Array<{ key: string; label: string; options: string[] }> = [
-  { key: 'Enciende', label: 'Enciende', options: ['OK', 'No', 'No probado'] },
-  { key: 'Lector de discos', label: 'Lector de discos', options: ['OK', 'Falla', 'No tiene'] },
-  { key: 'Imagen HDMI', label: 'Imagen HDMI', options: ['OK', 'Falla', 'No probado'] },
-  { key: 'Ventilador', label: 'Ventilador', options: ['OK', 'Falla', 'No probado'] },
-];
-
-const FUNCTIONAL_CONSOLE_FIELDS: Array<{ key: string; label: string; options: string[] }> = [
-  { key: 'Enciende', label: 'Enciende', options: ['OK', 'No', 'No probado'] },
-  { key: 'Lector de discos', label: 'Lector de discos', options: ['OK', 'Falla', 'No tiene'] },
-  { key: 'Imagen HDMI', label: 'Imagen HDMI', options: ['OK', 'Falla', 'No probado'] },
-  { key: 'Ventilador', label: 'Ventilador', options: ['OK', 'Ruidoso', 'No funciona'] },
+const PC_ACCESSORIES = [
+  'Cable poder',
+  'Cable HDMI / VGA',
+  'Teclado',
+  'Mouse',
+  'Monitor',
+  'Otro',
 ];
 
 export const NewRepairModal: React.FC<NewRepairModalProps> = ({
@@ -220,30 +186,15 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
 
   const isConsole = deviceType === 'Consola / joystick';
   const isNotebook = deviceType === 'Notebook';
-  const isSpeaker = deviceType === 'Parlante';
+  const isDesktopPc = deviceType === 'PC de escritorio';
   const showCapacity =
     deviceType === 'Celular' || deviceType === 'Tablet' || deviceType === 'Smartwatch';
 
   const pendingBalance = Math.max(0, Number(price || 0) - Number(deposit || 0));
 
-  const physicalFields = useMemo(() => {
-    if (isSpeaker) {
-      return [
-        ...PHYSICAL_SIMPLE_FIELDS,
-        { key: 'Prende luz', label: 'Prende luz', options: ['Sí', 'No'] },
-      ];
-    }
-    if (isNotebook || isConsole || deviceType === 'PC de escritorio') {
-      return PHYSICAL_SIMPLE_FIELDS;
-    }
-    return PHYSICAL_DEFAULT_FIELDS;
-  }, [deviceType, isConsole, isNotebook, isSpeaker]);
+  const physicalFields = useMemo(() => getPhysicalCheckFields(deviceType), [deviceType]);
 
-  const functionalFields = useMemo(() => {
-    if (isNotebook || deviceType === 'PC de escritorio') return FUNCTIONAL_NOTEBOOK_FIELDS;
-    if (isConsole) return FUNCTIONAL_CONSOLE_FIELDS;
-    return FUNCTIONAL_DEFAULT_FIELDS;
-  }, [deviceType, isConsole, isNotebook]);
+  const functionalFields = useMemo(() => getFunctionalCheckFields(deviceType), [deviceType]);
 
   const handleSelectExistingClient = (selectedId: string) => {
     setClientId(selectedId);
@@ -945,7 +896,12 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               </div>
             ) : (
               <div className="flex flex-wrap gap-2">
-                {(isNotebook ? NOTEBOOK_ACCESSORIES : DEFAULT_ACCESSORIES).map((acc) => {
+                {(isDesktopPc
+                  ? PC_ACCESSORIES
+                  : isNotebook
+                    ? NOTEBOOK_ACCESSORIES
+                    : DEFAULT_ACCESSORIES
+                ).map((acc) => {
                   const active = accessories.includes(acc);
                   return (
                     <button
@@ -985,7 +941,15 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                           key={opt}
                           type="button"
                           onClick={() =>
-                            setPhysicalCheck((prev) => ({ ...prev, [field.key]: opt }))
+                            setPhysicalCheck((prev) => {
+                              const next = { ...prev };
+                              if (next[field.key] === opt) {
+                                delete next[field.key];
+                              } else {
+                                next[field.key] = opt;
+                              }
+                              return next;
+                            })
                           }
                           className={`rounded-lg px-2 py-1 text-[11px] font-medium transition ${
                             physicalCheck[field.key] === opt
@@ -1014,7 +978,15 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                           key={opt}
                           type="button"
                           onClick={() =>
-                            setFunctionalCheck((prev) => ({ ...prev, [field.key]: opt }))
+                            setFunctionalCheck((prev) => {
+                              const next = { ...prev };
+                              if (next[field.key] === opt) {
+                                delete next[field.key];
+                              } else {
+                                next[field.key] = opt;
+                              }
+                              return next;
+                            })
                           }
                           className={`rounded-lg px-2 py-1 text-[11px] font-medium transition ${
                             functionalCheck[field.key] === opt
