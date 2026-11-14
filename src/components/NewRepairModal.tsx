@@ -127,6 +127,44 @@ const CONSOLE_EDITION_OPTIONS = [
   'Portátil (Switch / PSP)',
   'Otro',
 ];
+const SMARTWATCH_ACCESSORIES = [
+  'Cargador magnético',
+  'Cable USB',
+  'Malla / Correa',
+  'Protector / Case',
+  'Caja',
+  'Otro',
+];
+const SMARTWATCH_BRAND_SUGGESTIONS = [
+  'Apple',
+  'Samsung',
+  'Xiaomi',
+  'Amazfit',
+  'Huawei',
+  'Garmin',
+  'Haylou',
+  'Colmi',
+  'Genérico',
+];
+const SMARTWATCH_MODEL_SUGGESTIONS = [
+  'Apple Watch SE / Series',
+  'Apple Watch Ultra',
+  'Galaxy Watch 4 / 5 / 6',
+  'Xiaomi Watch / Mi Band',
+  'Amazfit GTS / GTR / Bip',
+  'Huawei Watch GT / Fit',
+  'Genérico (T500 / W26 / HK9)',
+];
+const SMARTWATCH_SIZE_OPTIONS = [
+  '38 / 40 mm',
+  '41 / 42 mm',
+  '44 / 45 mm',
+  '46 / 47 mm',
+  '49 mm (Ultra)',
+  'Redondo estándar',
+  'Rectangular estándar',
+  'Otro',
+];
 
 export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   open,
@@ -248,6 +286,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     deviceType === 'PC de escritorio' ||
     deviceType === 'Parlante' ||
     deviceType === 'Consola / joystick' ||
+    deviceType === 'Smartwatch' ||
     deviceType === 'Auriculares' ||
     deviceType === 'Otros equipos';
 
@@ -255,6 +294,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   const isNotebook = deviceType === 'Notebook';
   const isDesktopPc = deviceType === 'PC de escritorio';
   const isSpeaker = deviceType === 'Parlante';
+  const isSmartwatch = deviceType === 'Smartwatch';
   const showCapacity =
     deviceType === 'Celular' || deviceType === 'Tablet' || deviceType === 'Smartwatch';
 
@@ -507,7 +547,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                             ? 'Portátil Bluetooth'
                             : opt.type === 'Consola / joystick'
                               ? 'Consola · 500 GB'
-                              : '128 GB'
+                              : opt.type === 'Smartwatch'
+                                ? '44 / 45 mm'
+                                : '128 GB'
                         );
                       }
                       setDeviceType(opt.type);
@@ -675,7 +717,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                           ? 'speaker-brands-datalist'
                           : isConsole
                             ? 'console-brands-datalist'
-                            : undefined
+                            : isSmartwatch
+                              ? 'smartwatch-brands-datalist'
+                              : undefined
                       }
                       value={customBrand}
                       onChange={(e) => setCustomBrand(e.target.value)}
@@ -684,7 +728,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                           ? 'Ej: JBL, Sony, Noblex, Philips...'
                           : isConsole
                             ? 'Ej: Sony PlayStation, Xbox, Nintendo...'
-                            : `Marca de ${deviceType}`
+                            : isSmartwatch
+                              ? 'Ej: Apple, Samsung, Xiaomi, Amazfit...'
+                              : `Marca de ${deviceType}`
                       }
                       className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     />
@@ -698,6 +744,13 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                     {isConsole && (
                       <datalist id="console-brands-datalist">
                         {CONSOLE_BRAND_SUGGESTIONS.map((b) => (
+                          <option key={b} value={b} />
+                        ))}
+                      </datalist>
+                    )}
+                    {isSmartwatch && (
+                      <datalist id="smartwatch-brands-datalist">
+                        {SMARTWATCH_BRAND_SUGGESTIONS.map((b) => (
                           <option key={b} value={b} />
                         ))}
                       </datalist>
@@ -740,7 +793,13 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                   <>
                     <input
                       type="text"
-                      list={isConsole ? 'console-models-datalist' : undefined}
+                      list={
+                        isConsole
+                          ? 'console-models-datalist'
+                          : isSmartwatch
+                            ? 'smartwatch-models-datalist'
+                            : undefined
+                      }
                       value={customModel}
                       onChange={(e) => setCustomModel(e.target.value)}
                       placeholder={
@@ -748,13 +807,22 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                           ? 'Ej: Flip 6, Charge 5, Torre 15"...'
                           : isConsole
                             ? 'Ej: PS4 Slim, PS5, DualSense, Xbox Series S...'
-                            : `Modelo de ${deviceType}`
+                            : isSmartwatch
+                              ? 'Ej: Watch Series 8, Galaxy Watch 5, Amazfit GTS...'
+                              : `Modelo de ${deviceType}`
                       }
                       className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     />
                     {isConsole && (
                       <datalist id="console-models-datalist">
                         {CONSOLE_MODEL_SUGGESTIONS.map((m) => (
+                          <option key={m} value={m} />
+                        ))}
+                      </datalist>
+                    )}
+                    {isSmartwatch && (
+                      <datalist id="smartwatch-models-datalist">
+                        {SMARTWATCH_MODEL_SUGGESTIONS.map((m) => (
                           <option key={m} value={m} />
                         ))}
                       </datalist>
@@ -807,7 +875,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                       ? 'Tipo / Formato'
                       : isConsole
                         ? 'Edición / Capacidad'
-                        : 'Capacidad'}
+                        : isSmartwatch
+                          ? 'Medida / Caja'
+                          : 'Capacidad'}
                   </label>
                   <select
                     value={capacity}
@@ -818,7 +888,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                       ? SPEAKER_FORMAT_OPTIONS
                       : isConsole
                         ? CONSOLE_EDITION_OPTIONS
-                        : CAPACITY_OPTIONS
+                        : isSmartwatch
+                          ? SMARTWATCH_SIZE_OPTIONS
+                          : CAPACITY_OPTIONS
                     ).map((opt) => (
                       <option key={opt} value={opt}>
                         {opt}
@@ -1034,9 +1106,11 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                   ? PC_ACCESSORIES
                   : isSpeaker
                     ? SPEAKER_ACCESSORIES
-                    : isNotebook
-                      ? NOTEBOOK_ACCESSORIES
-                      : DEFAULT_ACCESSORIES
+                    : isSmartwatch
+                      ? SMARTWATCH_ACCESSORIES
+                      : isNotebook
+                        ? NOTEBOOK_ACCESSORIES
+                        : DEFAULT_ACCESSORIES
                 ).map((acc) => {
                   const active = accessories.includes(acc);
                   return (

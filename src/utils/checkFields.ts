@@ -54,6 +54,17 @@ export const PHYSICAL_CONSOLE_FIELDS: CheckFieldOption[] = [
   { key: 'Golpes visibles', label: 'Golpes visibles', options: ['No', 'Leves', 'Severos'] },
 ];
 
+export const PHYSICAL_SMARTWATCH_FIELDS: CheckFieldOption[] = [
+  { key: 'Cristal / Pantalla', label: 'Cristal / Pantalla', options: ['OK', 'Rayado', 'Trizado', 'Roto', 'Despegado'] },
+  { key: 'Caja / Bisel', label: 'Caja / Bisel', options: ['OK', 'Rayado', 'Golpeado', 'Oxidado'] },
+  { key: 'Tapa trasera / Sensores', label: 'Tapa trasera / Sensores', options: ['OK', 'Rayada', 'Despegada', 'Rota'] },
+  { key: 'Corona / Botón lateral', label: 'Corona / Botón lateral', options: ['OK', 'Trabada', 'Faltante', 'Dañada'] },
+  { key: 'Malla / Enganches', label: 'Malla / Enganches', options: ['OK', 'Sin malla', 'Rotos', 'Gastada'] },
+  { key: 'Pines de carga', label: 'Pines de carga', options: ['OK', 'Sulfatados', 'Hundidos', 'Carga inalámbrica'] },
+  { key: 'Humedad / Agua', label: 'Humedad / Agua', options: ['No', 'Condensación', 'Mojado'] },
+  { key: 'Reparación anterior', label: 'Reparación anterior', options: ['No', 'Sí'] },
+];
+
 export const FUNCTIONAL_DEFAULT_FIELDS: CheckFieldOption[] = [
   { key: 'Enciende', label: 'Enciende', options: ['OK', 'No', 'No probado'] },
   { key: 'Touch / Táctil', label: 'Touch / Táctil', options: ['OK', 'Falla', 'No probado'] },
@@ -107,6 +118,17 @@ export const FUNCTIONAL_SPEAKER_FIELDS: CheckFieldOption[] = [
   { key: 'Botones / Volumen', label: 'Botones / Volumen', options: ['OK', 'Falla', 'No probado'] },
 ];
 
+export const FUNCTIONAL_SMARTWATCH_FIELDS: CheckFieldOption[] = [
+  { key: 'Enciende / Imagen', label: 'Enciende / Imagen', options: ['OK', 'No enciende', 'Pantalla negra', 'Con líneas'] },
+  { key: 'Touch / Táctil', label: 'Touch / Táctil', options: ['OK', 'Falla', 'No probado'] },
+  { key: 'Carga / Batería', label: 'Carga / Batería', options: ['OK', 'No carga', 'Dura poco', 'Hinchada'] },
+  { key: 'Corona / Botones', label: 'Corona / Botones', options: ['OK', 'Falla', 'No probado'] },
+  { key: 'Bluetooth / Vinculación', label: 'Bluetooth / Vinculación', options: ['OK', 'No vincula', 'No probado'] },
+  { key: 'Sensores (Ritmo / Pasos)', label: 'Sensores (Ritmo / Pasos)', options: ['OK', 'Falla', 'No probado'] },
+  { key: 'Audio / Micrófono', label: 'Audio / Micrófono', options: ['OK', 'Falla', 'No tiene'] },
+  { key: 'Vibración', label: 'Vibración', options: ['OK', 'Falla', 'No probado'] },
+];
+
 export function getPhysicalCheckFields(deviceType?: string): CheckFieldOption[] {
   if (deviceType === 'PC de escritorio') {
     return PHYSICAL_PC_FIELDS;
@@ -116,6 +138,9 @@ export function getPhysicalCheckFields(deviceType?: string): CheckFieldOption[] 
   }
   if (deviceType === 'Consola / joystick') {
     return PHYSICAL_CONSOLE_FIELDS;
+  }
+  if (deviceType === 'Smartwatch') {
+    return PHYSICAL_SMARTWATCH_FIELDS;
   }
   if (deviceType === 'Notebook') {
     return PHYSICAL_SIMPLE_FIELDS;
@@ -129,6 +154,9 @@ export function getFunctionalCheckFields(deviceType?: string): CheckFieldOption[
   }
   if (deviceType === 'Parlante') {
     return FUNCTIONAL_SPEAKER_FIELDS;
+  }
+  if (deviceType === 'Smartwatch') {
+    return FUNCTIONAL_SMARTWATCH_FIELDS;
   }
   if (deviceType === 'Notebook') {
     return FUNCTIONAL_NOTEBOOK_FIELDS;

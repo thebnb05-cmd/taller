@@ -1034,7 +1034,9 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                           ? 'Tipo / Formato:'
                           : repair.deviceType === 'Consola / joystick'
                             ? 'Edición / Capacidad:'
-                            : 'Capacidad:'}
+                            : repair.deviceType === 'Smartwatch'
+                              ? 'Medida / Caja:'
+                              : 'Capacidad:'}
                       </dt>
                       <dd className="font-medium text-slate-900 dark:text-white">{repair.capacity}</dd>
                     </div>
