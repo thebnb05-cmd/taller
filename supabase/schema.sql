@@ -304,40 +304,29 @@ create policy "public_tickets_owner_delete" on public.public_tickets
   using (auth.uid() = owner_id);
 
 -- Validaciones de integridad a nivel base de datos (idempotente)
-do $$
-begin
-  if not exists (select 1 from pg_constraint where conname = 'chk_repairs_non_negative') then
-    alter table public.repairs
-      add constraint chk_repairs_non_negative check (price >= 0 and deposit >= 0 and paid_amount >= 0 and progress between 0 and 100);
-  end if;
-  if not exists (select 1 from pg_constraint where conname = 'chk_products_non_negative') then
-    alter table public.products
-      add constraint chk_products_non_negative check (cost >= 0 and vat >= 0 and price >= 0 and stock >= 0 and min_stock >= 0);
-  end if;
-  if not exists (select 1 from pg_constraint where conname = 'chk_sales_non_negative') then
-    alter table public.sales
-      add constraint chk_sales_non_negative check (amount >= 0 and (quantity is null or quantity > 0));
-  end if;
-  if not exists (select 1 from pg_constraint where conname = 'chk_purchases_non_negative') then
-    alter table public.purchases
-      add constraint chk_purchases_non_negative check (amount >= 0);
-  end if;
-end $$;
+alter table public.repairs
+  drop constraint if exists chk_repairs_non_negative;
+alter table public.repairs
+  add constraint chk_repairs_non_negative
+  check (price >= 0 and deposit >= 0 and paid_amount >= 0 and progress between 0 and 100) not valid;
 
--- Función segura opcional para consultar seguimiento por código exacto sin listar toda la tabla
-create or replace function public.get_public_ticket(p_code text)
-returns setof public.public_tickets
-language sql
-security definer
-set search_path = public
-as $$
-  select *
-  from public.public_tickets
-  where id = upper(trim(p_code))
-  limit 1;
-$$;
+alter table public.products
+  drop constraint if exists chk_products_non_negative;
+alter table public.products
+  add constraint chk_products_non_negative
+  check (cost >= 0 and vat >= 0 and price >= 0 and stock >= 0 and min_stock >= 0) not valid;
 
-grant execute on function public.get_public_ticket(text) to anon, authenticated;
+alter table public.sales
+  drop constraint if exists chk_sales_non_negative;
+alter table public.sales
+  add constraint chk_sales_non_negative
+  check (amount >= 0 and (quantity is null or quantity > 0)) not valid;
+
+alter table public.purchases
+  drop constraint if exists chk_purchases_non_negative;
+alter table public.purchases
+  add constraint chk_purchases_non_negative
+  check (amount >= 0) not valid;
 
 -- Nota sobre Realtime (opcional para sincronización entre múltiples dispositivos):
 -- En Supabase Dashboard -> Database -> Publications -> supabase_realtime,
