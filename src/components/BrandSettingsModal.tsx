@@ -1,8 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { Image as ImageIcon, Store, Trash2, UploadCloud } from 'lucide-react';
+import { Coins, Image as ImageIcon, Store, Trash2, UploadCloud } from 'lucide-react';
 import { clampStr, handleDbError, OperationType, stripUndefined, updateRow } from '../lib/db';
 import { DEFAULT_RECEIPT_TERMS } from '../data/catalog';
-import { compressImageToDataUrl } from '../utils/formatters';
+import {
+  CURRENCY_OPTIONS,
+  sanitizeCurrencyCode,
+  setActiveCurrency,
+  type CurrencyCode,
+} from '../utils/currency';
+import { compressImageToDataUrl, formatCurrency } from '../utils/formatters';
 import {
   isPrivatePreviewOrigin,
   normalizeTrackingBaseUrl,
@@ -46,6 +52,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
   const [taxId, setTaxId] = useState(initialMeta.taxId);
   const [businessEmail, setBusinessEmail] = useState(initialMeta.businessEmail);
   const [footerNote, setFooterNote] = useState(initialMeta.footerNote);
+  const [currency, setCurrency] = useState<CurrencyCode>(initialMeta.currency);
   const [wordColors, setWordColors] = useState<string[]>(
     profile.wordColors || ['#0F172A', '#0072BB']
   );
@@ -73,6 +80,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
     setTaxId(meta.taxId);
     setBusinessEmail(meta.businessEmail);
     setFooterNote(meta.footerNote);
+    setCurrency(meta.currency);
     setWordColors(profile.wordColors || ['#0F172A', '#0072BB']);
     setLogoDataUrl(profile.logoDataUrl || '');
     setLogoScale(profile.logoScale ?? 100);
@@ -126,6 +134,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
       const safeTrackingBaseUrl = isPrivatePreviewOrigin(cleanedTrackingUrl)
         ? ''
         : clampStr(cleanedTrackingUrl, 250);
+      const safeCurrency = sanitizeCurrencyCode(currency);
       const encodedSubtitle = serializeWorkshopSubtitle({
         subtitle: sanitizePlainLine(subtitleText, 80),
         hours: sanitizePlainLine(hours, 100),
@@ -133,6 +142,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
         taxId: sanitizePlainLine(taxId, 60),
         businessEmail: cleanEmail,
         footerNote: sanitizePlainLine(footerNote, 180),
+        currency: safeCurrency,
       });
       const safeColors = wordColors
         .slice(0, 12)
@@ -154,6 +164,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
         updatedAt: new Date().toISOString(),
       });
       await updateRow('workshop_profiles', profile.id, payload);
+      setActiveCurrency(safeCurrency);
       notify('Configuración del taller actualizada.');
       onClose();
     } catch (err) {
@@ -239,6 +250,45 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
               onChange={(e) => setBusinessAddress(e.target.value)}
               className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-800/40">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+                <Coins className="h-4 w-4" />
+              </span>
+              <div>
+                <label
+                  htmlFor="workshop-currency-select"
+                  className="block text-xs font-bold text-slate-800 dark:text-slate-100"
+                >
+                  Moneda del taller, presupuestos y boletas
+                </label>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Se aplica en presupuestos, señas, inventario, ventas, WhatsApp y boletas A4, 80mm y PDF.
+                </p>
+              </div>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-mono-num text-xs font-bold text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-sky-300">
+              Ej: {formatCurrency(15000, currency)}
+            </div>
+          </div>
+
+          <div className="mt-3">
+            <select
+              id="workshop-currency-select"
+              value={currency}
+              onChange={(e) => setCurrency(sanitizeCurrencyCode(e.target.value))}
+              className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            >
+              {CURRENCY_OPTIONS.map((opt) => (
+                <option key={opt.code} value={opt.code}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 

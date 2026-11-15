@@ -1,4 +1,5 @@
 import type { WorkshopProfile } from '../types/workshop';
+import { DEFAULT_CURRENCY, sanitizeCurrencyCode, type CurrencyCode } from './currency';
 
 export interface WorkshopReceiptMeta {
   subtitle: string;
@@ -7,6 +8,7 @@ export interface WorkshopReceiptMeta {
   taxId: string;
   businessEmail: string;
   footerNote: string;
+  currency: CurrencyCode;
 }
 
 const DEFAULT_SUBTITLE = 'Servicio técnico';
@@ -26,6 +28,7 @@ export function parseWorkshopMeta(
         t: string;
         e: string;
         f: string;
+        c: string;
       }>;
       return {
         subtitle: typeof parsed.s === 'string' ? parsed.s : '',
@@ -35,6 +38,7 @@ export function parseWorkshopMeta(
         businessEmail:
           typeof parsed.e === 'string' && parsed.e.trim() ? parsed.e.trim() : baseEmail,
         footerNote: typeof parsed.f === 'string' ? parsed.f : '',
+        currency: sanitizeCurrencyCode(parsed.c),
       };
     } catch {
       // Fallback to treating raw as plain subtitle
@@ -48,6 +52,7 @@ export function parseWorkshopMeta(
     taxId: '',
     businessEmail: baseEmail,
     footerNote: '',
+    currency: DEFAULT_CURRENCY,
   };
 }
 
@@ -58,6 +63,7 @@ export function serializeWorkshopSubtitle(meta: {
   taxId: string;
   businessEmail: string;
   footerNote: string;
+  currency?: CurrencyCode;
 }): string {
   const s = meta.subtitle.trim().slice(0, 120);
   const h = meta.hours.trim().slice(0, 120);
@@ -65,8 +71,9 @@ export function serializeWorkshopSubtitle(meta: {
   const t = meta.taxId.trim().slice(0, 80);
   const e = meta.businessEmail.trim().slice(0, 120);
   const f = meta.footerNote.trim().slice(0, 220);
+  const c = sanitizeCurrencyCode(meta.currency);
 
-  if (!h && !r && !t && !e && !f) {
+  if (!h && !r && !t && !e && !f && c === DEFAULT_CURRENCY) {
     return s || DEFAULT_SUBTITLE;
   }
 
@@ -77,5 +84,6 @@ export function serializeWorkshopSubtitle(meta: {
     ...(t ? { t } : {}),
     ...(e ? { e } : {}),
     ...(f ? { f } : {}),
+    ...(c !== DEFAULT_CURRENCY ? { c } : {}),
   });
 }

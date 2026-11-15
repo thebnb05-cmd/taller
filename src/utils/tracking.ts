@@ -1,3 +1,5 @@
+import { DEFAULT_CURRENCY, sanitizeCurrencyCode, type CurrencyCode } from './currency';
+
 const DEFAULT_PUBLIC_TRACKING_URL = 'https://taller-ashen.vercel.app';
 
 export function normalizeTrackingBaseUrl(rawUrl: string): string {
@@ -49,8 +51,11 @@ export function resolveTrackingBaseUrl(profileTrackingBaseUrl?: string | null): 
 
 export function buildTrackingUrl(
   trackingCode: string,
-  profileTrackingBaseUrl?: string | null
+  profileTrackingBaseUrl?: string | null,
+  currencyCode?: CurrencyCode | string | null
 ): string {
   const baseUrl = resolveTrackingBaseUrl(profileTrackingBaseUrl);
-  return `${baseUrl}/?track=${encodeURIComponent(trackingCode)}`;
+  const safeCurrency = currencyCode ? sanitizeCurrencyCode(currencyCode) : DEFAULT_CURRENCY;
+  const currencyParam = safeCurrency !== DEFAULT_CURRENCY ? `&cur=${encodeURIComponent(safeCurrency)}` : '';
+  return `${baseUrl}/?track=${encodeURIComponent(trackingCode)}${currencyParam}`;
 }

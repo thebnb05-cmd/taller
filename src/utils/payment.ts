@@ -1,5 +1,6 @@
 import type { RepairRecord } from '../types/workshop';
 import { decryptJsonValue, encryptJsonValue, isEncryptedValue } from './crypto';
+import { formatCurrency } from './formatters';
 import {
   isSafeId,
   sanitizeAlias,
@@ -183,7 +184,7 @@ export function buildTransferWhatsAppText(
   const safeAmount = Number.isFinite(params.amount) ? Math.max(0, params.amount) : 0;
   const lines = [
     `Hola ${sanitizePlainLine(params.clientName, 120)}, te pasamos los datos de ${sanitizePlainLine(params.brandName || 'TH3 BNB', 80)} para abonar por transferencia (${sanitizePlainLine(params.code, 40)}):`,
-    `• Monto: $${safeAmount.toLocaleString('es-AR', { minimumFractionDigits: safeAmount % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 })}`,
+    `• Monto: ${formatCurrency(safeAmount)}`,
   ];
   if (cfg.alias.trim()) lines.push(`• Alias: ${cfg.alias.trim()}`);
   if (cfg.cbu.trim()) lines.push(`• CBU/CVU: ${cfg.cbu.trim()}`);

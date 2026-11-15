@@ -132,16 +132,16 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
     const pending = Math.max(0, Number(repair.price || 0) - Number(repair.deposit || 0));
     const paidInfo = parsePaymentInfo(repair);
     const amountLine = paidInfo.isPaid
-      ? `Total abonado: ${formatCurrency(repair.price)} (PAGO).`
-      : `Presupuesto: ${formatCurrency(repair.price)}${
-          Number(repair.deposit || 0) > 0 ? ` · Seña: ${formatCurrency(repair.deposit)}` : ''
-        } · Saldo pendiente: ${formatCurrency(pending)}.`;
+      ? `Total abonado: ${formatCurrency(repair.price, workshopMeta.currency)} (PAGO).`
+      : `Presupuesto: ${formatCurrency(repair.price, workshopMeta.currency)}${
+          Number(repair.deposit || 0) > 0 ? ` · Seña: ${formatCurrency(repair.deposit, workshopMeta.currency)}` : ''
+        } · Saldo pendiente: ${formatCurrency(pending, workshopMeta.currency)}.`;
     return (
       `Hola ${repair.clientName}, te enviamos la boleta PDF de ${brand} para tu ${repair.brand} ${repair.model} (Orden ${repair.code}).\n` +
       `${amountLine}\n` +
       `Seguimiento en línea (${repair.trackingCode}): ${trackingUrl}`
     );
-  }, [profile?.brandName, repair, trackingUrl]);
+  }, [profile?.brandName, repair, trackingUrl, workshopMeta.currency]);
 
   const whatsappPdfHref = cleanPhoneForWa
     ? `https://wa.me/${cleanPhoneForWa}?text=${encodeURIComponent(waReceiptMessage)}`

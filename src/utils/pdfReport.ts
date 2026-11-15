@@ -9,6 +9,7 @@ import type {
   SaleRecord,
   WorkshopProfile,
 } from '../types/workshop';
+import type { CurrencyCode } from './currency';
 import { formatCurrency, formatDateShort, getStatusLabel, todayISO } from './formatters';
 import { parsePaymentInfo } from './payment';
 import { parseSalePaymentInfo } from './saleMeta';
@@ -24,6 +25,7 @@ interface PdfBrandHeader {
   hours?: string;
   social?: string;
   footerNote?: string;
+  currency: CurrencyCode;
 }
 
 function resolveBrand(profile?: WorkshopProfile | null): PdfBrandHeader {
@@ -38,6 +40,7 @@ function resolveBrand(profile?: WorkshopProfile | null): PdfBrandHeader {
     hours: meta.hours,
     social: meta.social,
     footerNote: meta.footerNote,
+    currency: meta.currency,
   };
 }
 
@@ -157,14 +160,14 @@ export function downloadSalesSummaryPdf(params: {
     bodyStyles: { fontSize: 8.5, textColor: [30, 41, 59] },
     head: [['Concepto', 'Detalle / Cantidad', 'Monto']],
     body: [
-      ['Ventas de mostrador', `${sales.length} operaciones`, formatCurrency(salesIncome)],
-      ['Órdenes de reparación', `${repairs.length} equipos`, formatCurrency(repairIncome)],
-      ['Ingreso bruto total', 'Ventas + Reparaciones', formatCurrency(totalRevenue)],
-      ['Total cobrado', 'Ventas cobradas + Señas', formatCurrency(totalCollected)],
-      ['Saldo pendiente por cobrar', 'Cuentas por cobrar', formatCurrency(totalPending)],
-      ['Compras / reposición', `${purchases.length} comprobantes`, formatCurrency(totalPurchases)],
-      ['Resultado neto estimado', 'Ingresos - Compras', formatCurrency(netResult)],
-      ['Ticket promedio (reparaciones)', `${repairs.length} órdenes`, formatCurrency(avgTicket)],
+      ['Ventas de mostrador', `${sales.length} operaciones`, formatCurrency(salesIncome, brand.currency)],
+      ['Órdenes de reparación', `${repairs.length} equipos`, formatCurrency(repairIncome, brand.currency)],
+      ['Ingreso bruto total', 'Ventas + Reparaciones', formatCurrency(totalRevenue, brand.currency)],
+      ['Total cobrado', 'Ventas cobradas + Señas', formatCurrency(totalCollected, brand.currency)],
+      ['Saldo pendiente por cobrar', 'Cuentas por cobrar', formatCurrency(totalPending, brand.currency)],
+      ['Compras / reposición', `${purchases.length} comprobantes`, formatCurrency(totalPurchases, brand.currency)],
+      ['Resultado neto estimado', 'Ingresos - Compras', formatCurrency(netResult, brand.currency)],
+      ['Ticket promedio (reparaciones)', `${repairs.length} órdenes`, formatCurrency(avgTicket, brand.currency)],
     ],
     columnStyles: {
       2: { halign: 'right', fontStyle: 'bold' },
@@ -202,7 +205,7 @@ export function downloadSalesSummaryPdf(params: {
         const statusText = info.isPaid
           ? `Cobrado${info.methodLabel ? ` (${info.methodLabel})` : ''}`
           : info.deposit > 0
-            ? `Seña ${formatCurrency(info.deposit)}${info.methodLabel ? ` · ${info.methodLabel}` : ''}`
+            ? `Seña ${formatCurrency(info.deposit, brand.currency)}${info.methodLabel ? ` · ${info.methodLabel}` : ''}`
             : `Pendiente${info.methodLabel ? ` (${info.methodLabel})` : ''}`;
         return [
           s.invoice || '—',
@@ -210,7 +213,7 @@ export function downloadSalesSummaryPdf(params: {
           s.clientName,
           s.productName ? `${s.productName}${s.quantity ? ` × ${s.quantity}` : ''}` : 'Venta general',
           statusText,
-          formatCurrency(s.amount),
+          formatCurrency(s.amount, brand.currency),
         ];
       }),
       columnStyles: {
@@ -255,8 +258,8 @@ export function downloadSalesSummaryPdf(params: {
         r.clientName,
         `${r.brand} ${r.model}`,
         getStatusLabel(r.status),
-        formatCurrency(r.price),
-        formatCurrency(r.deposit),
+        formatCurrency(r.price, brand.currency),
+        formatCurrency(r.deposit, brand.currency),
       ]),
       columnStyles: {
         5: { halign: 'right' },
@@ -320,8 +323,8 @@ export function downloadInventorySummaryPdf(params: {
       ['Artículos con control de stock', String(tracked.length)],
       ['Artículos con stock bajo / crítico', String(lowStock.length)],
       ['Unidades totales disponibles', `${totalUnits} u.`],
-      ['Valorización total al costo', formatCurrency(costValuation)],
-      ['Valorización total a precio de venta', formatCurrency(saleValuation)],
+      ['Valorización total al costo', formatCurrency(costValuation, brand.currency)],
+      ['Valorización total a precio de venta', formatCurrency(saleValuation, brand.currency)],
     ],
     columnStyles: {
       1: { halign: 'right', fontStyle: 'bold' },
@@ -374,8 +377,8 @@ export function downloadInventorySummaryPdf(params: {
           p.sku || p.barcode || p.internalCode || '—',
           p.trackStock ? `${p.stock} u.` : '—',
           p.trackStock ? `${p.minStock} u.` : '—',
-          formatCurrency(p.cost),
-          formatCurrency(p.price),
+          formatCurrency(p.cost, brand.currency),
+          formatCurrency(p.price, brand.currency),
           statusLabel,
         ];
       }),
@@ -685,13 +688,13 @@ export async function buildClientRepairReceiptPdf(params: {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(15, 23, 42);
-  doc.text(formatCurrency(repair.price), margin + third * 0.5, cursorY + 11.2, { align: 'center' });
+  doc.text(formatCurrency(repair.price, brand.currency), margin + third * 0.5, cursorY + 11.2, { align: 'center' });
   doc.setTextColor(4, 120, 87);
-  doc.text(formatCurrency(repair.deposit), margin + third * 1.5, cursorY + 11.2, {
+  doc.text(formatCurrency(repair.deposit, brand.currency), margin + third * 1.5, cursorY + 11.2, {
     align: 'center',
   });
   doc.setTextColor(15, 23, 42);
-  doc.text(formatCurrency(pendingBalance), margin + third * 2.5, cursorY + 11.2, {
+  doc.text(formatCurrency(pendingBalance, brand.currency), margin + third * 2.5, cursorY + 11.2, {
     align: 'center',
   });
 
@@ -722,7 +725,7 @@ export async function buildClientRepairReceiptPdf(params: {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.8);
     doc.setTextColor(6, 95, 70);
-    const paidDetail = `${paymentInfo.methodLabel ? `${paymentInfo.methodLabel} · ` : ''}${formatCurrency(repair.price)}`;
+    const paidDetail = `${paymentInfo.methodLabel ? `${paymentInfo.methodLabel} · ` : ''}${formatCurrency(repair.price, brand.currency)}`;
     doc.text(paidDetail, stampX + stampW / 2, cursorY + 15, { align: 'center' });
 
     cursorY += stampH + 4;
@@ -990,9 +993,9 @@ export async function buildBatchRepairReceiptPdf(params: {
         `${r.code}\n${r.trackingCode}`,
         `${r.deviceType} · ${r.brand} ${r.model}${specs ? `\n${specs}` : ''}`,
         `${r.problem || 'Sin detalle'}${acc ? `\nAcc: ${acc}` : ''}`,
-        formatCurrency(r.price),
-        formatCurrency(r.deposit),
-        formatCurrency(pending),
+        formatCurrency(r.price, brand.currency),
+        formatCurrency(r.deposit, brand.currency),
+        formatCurrency(pending, brand.currency),
       ];
     }),
     columnStyles: {
@@ -1029,11 +1032,11 @@ export async function buildBatchRepairReceiptPdf(params: {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(15, 23, 42);
-  doc.text(formatCurrency(totalBudget), margin + third * 0.5, cursorY + 11.2, { align: 'center' });
+  doc.text(formatCurrency(totalBudget, brand.currency), margin + third * 0.5, cursorY + 11.2, { align: 'center' });
   doc.setTextColor(4, 120, 87);
-  doc.text(formatCurrency(totalDeposit), margin + third * 1.5, cursorY + 11.2, { align: 'center' });
+  doc.text(formatCurrency(totalDeposit, brand.currency), margin + third * 1.5, cursorY + 11.2, { align: 'center' });
   doc.setTextColor(15, 23, 42);
-  doc.text(formatCurrency(totalPending), margin + third * 2.5, cursorY + 11.2, { align: 'center' });
+  doc.text(formatCurrency(totalPending, brand.currency), margin + third * 2.5, cursorY + 11.2, { align: 'center' });
 
   cursorY += 20;
 

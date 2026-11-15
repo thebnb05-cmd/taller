@@ -21,6 +21,7 @@ import {
   OperationType,
   supabase,
 } from '../lib/db';
+import { sanitizeCurrencyCode, useActiveCurrency } from '../utils/currency';
 import { formatCurrency, formatDateShort, getStatusMeta } from '../utils/formatters';
 import { getEmbedVideoUrl, parseWorkDetailAndMedia } from '../utils/techMedia';
 import {
@@ -51,6 +52,13 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
   initialCode,
   onExitTracking,
 }) => {
+  const activeCurrency = useActiveCurrency();
+  const [urlCurrency] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const rawCur = new URLSearchParams(window.location.search).get('cur');
+    return rawCur ? sanitizeCurrencyCode(rawCur) : null;
+  });
+  const displayCurrency = urlCurrency ?? activeCurrency;
   const [searchInput, setSearchInput] = useState(initialCode);
   const [activeCode, setActiveCode] = useState(initialCode.trim().toUpperCase());
   const [ticket, setTicket] = useState<PublicTicketRecord | undefined>(undefined);
@@ -449,19 +457,19 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
               <div>
                 <div className="text-xs text-slate-500 dark:text-slate-400">Presupuesto</div>
                 <div className="mt-0.5 font-mono-num text-sm font-bold text-slate-900 dark:text-white">
-                  {formatCurrency(ticket.price)}
+                  {formatCurrency(ticket.price, displayCurrency)}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-slate-500 dark:text-slate-400">Seña / Anticipo</div>
                 <div className="mt-0.5 font-mono-num text-sm font-bold text-emerald-600 dark:text-emerald-400">
-                  {formatCurrency(ticket.deposit)}
+                  {formatCurrency(ticket.deposit, displayCurrency)}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-slate-500 dark:text-slate-400">Saldo pendiente</div>
                 <div className="mt-0.5 font-mono-num text-sm font-bold text-[#0072BB] dark:text-sky-400">
-                  {formatCurrency(pendingBalance)}
+                  {formatCurrency(pendingBalance, displayCurrency)}
                 </div>
               </div>
             </div>

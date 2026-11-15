@@ -1,25 +1,41 @@
 import type { RepairRecord } from '../types/workshop';
 import { STATUS_META } from '../data/catalog';
+import { getActiveCurrency, getCurrencyOption, type CurrencyCode } from './currency';
 
-export function formatCurrency(value: number | undefined | null): string {
+export function formatCurrency(
+  value: number | undefined | null,
+  currencyCode?: CurrencyCode | string | null
+): string {
+  const opt = getCurrencyOption(currencyCode ?? getActiveCurrency());
   const num = Number(value || 0);
-  if (!Number.isFinite(num)) return '$0';
-  return new Intl.NumberFormat('es-AR', {
-    style: 'currency',
-    currency: 'ARS',
-    maximumFractionDigits: num % 1 === 0 ? 0 : 2,
-  }).format(num);
+  if (!Number.isFinite(num)) return `${opt.symbol} 0`;
+  const sign = num < 0 ? '-' : '';
+  const abs = Math.abs(num);
+  const hasDecimals = Math.round(abs * 100) % 100 !== 0;
+  const formattedNumber = new Intl.NumberFormat('es-AR', {
+    minimumFractionDigits: hasDecimals ? 2 : 0,
+    maximumFractionDigits: 2,
+  }).format(abs);
+  return `${sign}${opt.symbol} ${formattedNumber}`;
 }
 
-export function formatCompactCurrency(value: number | undefined | null): string {
+export function formatCompactCurrency(
+  value: number | undefined | null,
+  currencyCode?: CurrencyCode | string | null
+): string {
+  const code = currencyCode ?? getActiveCurrency();
+  const opt = getCurrencyOption(code);
   const num = Number(value || 0);
-  if (Math.abs(num) >= 1_000_000) {
-    return `$${(num / 1_000_000).toFixed(1)}M`;
+  if (!Number.isFinite(num)) return `${opt.symbol} 0`;
+  const sign = num < 0 ? '-' : '';
+  const abs = Math.abs(num);
+  if (abs >= 1_000_000) {
+    return `${sign}${opt.symbol}${(abs / 1_000_000).toFixed(1)}M`;
   }
-  if (Math.abs(num) >= 10_000) {
-    return `$${(num / 1_000).toFixed(1)}k`;
+  if (abs >= 10_000) {
+    return `${sign}${opt.symbol}${(abs / 1_000).toFixed(1)}k`;
   }
-  return formatCurrency(num);
+  return formatCurrency(num, code);
 }
 
 export function todayISO(): string {

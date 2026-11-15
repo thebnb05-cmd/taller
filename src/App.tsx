@@ -11,7 +11,9 @@ import {
 } from './lib/db';
 import type { WorkshopProfile } from './types/workshop';
 import { getPreferenceCookie, setPreferenceCookie } from './utils/cookieStorage';
+import { setActiveCurrency } from './utils/currency';
 import { sanitizeDbErrorMessage } from './utils/validation';
+import { parseWorkshopMeta } from './utils/workshopMeta';
 import { AuthScreen, WorkshopOnboarding } from './components/AuthGate';
 import { PublicTrackingView } from './components/PublicTrackingView';
 import { ToastProvider } from './components/ToastProvider';
@@ -38,6 +40,9 @@ function AuthenticatedGate({
     try {
       const data = await fetchSingleById<WorkshopProfile>('workshop_profiles', user.id);
       setProfile(data ?? undefined);
+      if (data) {
+        setActiveCurrency(parseWorkshopMeta(data).currency);
+      }
     } catch (err) {
       if (isMissingTableError(err)) {
         setMissingSchema(true);

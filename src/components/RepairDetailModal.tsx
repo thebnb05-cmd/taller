@@ -63,8 +63,10 @@ import {
   type TechMediaItem,
 } from '../utils/techMedia';
 import { extractBatchRef } from '../utils/batchRef';
+import { getCurrencyOption, useActiveCurrency } from '../utils/currency';
 import { buildTrackingUrl } from '../utils/tracking';
 import { getFunctionalCheckFields, getPhysicalCheckFields } from '../utils/checkFields';
+import { parseWorkshopMeta } from '../utils/workshopMeta';
 import {
   isValidEmail,
   parseSafePositiveNumber,
@@ -105,6 +107,9 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   onClose,
 }) => {
   const { notify } = useToast();
+  const activeCurrency = useActiveCurrency();
+  const profileCurrency = profile ? parseWorkshopMeta(profile).currency : activeCurrency;
+  const currencySymbol = getCurrencyOption(profileCurrency).symbol;
   const [tab, setTab] = useState<'detail' | 'edit' | 'receipt'>(initialTab);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -227,7 +232,11 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   const paymentInfo = parsePaymentInfo(repair);
   const detailWork = parseWorkDetailAndMedia(repair.workDetail);
   const editPendingBalance = Math.max(0, Number(price || 0) - Number(deposit || 0));
-  const trackingUrl = buildTrackingUrl(repair.trackingCode, profile?.trackingBaseUrl);
+  const trackingUrl = buildTrackingUrl(
+    repair.trackingCode,
+    profile?.trackingBaseUrl,
+    profileCurrency
+  );
 
   const cleanPhoneForWa = (repair.clientPhone || '').replace(/[^\d]/g, '');
   const whatsappMessage = encodeURIComponent(
@@ -1780,7 +1789,9 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
               </div>
               <div className="grid gap-3 sm:grid-cols-3">
                 <div>
-                  <label className="mb-1 block text-xs text-slate-500">Presupuesto</label>
+                  <label className="mb-1 block text-xs text-slate-500">
+                    Presupuesto ({currencySymbol})
+                  </label>
                   <input
                     type="number"
                     min="0"
@@ -1791,7 +1802,9 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs text-slate-500">Anticipo / Pagado</label>
+                  <label className="mb-1 block text-xs text-slate-500">
+                    Anticipo / Pagado ({currencySymbol})
+                  </label>
                   <input
                     type="number"
                     min="0"

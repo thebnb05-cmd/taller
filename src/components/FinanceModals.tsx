@@ -14,6 +14,7 @@ import type {
   SaleRecord,
   SupplierRecord,
 } from '../types/workshop';
+import { getCurrencyOption, useActiveCurrency } from '../utils/currency';
 import { compressImageToDataUrl, formatCurrency, todayISO } from '../utils/formatters';
 import {
   buildTransferQrPayload,
@@ -444,6 +445,8 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   onCreated,
 }) => {
   const { notify } = useToast();
+  const activeCurrency = useActiveCurrency();
+  const currencySymbol = getCurrencyOption(activeCurrency).symbol;
   const [clientName, setClientName] = useState('');
   const [invoice, setInvoice] = useState('');
   const [quantity, setQuantity] = useState(1);
@@ -856,7 +859,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Monto total *
+              Monto total ({currencySymbol}) *
             </label>
             <input
               type="number"
@@ -871,7 +874,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Anticipo / Seña
+              Anticipo / Seña ({currencySymbol})
             </label>
             <input
               type="number"
@@ -1161,6 +1164,8 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
   suppliers,
 }) => {
   const { notify } = useToast();
+  const activeCurrency = useActiveCurrency();
+  const currencySymbol = getCurrencyOption(activeCurrency).symbol;
   const [supplierName, setSupplierName] = useState('');
   const [invoice, setInvoice] = useState('');
   const [amount, setAmount] = useState('');
@@ -1256,7 +1261,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Monto *
+              Monto ({currencySymbol}) *
             </label>
             <input
               type="number"

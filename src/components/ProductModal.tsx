@@ -16,9 +16,11 @@ import {
   SUBCATEGORIES_BY_CATEGORY,
 } from '../data/catalog';
 import type { ProductRecord, SupplierRecord } from '../types/workshop';
+import { getCurrencyOption, useActiveCurrency } from '../utils/currency';
 import {
   compressImageToDataUrl,
   computeProductPricing,
+  formatCurrency,
   generateInternalProductCode,
 } from '../utils/formatters';
 import {
@@ -50,6 +52,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   editProduct,
 }) => {
   const { notify } = useToast();
+  const activeCurrency = useActiveCurrency();
+  const currencySymbol = getCurrencyOption(activeCurrency).symbol;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanTimerRef = useRef<number | null>(null);
@@ -645,7 +649,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
           <div className="grid gap-3 sm:grid-cols-3">
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Costo de compra
+                Costo de compra ({currencySymbol})
               </label>
               <input
                 type="number"
@@ -671,7 +675,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                {marginMode === 'percent' ? 'Ganancia (%)' : 'Ganancia ($)'}
+                {marginMode === 'percent' ? 'Ganancia (%)' : `Ganancia (${currencySymbol})`}
               </label>
               <input
                 type="number"
@@ -718,7 +722,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               <input
                 type="text"
                 readOnly
-                value={`$${pricing.finalPrice.toLocaleString('es-AR')}`}
+                value={formatCurrency(pricing.finalPrice, activeCurrency)}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-sky-50 px-3 font-mono-num text-sm font-bold text-[#0072BB] dark:border-slate-700 dark:bg-sky-950/40 dark:text-sky-300"
               />
             </div>

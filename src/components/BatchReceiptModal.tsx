@@ -110,18 +110,18 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
     const orderLines = repairs
       .map(
         (r, i) =>
-          `${i + 1}. ${r.code} (${r.deviceType}: ${r.brand} ${r.model}) — ${formatCurrency(r.price)}`
+          `${i + 1}. ${r.code} (${r.deviceType}: ${r.brand} ${r.model}) — ${formatCurrency(r.price, workshopMeta.currency)}`
       )
       .join('\n');
     return (
       `Hola ${first.clientName}, te enviamos la boleta múltiple de ${brand}.\n` +
       `Referencia: ${batchRef} · ${repairs.length} equipos:\n` +
       `${orderLines}\n` +
-      `Total: ${formatCurrency(totalBudget)}` +
-      `${totalDeposit > 0 ? ` · Seña: ${formatCurrency(totalDeposit)}` : ''}` +
-      ` · Saldo pendiente: ${formatCurrency(totalPending)}.`
+      `Total: ${formatCurrency(totalBudget, workshopMeta.currency)}` +
+      `${totalDeposit > 0 ? ` · Seña: ${formatCurrency(totalDeposit, workshopMeta.currency)}` : ''}` +
+      ` · Saldo pendiente: ${formatCurrency(totalPending, workshopMeta.currency)}.`
     );
-  }, [batchRef, first, profile?.brandName, repairs, totalBudget, totalDeposit, totalPending]);
+  }, [batchRef, first, profile?.brandName, repairs, totalBudget, totalDeposit, totalPending, workshopMeta.currency]);
 
   const whatsappHref = cleanPhoneForWa
     ? `https://wa.me/${cleanPhoneForWa}?text=${encodeURIComponent(waMessage)}`

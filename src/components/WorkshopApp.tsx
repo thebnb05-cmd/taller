@@ -29,6 +29,7 @@ import {
   type TableName,
 } from '../lib/db';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import { useActiveCurrency } from '../utils/currency';
 import { clearTransferConfigCache, hydrateTransferConfig } from '../utils/payment';
 import { sanitizeDbErrorMessage } from '../utils/validation';
 import type {
@@ -100,6 +101,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   onToggleDark,
 }) => {
   const isOnline = useOnlineStatus();
+  useActiveCurrency();
   const [page, setPage] = useState<PageId>('home');
   const [inventoryInitialFilter, setInventoryInitialFilter] = useState<
     'all' | 'repuestos' | 'accesorios' | 'bajo_stock'
