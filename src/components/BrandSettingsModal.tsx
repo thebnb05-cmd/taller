@@ -9,6 +9,16 @@ import {
   resolveTrackingBaseUrl,
 } from '../utils/tracking';
 import { parseWorkshopMeta, serializeWorkshopSubtitle } from '../utils/workshopMeta';
+import {
+  isValidEmail,
+  sanitizeDbErrorMessage,
+  sanitizeEmail,
+  sanitizeHexColor,
+  sanitizeImageDataUrl,
+  sanitizePhone,
+  sanitizePlainLine,
+  sanitizeText,
+} from '../utils/validation';
 import type { WorkshopProfile } from '../types/workshop';
 import { ModalShell } from './ModalShell';
 import { BrandMark } from './BrandMark';
@@ -85,7 +95,12 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
     }
     try {
       const compressed = await compressImageToDataUrl(file, 480, 0.88);
-      setLogoDataUrl(compressed);
+      const safeLogo = sanitizeImageDataUrl(compressed, 700000);
+      if (!safeLogo) {
+        notify('El logo procesado no tiene un formato válido o supera el límite.', 'error');
+        return;
+      }
+      setLogoDataUrl(safeLogo);
     } catch {
       notify('No se pudo cargar la imagen del logo.', 'error');
     }
@@ -93,31 +108,48 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanEmail = sanitizeEmail(businessEmail, 100);
+    if (cleanEmail && !isValidEmail(cleanEmail)) {
+      notify('El email de contacto del taller no tiene un formato válido.', 'error');
+      return;
+    }
+    const rawTracking = trackingBaseUrl.trim();
+    const cleanedTrackingUrl = normalizeTrackingBaseUrl(rawTracking);
+    if (rawTracking && !cleanedTrackingUrl) {
+      notify('La dirección del sitio de seguimiento debe empezar con https:// o http://', 'error');
+      return;
+    }
+
     setSaving(true);
     const path = `workshop_profiles/${profile.id}`;
     try {
-      const cleanedTrackingUrl = normalizeTrackingBaseUrl(trackingBaseUrl);
       const safeTrackingBaseUrl = isPrivatePreviewOrigin(cleanedTrackingUrl)
         ? ''
         : clampStr(cleanedTrackingUrl, 250);
       const encodedSubtitle = serializeWorkshopSubtitle({
-        subtitle: subtitleText,
-        hours,
-        social,
-        taxId,
-        businessEmail,
-        footerNote,
+        subtitle: sanitizePlainLine(subtitleText, 80),
+        hours: sanitizePlainLine(hours, 100),
+        social: sanitizePlainLine(social, 100),
+        taxId: sanitizePlainLine(taxId, 60),
+        businessEmail: cleanEmail,
+        footerNote: sanitizePlainLine(footerNote, 180),
       });
+      const safeColors = wordColors
+        .slice(0, 12)
+        .map((c, idx) => sanitizeHexColor(c, idx === 0 ? '#0F172A' : '#0072BB'));
+      const safeScale = Math.min(200, Math.max(50, Math.round(Number(logoScale) || 100)));
+      const safeLogoDataUrl = logoDataUrl ? sanitizeImageDataUrl(logoDataUrl, 700000) : '';
+
       const payload = stripUndefined({
-        brandName: clampStr(brandName || 'TH3 BNB', 80) || 'TH3 BNB',
+        brandName: sanitizePlainLine(brandName || 'TH3 BNB', 80) || 'TH3 BNB',
         subtitle: clampStr(encodedSubtitle, 900),
-        businessPhone: clampStr(businessPhone, 50),
-        businessAddress: clampStr(businessAddress, 200),
-        wordColors: wordColors.slice(0, 12),
-        logoDataUrl: clampStr(logoDataUrl, 700000),
-        logoScale,
+        businessPhone: sanitizePhone(businessPhone, 50),
+        businessAddress: sanitizePlainLine(businessAddress, 200),
+        wordColors: safeColors,
+        logoDataUrl: safeLogoDataUrl,
+        logoScale: safeScale,
         logoTransparent,
-        receiptTerms: clampStr(receiptTerms, 2000),
+        receiptTerms: sanitizeText(receiptTerms, 2000),
         trackingBaseUrl: safeTrackingBaseUrl,
         updatedAt: new Date().toISOString(),
       });
@@ -125,8 +157,8 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
       notify('Configuración del taller actualizada.');
       onClose();
     } catch (err) {
-      notify('Error al guardar la configuración.', 'error');
-      await handleDbError(err, OperationType.UPDATE, path);
+      notify(sanitizeDbErrorMessage(err, 'Error al guardar la configuración.'), 'error');
+      void handleDbError(err, OperationType.UPDATE, path).catch(() => {});
     } finally {
       setSaving(false);
     }

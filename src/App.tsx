@@ -10,6 +10,8 @@ import {
   supabase,
 } from './lib/db';
 import type { WorkshopProfile } from './types/workshop';
+import { getPreferenceCookie, setPreferenceCookie } from './utils/cookieStorage';
+import { sanitizeDbErrorMessage } from './utils/validation';
 import { AuthScreen, WorkshopOnboarding } from './components/AuthGate';
 import { PublicTrackingView } from './components/PublicTrackingView';
 import { ToastProvider } from './components/ToastProvider';
@@ -40,11 +42,7 @@ function AuthenticatedGate({
       if (isMissingTableError(err)) {
         setMissingSchema(true);
       }
-      const msg =
-        err && typeof err === 'object' && 'message' in err
-          ? String((err as { message?: unknown }).message)
-          : 'Error al cargar el perfil del taller.';
-      setErrorMsg(msg);
+      setErrorMsg(sanitizeDbErrorMessage(err, 'Error al cargar el perfil del taller.'));
       try {
         await handleDbError(err, OperationType.GET, `workshop_profiles/${user.id}`);
       } catch {
@@ -156,18 +154,30 @@ function AuthenticatedGate({
 function AppContent() {
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
+    const fromCookie = getPreferenceCookie('th3bnb_theme');
+    if (fromCookie === 'dark' || fromCookie === 'light') {
+      return fromCookie === 'dark';
+    }
     return localStorage.getItem('th3bnb-theme') === 'dark';
   });
 
   const [trackingCode, setTrackingCode] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
     const params = new URLSearchParams(window.location.search);
-    return params.get('track');
+    const raw = params.get('track');
+    if (raw === null) return null;
+    return raw.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40);
   });
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
-    localStorage.setItem('th3bnb-theme', darkMode ? 'dark' : 'light');
+    const themeVal = darkMode ? 'dark' : 'light';
+    setPreferenceCookie('th3bnb_theme', themeVal);
+    try {
+      localStorage.setItem('th3bnb-theme', themeVal);
+    } catch {
+      // Ignore storage restrictions
+    }
   }, [darkMode]);
 
   if (trackingCode !== null) {

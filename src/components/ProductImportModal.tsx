@@ -11,6 +11,13 @@ import {
 } from '../lib/db';
 import type { ProductRecord } from '../types/workshop';
 import { generateInternalProductCode } from '../utils/formatters';
+import {
+  parseSafeNonNegativeInt,
+  parseSafePositiveNumber,
+  sanitizeCsvCell,
+  sanitizeDbErrorMessage,
+  sanitizePlainLine,
+} from '../utils/validation';
 import { ModalShell } from './ModalShell';
 import { useToast } from './ToastProvider';
 
@@ -53,14 +60,34 @@ export const ProductImportModal: React.FC<ProductImportModalProps> = ({
 
   const handleFile = async (file: File | undefined) => {
     if (!file) return;
-    setFileName(file.name);
+    const lowerName = file.name.toLowerCase();
+    if (!lowerName.endsWith('.xlsx') && !lowerName.endsWith('.csv')) {
+      notify('Formato inválido. Usá un archivo .xlsx o .csv.', 'error');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      notify('El archivo supera el límite máximo de 5 MB.', 'error');
+      return;
+    }
+    setFileName(sanitizePlainLine(file.name, 160));
     try {
       const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: 'array' });
-      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const firstSheetName = workbook.SheetNames[0];
+      if (!firstSheetName) {
+        notify('El archivo no contiene hojas válidas.', 'error');
+        reset();
+        return;
+      }
+      const firstSheet = workbook.Sheets[firstSheetName];
       const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, {
         defval: '',
       });
+      if (rows.length > 2500) {
+        notify('Máximo 2500 filas por importación. Dividí el archivo e intentá nuevamente.', 'error');
+        reset();
+        return;
+      }
 
       const existingNames = new Set(
         existingProducts.map((p) => p.name.trim().toLowerCase())
@@ -73,22 +100,29 @@ export const ProductImportModal: React.FC<ProductImportModalProps> = ({
       let skipped = 0;
 
       for (const row of rows) {
-        const normalized: Record<string, string> = {};
+        const normalized: Record<string, string> = Object.create(null);
         for (const [k, v] of Object.entries(row)) {
-          normalized[k.trim().toLowerCase()] = String(v ?? '').trim();
+          const safeKey = sanitizePlainLine(k, 80).toLowerCase();
+          if (!safeKey || safeKey === '__proto__' || safeKey === 'constructor' || safeKey === 'prototype') {
+            continue;
+          }
+          normalized[safeKey] = sanitizePlainLine(String(v ?? ''), 240);
         }
-        const name =
+        const rawName =
           normalized['nombre'] || normalized['producto'] || normalized['name'] || '';
+        const name = sanitizeCsvCell(rawName).slice(0, 200);
         if (!name) {
           skipped++;
           continue;
         }
-        const sku = normalized['sku'] || '';
-        const barcode =
+        const sku = sanitizeCsvCell(normalized['sku'] || '').slice(0, 80);
+        const barcode = sanitizePlainLine(
           normalized['código de barras'] ||
-          normalized['codigo de barras'] ||
-          normalized['barcode'] ||
-          '';
+            normalized['codigo de barras'] ||
+            normalized['barcode'] ||
+            '',
+          80
+        );
 
         if (
           existingNames.has(name.toLowerCase()) ||
@@ -101,21 +135,23 @@ export const ProductImportModal: React.FC<ProductImportModalProps> = ({
         existingNames.add(name.toLowerCase());
         if (sku) existingSkus.add(sku.toLowerCase());
 
-        const price = Math.max(
-          0,
-          Number((normalized['precio'] || normalized['price'] || '0').replace(',', '.')) || 0
+        const price = parseSafePositiveNumber(
+          normalized['precio'] || normalized['price'] || '0',
+          0
         );
-        const cost = Math.max(
-          0,
-          Number((normalized['costo'] || normalized['cost'] || '0').replace(',', '.')) || 0
+        const cost = parseSafePositiveNumber(
+          normalized['costo'] || normalized['cost'] || '0',
+          0
         );
-        const stock = Math.max(
-          0,
-          Math.floor(Number(normalized['stock'] || '0') || 0)
+        const stock = parseSafeNonNegativeInt(normalized['stock'] || '0', 0);
+        const category = sanitizePlainLine(
+          normalized['categoría'] || normalized['categoria'] || 'Repuesto',
+          80
+        ) || 'Repuesto';
+        const subcategory = sanitizePlainLine(
+          normalized['subcategoría'] || normalized['subcategoria'] || '',
+          80
         );
-        const category = normalized['categoría'] || normalized['categoria'] || 'Repuesto';
-        const subcategory =
-          normalized['subcategoría'] || normalized['subcategoria'] || '';
 
         parsed.push({
           name,
@@ -158,17 +194,20 @@ export const ProductImportModal: React.FC<ProductImportModalProps> = ({
             sku: clampStr(item.sku, 80),
             barcode: clampStr(item.barcode, 80),
             internalCode: clampStr(generateInternalProductCode(), 60),
-            cost: Math.max(0, Number(item.cost || 0)),
+            cost: parseSafePositiveNumber(item.cost, 0),
             marginMode: 'fixed',
-            margin: Math.max(0, Number(item.price || 0) - Number(item.cost || 0)),
+            margin: Math.max(
+              0,
+              parseSafePositiveNumber(item.price, 0) - parseSafePositiveNumber(item.cost, 0)
+            ),
             vat: 0,
             rounding: 0,
-            netPrice: Math.max(0, Number(item.price || 0)),
-            price: Math.max(0, Number(item.price || 0)),
+            netPrice: parseSafePositiveNumber(item.price, 0),
+            price: parseSafePositiveNumber(item.price, 0),
             trackStock: true,
             allowNoStock: false,
             usesSerial: false,
-            stock: Math.max(0, Number(item.stock || 0)),
+            stock: parseSafeNonNegativeInt(item.stock, 0),
             minStock: 1,
             createdAt: nowIso,
           })
@@ -179,8 +218,8 @@ export const ProductImportModal: React.FC<ProductImportModalProps> = ({
       reset();
       onClose();
     } catch (err) {
-      notify('Ocurrió un error al importar los productos.', 'error');
-      await handleDbError(err, OperationType.WRITE, 'products');
+      notify(sanitizeDbErrorMessage(err, 'Ocurrió un error al importar los productos.'), 'error');
+      void handleDbError(err, OperationType.WRITE, 'products').catch(() => {});
     } finally {
       setImporting(false);
     }

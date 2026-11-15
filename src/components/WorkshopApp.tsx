@@ -29,6 +29,8 @@ import {
   type TableName,
 } from '../lib/db';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import { clearTransferConfigCache, hydrateTransferConfig } from '../utils/payment';
+import { sanitizeDbErrorMessage } from '../utils/validation';
 import type {
   ClientRecord,
   PageId,
@@ -118,6 +120,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   useEffect(() => {
     if (!userId) return;
     let active = true;
+    void hydrateTransferConfig(userId);
     const loadedSet = new Set<string>();
     setLoadingCount(7);
     setSyncError(null);
@@ -139,11 +142,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         markLoaded(tableName);
       } catch (err) {
         if (!active) return;
-        const msg =
-          err && typeof err === 'object' && 'message' in err
-            ? String((err as { message?: unknown }).message)
-            : 'Error al sincronizar con Supabase.';
-        setSyncError(msg);
+        setSyncError(sanitizeDbErrorMessage(err, 'Error al sincronizar con Supabase.'));
         markLoaded(tableName);
         void handleDbError(err, OperationType.LIST, tableName).catch(() => {});
       }
@@ -410,7 +409,10 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
 
             <button
               type="button"
-              onClick={() => void supabase.auth.signOut()}
+              onClick={() => {
+                clearTransferConfigCache(userId);
+                void supabase.auth.signOut();
+              }}
               aria-label="Cerrar sesión"
               title="Salir"
               className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"

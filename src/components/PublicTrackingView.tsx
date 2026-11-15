@@ -23,6 +23,12 @@ import {
 } from '../lib/db';
 import { formatCurrency, formatDateShort, getStatusMeta } from '../utils/formatters';
 import { getEmbedVideoUrl, parseWorkDetailAndMedia } from '../utils/techMedia';
+import {
+  sanitizeDbErrorMessage,
+  sanitizeMediaUrl,
+  sanitizeSafeUrl,
+  sanitizeTelHref,
+} from '../utils/validation';
 import type { PublicTicketRecord } from '../types/workshop';
 
 interface PublicTrackingViewProps {
@@ -60,16 +66,8 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
       const data = await fetchPublicTicketByCode<PublicTicketRecord>(code);
       setTicket(data ?? undefined);
     } catch (err) {
-      const msg =
-        err && typeof err === 'object' && 'message' in err
-          ? String((err as { message?: unknown }).message)
-          : 'No se pudo consultar el seguimiento.';
-      setErrorMsg(msg);
-      try {
-        await handleDbError(err, OperationType.GET, `public_tickets/${code}`);
-      } catch {
-        // Error already logged in structured JSON format
-      }
+      setErrorMsg(sanitizeDbErrorMessage(err, 'No se pudo consultar el seguimiento.'));
+      void handleDbError(err, OperationType.GET, `public_tickets/${code}`).catch(() => {});
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -159,6 +157,10 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
     e.preventDefault();
     const cleaned = searchInput.trim().toUpperCase();
     if (!cleaned) return;
+    if (!VALID_TRACKING_CODE_RE.test(cleaned)) {
+      setErrorMsg('El código de seguimiento solo puede contener letras, números y guiones.');
+      return;
+    }
     setActiveCode(cleaned);
     const url = new URL(window.location.href);
     url.searchParams.set('track', cleaned);
@@ -364,11 +366,14 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
 
                 <div className="grid gap-3 sm:grid-cols-2">
                   {parsedWork.media.map((item) => {
-                    const embedUrl = item.type === 'video' ? getEmbedVideoUrl(item.url) : null;
+                    const safeUrl = sanitizeMediaUrl(item.url, item.type);
+                    if (!safeUrl) return null;
+                    const embedUrl = item.type === 'video' ? getEmbedVideoUrl(safeUrl) : null;
+                    const safeExternalHref = sanitizeSafeUrl(safeUrl, 1000);
                     const isDirectVideo =
                       item.type === 'video' &&
-                      (item.url.startsWith('data:video/') ||
-                        /\.(mp4|webm|mov|m4v|ogg)(\?.*)?$/i.test(item.url));
+                      (safeUrl.startsWith('data:video/') ||
+                        /\.(mp4|webm|mov|m4v|ogg)(\?.*)?$/i.test(safeUrl));
                     return (
                       <div
                         key={item.id}
@@ -381,8 +386,9 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
                             className="group relative block w-full overflow-hidden bg-slate-900/5 text-left"
                           >
                             <img
-                              src={item.url}
+                              src={safeUrl}
                               alt={item.caption || 'Avance técnico'}
+                              referrerPolicy="no-referrer"
                               className="h-48 w-full object-cover transition duration-200 group-hover:scale-[1.02]"
                             />
                             <span className="absolute top-2 left-2 rounded-md bg-slate-900/70 px-2 py-0.5 text-[10px] font-semibold text-white">
@@ -398,21 +404,23 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
                               src={embedUrl}
                               title={item.caption || 'Video técnico'}
                               className="h-full w-full"
+                              sandbox="allow-scripts allow-same-origin allow-presentation"
+                              referrerPolicy="strict-origin-when-cross-origin"
                               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                               allowFullScreen
                             />
                           </div>
                         ) : isDirectVideo ? (
                           <video
-                            src={item.url}
+                            src={safeUrl}
                             controls
                             playsInline
                             preload="metadata"
                             className="h-48 w-full bg-black object-contain"
                           />
-                        ) : (
+                        ) : safeExternalHref ? (
                           <a
-                            href={item.url}
+                            href={safeExternalHref}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex h-36 flex-col items-center justify-center gap-2 bg-slate-100 p-4 text-center text-xs font-semibold text-[#0072BB] hover:bg-slate-200/70 dark:bg-slate-800 dark:text-sky-400"
@@ -423,7 +431,7 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
                               <ExternalLink className="h-3.5 w-3.5" />
                             </span>
                           </a>
-                        )}
+                        ) : null}
 
                         {item.caption && (
                           <div className="border-t border-slate-200/80 px-3 py-2 text-xs text-slate-700 dark:border-slate-700/70 dark:text-slate-200">
@@ -458,11 +466,11 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
               </div>
             </div>
 
-            {ticket.businessPhone && (
+            {ticket.businessPhone && sanitizeTelHref(ticket.businessPhone) && (
               <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-600 dark:bg-slate-800/50 dark:text-slate-300">
                 <span>¿Tenés dudas sobre tu equipo?</span>
                 <a
-                  href={`tel:${ticket.businessPhone}`}
+                  href={`tel:${sanitizeTelHref(ticket.businessPhone)}`}
                   className="inline-flex items-center gap-1.5 font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
                 >
                   <Phone className="h-3.5 w-3.5" />
@@ -519,8 +527,9 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
           )}
 
           <img
-            src={activeLightboxItem.url}
+            src={sanitizeMediaUrl(activeLightboxItem.url, 'image')}
             alt={activeLightboxItem.caption || 'Vista ampliada'}
+            referrerPolicy="no-referrer"
             onClick={(e) => e.stopPropagation()}
             className="max-h-[82vh] max-w-full rounded-2xl object-contain shadow-2xl"
           />

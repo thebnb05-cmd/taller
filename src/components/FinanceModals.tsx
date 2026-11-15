@@ -17,12 +17,27 @@ import type {
 import { compressImageToDataUrl, formatCurrency, todayISO } from '../utils/formatters';
 import {
   buildTransferQrPayload,
+  hydrateTransferConfig,
   loadTransferConfig,
   saveTransferConfig,
   type PaymentMethod,
   type TransferConfig,
 } from '../utils/payment';
 import { serializeSaleStatus } from '../utils/saleMeta';
+import {
+  isValidEmail,
+  parseSafeNonNegativeInt,
+  parseSafePositiveNumber,
+  sanitizeAlias,
+  sanitizeCbu,
+  sanitizeDbErrorMessage,
+  sanitizeEmail,
+  sanitizeImageDataUrl,
+  sanitizePhone,
+  sanitizePlainLine,
+  sanitizeSafeUrl,
+  sanitizeText,
+} from '../utils/validation';
 import { ModalShell } from './ModalShell';
 import { useToast } from './ToastProvider';
 
@@ -56,7 +71,8 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({ open, onClose, owner
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) {
+    const cleanTitle = sanitizePlainLine(title, 200);
+    if (!cleanTitle) {
       notify('Ingresá un título para la tarea.', 'error');
       return;
     }
@@ -68,20 +84,19 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({ open, onClose, owner
         stripUndefined({
           id: taskId,
           ownerId,
-          title: clampStr(title, 200),
+          title: cleanTitle,
           taskType,
           priority,
-          assignee: clampStr(assignee, 100),
+          assignee: sanitizePlainLine(assignee, 100),
           dueDate: clampStr(dueDate, 40),
           status,
-          notes: clampStr(notes, 1500),
+          notes: sanitizeText(notes, 1500),
         })
       );
       notify('Tarea agregada a la agenda.');
       onClose();
     } catch (err) {
-      console.error(err);
-      notify('No se pudo guardar la tarea.', 'error');
+      notify(sanitizeDbErrorMessage(err, 'No se pudo guardar la tarea.'), 'error');
     } finally {
       setSaving(false);
     }
@@ -248,44 +263,42 @@ export const NewSupplierModal: React.FC<NewSupplierModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) {
+    const cleanName = sanitizePlainLine(name, 160);
+    if (!cleanName) {
       notify('Ingresá el nombre del proveedor.', 'error');
+      return;
+    }
+    const cleanEmail = sanitizeEmail(email, 200);
+    if (cleanEmail && !isValidEmail(cleanEmail)) {
+      notify('El correo electrónico del proveedor no es válido.', 'error');
       return;
     }
     setSaving(true);
     try {
       const baseFields = stripUndefined({
-        name: clampStr(name, 160),
-        category: clampStr(category || 'Repuestos', 80) || 'Repuestos',
-        contact: clampStr(contact, 120),
-        phone: clampStr(phone, 60),
-        email: clampStr(email, 200),
-        leadTime: clampStr(leadTime, 60),
-        balance: Math.max(0, Number(balance || 0)),
+        name: cleanName,
+        category: sanitizePlainLine(category || 'Repuestos', 80) || 'Repuestos',
+        contact: sanitizePlainLine(contact, 120),
+        phone: sanitizePhone(phone, 60),
+        email: cleanEmail,
+        leadTime: sanitizePlainLine(leadTime, 60),
+        balance: parseSafePositiveNumber(balance, 0),
       });
       if (editSupplier) {
-        try {
-          await updateRow('suppliers', editSupplier.id, baseFields);
-          notify('Proveedor actualizado.');
-        } catch (err) {
-          console.error(err);
-          notify('No se pudo guardar el proveedor.', 'error');
-        }
+        await updateRow('suppliers', editSupplier.id, baseFields);
+        notify('Proveedor actualizado.');
       } else {
         const supplierId = generateDocId('suppliers');
-        try {
-          await upsertRow('suppliers', {
-            id: supplierId,
-            ...baseFields,
-            ownerId,
-          });
-          notify('Proveedor guardado.');
-        } catch (err) {
-          console.error(err);
-          notify('No se pudo guardar el proveedor.', 'error');
-        }
+        await upsertRow('suppliers', {
+          id: supplierId,
+          ...baseFields,
+          ownerId,
+        });
+        notify('Proveedor guardado.');
       }
       onClose();
+    } catch (err) {
+      notify(sanitizeDbErrorMessage(err, 'No se pudo guardar el proveedor.'), 'error');
     } finally {
       setSaving(false);
     }
@@ -463,13 +476,29 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         !loadedCfg.paymentLink.trim() &&
         !loadedCfg.qrImageDataUrl
     );
+
+    let cancelled = false;
+    void hydrateTransferConfig(ownerId).then((hydrated) => {
+      if (cancelled) return;
+      setTransferCfg(hydrated);
+      setEditingTransferCfg(
+        !hydrated.alias.trim() &&
+          !hydrated.cbu.trim() &&
+          !hydrated.paymentLink.trim() &&
+          !hydrated.qrImageDataUrl
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [open, ownerId, preselectedProduct]);
 
-  const numericAmount = Math.max(0, Number(amount || 0));
+  const numericAmount = parseSafePositiveNumber(amount, 0);
+  const rawDeposit = parseSafePositiveNumber(deposit, 0);
   const numericDeposit =
     status === 'cobrado'
       ? numericAmount
-      : Math.min(numericAmount > 0 ? numericAmount : Number(deposit || 0), Math.max(0, Number(deposit || 0)));
+      : Math.min(numericAmount > 0 ? numericAmount : rawDeposit, rawDeposit);
   const pendingBalance = Math.max(0, numericAmount - numericDeposit);
   const qrChargeAmount = status === 'cobrado' ? numericAmount : numericDeposit > 0 ? numericDeposit : numericAmount;
 
@@ -553,30 +582,39 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   );
 
   const submitSale = async (openPrintAfter: boolean) => {
-    if (!clientName.trim()) {
+    const cleanClientName = sanitizePlainLine(clientName, 160);
+    if (!cleanClientName) {
       notify('Ingresá el nombre del cliente.', 'error');
       return;
     }
-    const cleanAmount = Math.max(0, Number(amount || 0));
+    const cleanAmount = parseSafePositiveNumber(amount, 0);
     if (cleanAmount <= 0) {
       notify('Ingresá un monto mayor a 0.', 'error');
       return;
     }
+    const cleanQty = Math.max(1, parseSafeNonNegativeInt(quantity, 1, 10_000));
 
     if (
       preselectedProduct &&
       preselectedProduct.trackStock &&
       !preselectedProduct.allowNoStock &&
-      quantity > preselectedProduct.stock
+      cleanQty > preselectedProduct.stock
     ) {
       notify(`Stock insuficiente (disponible: ${preselectedProduct.stock} u.).`, 'error');
       return;
     }
 
+    if (paymentMethod === 'transferencia' && transferCfg.paymentLink.trim()) {
+      if (!sanitizeSafeUrl(transferCfg.paymentLink, 400)) {
+        notify('El link de pago debe empezar con https:// o http://', 'error');
+        return;
+      }
+    }
+
     const cleanDeposit =
       status === 'cobrado'
         ? cleanAmount
-        : Math.min(cleanAmount, Math.max(0, Number(deposit || 0)));
+        : Math.min(cleanAmount, parseSafePositiveNumber(deposit, 0));
 
     const serializedStatus = serializeSaleStatus({
       status,
@@ -587,11 +625,11 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
 
     if (paymentMethod === 'transferencia') {
       saveTransferConfig(ownerId, {
-        alias: transferCfg.alias.trim(),
-        cbu: transferCfg.cbu.trim(),
-        holder: transferCfg.holder.trim(),
-        paymentLink: transferCfg.paymentLink.trim(),
-        qrImageDataUrl: transferCfg.qrImageDataUrl,
+        alias: sanitizeAlias(transferCfg.alias),
+        cbu: sanitizeCbu(transferCfg.cbu),
+        holder: sanitizePlainLine(transferCfg.holder, 120),
+        paymentLink: sanitizeSafeUrl(transferCfg.paymentLink, 400),
+        qrImageDataUrl: sanitizeImageDataUrl(transferCfg.qrImageDataUrl, 1_200_000),
       });
     }
 
@@ -606,23 +644,26 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           stripUndefined({
             id: resolvedClientId,
             ownerId,
-            name: clampStr(clientName, 160),
+            name: cleanClientName,
           })
         );
       }
 
       const saleId = generateDocId('sales');
-      const finalInvoice = clampStr(invoice || `FV-${Date.now().toString().slice(-4)}`, 60);
+      const finalInvoice = sanitizePlainLine(
+        invoice || `FV-${Date.now().toString().slice(-4)}`,
+        60
+      );
       const finalDueDate = clampStr(dueDate, 40);
       const salePayload = stripUndefined({
         id: saleId,
         ownerId,
         clientId: clampStr(resolvedClientId, 128),
-        clientName: clampStr(clientName, 160),
+        clientName: cleanClientName,
         invoice: finalInvoice,
         productId: clampStr(preselectedProduct?.id, 128),
-        productName: clampStr(preselectedProduct?.name, 200),
-        quantity: preselectedProduct ? quantity : undefined,
+        productName: sanitizePlainLine(preselectedProduct?.name || '', 200),
+        quantity: preselectedProduct ? cleanQty : undefined,
         amount: cleanAmount,
         status: serializedStatus,
         dueDate: finalDueDate,
@@ -632,7 +673,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
 
       if (preselectedProduct && preselectedProduct.trackStock) {
         await updateRow('products', preselectedProduct.id, {
-          stock: Math.max(0, preselectedProduct.stock - quantity),
+          stock: Math.max(0, preselectedProduct.stock - cleanQty),
         });
       }
 
@@ -640,11 +681,11 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         id: saleId,
         ownerId,
         clientId: resolvedClientId,
-        clientName: clampStr(clientName, 160),
+        clientName: cleanClientName,
         invoice: finalInvoice,
         productId: preselectedProduct?.id,
         productName: preselectedProduct?.name,
-        quantity: preselectedProduct ? quantity : undefined,
+        quantity: preselectedProduct ? cleanQty : undefined,
         amount: cleanAmount,
         status: serializedStatus,
         dueDate: finalDueDate,
@@ -657,8 +698,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         onCreated?.(createdRecord);
       }
     } catch (err) {
-      console.error(err);
-      notify('No se pudo guardar la venta.', 'error');
+      notify(sanitizeDbErrorMessage(err, 'No se pudo guardar la venta.'), 'error');
     } finally {
       setSaving(false);
     }
@@ -680,26 +720,45 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   };
 
   const handleSaveTransferCfg = () => {
+    const rawLink = transferCfg.paymentLink.trim();
+    const safeLink = sanitizeSafeUrl(rawLink, 400);
+    if (rawLink && !safeLink) {
+      notify('El link de pago debe empezar con https:// o http://', 'error');
+      return;
+    }
     const cleaned: TransferConfig = {
-      alias: transferCfg.alias.trim(),
-      cbu: transferCfg.cbu.trim(),
-      holder: transferCfg.holder.trim(),
-      paymentLink: transferCfg.paymentLink.trim(),
-      qrImageDataUrl: transferCfg.qrImageDataUrl,
+      alias: sanitizeAlias(transferCfg.alias),
+      cbu: sanitizeCbu(transferCfg.cbu),
+      holder: sanitizePlainLine(transferCfg.holder, 120),
+      paymentLink: safeLink,
+      qrImageDataUrl: sanitizeImageDataUrl(transferCfg.qrImageDataUrl, 1_200_000),
     };
     setTransferCfg(cleaned);
     saveTransferConfig(ownerId, cleaned);
     setEditingTransferCfg(false);
-    notify('Datos de transferencia guardados.');
+    notify('Datos de transferencia guardados (cifrados).');
   };
 
   const handleUploadTransferQr = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      notify('Usá una imagen PNG, JPG o WebP.', 'error');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      notify('La imagen del QR no puede superar 2 MB.', 'error');
+      return;
+    }
     try {
       const dataUrl = await compressImageToDataUrl(file, 480, 0.85);
-      const nextCfg = { ...transferCfg, qrImageDataUrl: dataUrl };
+      const safeQr = sanitizeImageDataUrl(dataUrl, 1_200_000);
+      if (!safeQr) {
+        notify('La imagen procesada supera el límite permitido.', 'error');
+        return;
+      }
+      const nextCfg = { ...transferCfg, qrImageDataUrl: safeQr };
       setTransferCfg(nextCfg);
       saveTransferConfig(ownerId, nextCfg);
       notify('Captura del QR guardada.');
@@ -1120,11 +1179,12 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!supplierName.trim()) {
+    const cleanSupplier = sanitizePlainLine(supplierName, 160);
+    if (!cleanSupplier) {
       notify('Ingresá el proveedor.', 'error');
       return;
     }
-    const cleanAmount = Math.max(0, Number(amount || 0));
+    const cleanAmount = parseSafePositiveNumber(amount, 0);
     if (cleanAmount <= 0) {
       notify('Ingresá un monto mayor a 0.', 'error');
       return;
@@ -1133,7 +1193,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
     const purchaseId = generateDocId('purchases');
     try {
       const matched = suppliers.find(
-        (s) => s.name.trim().toLowerCase() === supplierName.trim().toLowerCase()
+        (s) => s.name.trim().toLowerCase() === cleanSupplier.toLowerCase()
       );
       await upsertRow(
         'purchases',
@@ -1141,8 +1201,11 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
           id: purchaseId,
           ownerId,
           supplierId: clampStr(matched?.id, 128),
-          supplierName: clampStr(supplierName, 160),
-          invoice: clampStr(invoice || `FC-${Date.now().toString().slice(-4)}`, 60),
+          supplierName: cleanSupplier,
+          invoice: sanitizePlainLine(
+            invoice || `FC-${Date.now().toString().slice(-4)}`,
+            60
+          ),
           amount: cleanAmount,
           status,
           dueDate: clampStr(dueDate, 40),
@@ -1151,8 +1214,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
       notify('Compra registrada.');
       onClose();
     } catch (err) {
-      console.error(err);
-      notify('No se pudo guardar la compra.', 'error');
+      notify(sanitizeDbErrorMessage(err, 'No se pudo guardar la compra.'), 'error');
     } finally {
       setSaving(false);
     }

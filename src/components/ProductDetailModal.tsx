@@ -3,6 +3,7 @@ import { Edit3, Minus, Package, Plus, ShoppingCart, Trash2 } from 'lucide-react'
 import { deleteRow, handleDbError, OperationType, updateRow } from '../lib/db';
 import type { ProductRecord } from '../types/workshop';
 import { formatCurrency } from '../utils/formatters';
+import { sanitizeDbErrorMessage, sanitizeImageDataUrl } from '../utils/validation';
 import { ModalShell } from './ModalShell';
 import { useToast } from './ToastProvider';
 
@@ -37,8 +38,8 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       await updateRow('products', product.id, { stock: nextStock });
       notify(`Stock actualizado: ${nextStock} u.`);
     } catch (err) {
-      notify('No se pudo actualizar el stock.', 'error');
-      await handleDbError(err, OperationType.UPDATE, path);
+      notify(sanitizeDbErrorMessage(err, 'No se pudo actualizar el stock.'), 'error');
+      void handleDbError(err, OperationType.UPDATE, path).catch(() => {});
     }
   };
 
@@ -49,8 +50,8 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       notify('Producto eliminado.');
       onClose();
     } catch (err) {
-      notify('No se pudo eliminar el producto.', 'error');
-      await handleDbError(err, OperationType.DELETE, path);
+      notify(sanitizeDbErrorMessage(err, 'No se pudo eliminar el producto.'), 'error');
+      void handleDbError(err, OperationType.DELETE, path).catch(() => {});
     }
   };
 
@@ -64,9 +65,9 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     >
       <div className="space-y-5">
         <div className="flex flex-wrap items-center gap-4">
-          {product.imageDataUrl ? (
+          {sanitizeImageDataUrl(product.imageDataUrl, 1_200_000) ? (
             <img
-              src={product.imageDataUrl}
+              src={sanitizeImageDataUrl(product.imageDataUrl, 1_200_000)}
               alt={product.name}
               referrerPolicy="no-referrer"
               className="h-20 w-20 rounded-2xl border border-slate-200 object-cover dark:border-slate-700"

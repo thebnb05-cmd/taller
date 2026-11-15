@@ -21,6 +21,14 @@ import {
   computeProductPricing,
   generateInternalProductCode,
 } from '../utils/formatters';
+import {
+  parseSafeNonNegativeInt,
+  parseSafePositiveNumber,
+  sanitizeDbErrorMessage,
+  sanitizeImageDataUrl,
+  sanitizePlainLine,
+  sanitizeText,
+} from '../utils/validation';
 import { ModalShell } from './ModalShell';
 import { useToast } from './ToastProvider';
 
@@ -180,14 +188,24 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      notify('Usá una imagen PNG, JPG o WebP.', 'error');
+      return;
+    }
     if (file.size > 4 * 1024 * 1024) {
       notify('La imagen no puede superar 4 MB.', 'error');
       return;
     }
     try {
       const compressed = await compressImageToDataUrl(file, 640, 0.8);
-      setImageDataUrl(compressed);
+      const safeImg = sanitizeImageDataUrl(compressed, 700000);
+      if (!safeImg) {
+        notify('La imagen procesada supera el tamaño permitido.', 'error');
+        return;
+      }
+      setImageDataUrl(safeImg);
     } catch {
       notify('No se pudo optimizar la imagen.', 'error');
     }
@@ -263,40 +281,53 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) {
+    const cleanName = sanitizePlainLine(name, 200);
+    if (!cleanName) {
       notify('Ingresá el nombre del producto.', 'error');
       return;
     }
+    const rawMargin = Number(String(margin || 0).replace(',', '.'));
+    const safeMargin = Number.isFinite(rawMargin)
+      ? Math.max(-999_999, Math.min(999_999_999, Math.round(rawMargin * 100) / 100))
+      : 0;
+    const safeImage = imageDataUrl ? sanitizeImageDataUrl(imageDataUrl, 700000) : '';
+
     setSaving(true);
     try {
       const supplier = suppliers.find((s) => s.id === supplierId);
       const baseFields = {
-        name: clampStr(name, 200),
-        description: clampStr(description, 2000),
-        metaDescription: clampStr(metaDescription, 200),
+        name: cleanName,
+        description: sanitizeText(description, 2000),
+        metaDescription: sanitizePlainLine(metaDescription, 200),
         productType: clampStr(productType || 'Fisico', 40) || 'Fisico',
-        imageDataUrl: clampStr(imageDataUrl, 700000),
-        category: clampStr(category || 'Repuesto', 80) || 'Repuesto',
-        subcategory: clampStr(subcategory, 80),
-        brand: clampStr(brand, 80),
+        imageDataUrl: safeImage,
+        category: sanitizePlainLine(category || 'Repuesto', 80) || 'Repuesto',
+        subcategory: sanitizePlainLine(subcategory, 80),
+        brand: sanitizePlainLine(brand, 80),
         supplierId: clampStr(supplier?.id, 128),
-        supplierName: clampStr(supplier?.name, 160),
-        sku: clampStr(sku, 80),
-        barcode: clampStr(barcode, 80),
-        location: clampStr(location, 120),
-        internalCode: clampStr(internalCode || generateInternalProductCode(), 60),
-        cost: Math.max(0, Number(cost || 0)),
+        supplierName: sanitizePlainLine(supplier?.name || '', 160),
+        sku: sanitizePlainLine(sku, 80),
+        barcode: sanitizePlainLine(barcode, 80),
+        location: sanitizePlainLine(location, 120),
+        internalCode: sanitizePlainLine(internalCode || generateInternalProductCode(), 60),
+        cost: parseSafePositiveNumber(cost, 0),
         marginMode,
-        margin: Number(margin || 0),
-        vat: Math.max(0, Number(vat || 0)),
-        rounding: Math.max(0, Number(rounding || 0)),
-        netPrice: pricing.netPrice,
-        price: pricing.finalPrice,
+        margin: safeMargin,
+        vat: parseSafePositiveNumber(vat, 0, 100),
+        rounding: parseSafePositiveNumber(rounding, 0, 100_000),
+        netPrice: Number.isFinite(pricing.netPrice) ? Math.max(0, pricing.netPrice) : 0,
+        price: Number.isFinite(pricing.finalPrice) ? Math.max(0, pricing.finalPrice) : 0,
         trackStock,
         allowNoStock,
         usesSerial,
-        stock: Math.max(0, Number(stock || 0)),
-        minStock: Math.max(0, Number(minStock || 0)),
+        stock: parseSafeNonNegativeInt(stock, 0),
+        minStock: parseSafeNonNegativeInt(minStock, 0),
+      };
+
+      const optNum = (v: string) => {
+        if (!v.trim()) return undefined;
+        const parsed = parseSafePositiveNumber(v, -1);
+        return parsed >= 0 ? parsed : undefined;
       };
 
       if (editProduct) {
@@ -304,20 +335,21 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         const updatePayload = stripUndefined(
           {
             ...baseFields,
-            reorderCap: reorderCap ? Number(reorderCap) : null,
-            weight: weight ? Number(weight) : null,
-            height: height ? Number(height) : null,
-            width: width ? Number(width) : null,
-            depth: depth ? Number(depth) : null,
+            reorderCap: reorderCap.trim() ? parseSafeNonNegativeInt(reorderCap, 0) : null,
+            weight: optNum(weight) ?? null,
+            height: optNum(height) ?? null,
+            width: optNum(width) ?? null,
+            depth: optNum(depth) ?? null,
           },
           true
         );
         try {
           await updateRow('products', editProduct.id, updatePayload, true);
           notify('Producto actualizado.');
+          onClose();
         } catch (err) {
-          notify('No se pudo guardar el producto.', 'error');
-          await handleDbError(err, OperationType.UPDATE, path);
+          notify(sanitizeDbErrorMessage(err, 'No se pudo guardar el producto.'), 'error');
+          void handleDbError(err, OperationType.UPDATE, path).catch(() => {});
         }
       } else {
         const productId = generateDocId('products');
@@ -326,22 +358,22 @@ export const ProductModal: React.FC<ProductModalProps> = ({
           id: productId,
           ...baseFields,
           ownerId,
-          reorderCap: reorderCap ? Number(reorderCap) : undefined,
-          weight: weight ? Number(weight) : undefined,
-          height: height ? Number(height) : undefined,
-          width: width ? Number(width) : undefined,
-          depth: depth ? Number(depth) : undefined,
+          reorderCap: reorderCap.trim() ? parseSafeNonNegativeInt(reorderCap, 0) : undefined,
+          weight: optNum(weight),
+          height: optNum(height),
+          width: optNum(width),
+          depth: optNum(depth),
           createdAt: new Date().toISOString(),
         });
         try {
           await upsertRow('products', createPayload);
           notify('Producto guardado.');
+          onClose();
         } catch (err) {
-          notify('No se pudo guardar el producto.', 'error');
-          await handleDbError(err, OperationType.CREATE, path);
+          notify(sanitizeDbErrorMessage(err, 'No se pudo guardar el producto.'), 'error');
+          void handleDbError(err, OperationType.CREATE, path).catch(() => {});
         }
       }
-      onClose();
     } finally {
       setSaving(false);
     }

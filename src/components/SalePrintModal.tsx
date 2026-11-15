@@ -7,7 +7,9 @@ import { formatCurrency, formatDateShort } from '../utils/formatters';
 import {
   buildTransferQrPayload,
   buildTransferWhatsAppText,
+  hydrateTransferConfig,
   loadTransferConfig,
+  type TransferConfig,
 } from '../utils/payment';
 import { parseSalePaymentInfo } from '../utils/saleMeta';
 import { BrandMark } from './BrandMark';
@@ -39,10 +41,24 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
     [sale]
   );
 
-  const transferCfg = useMemo(
-    () => (sale ? loadTransferConfig(sale.ownerId) : loadTransferConfig('')),
-    [sale]
+  const [transferCfg, setTransferCfg] = useState<TransferConfig>(() =>
+    sale ? loadTransferConfig(sale.ownerId) : loadTransferConfig('')
   );
+
+  useEffect(() => {
+    if (!sale?.ownerId) {
+      setTransferCfg(loadTransferConfig(''));
+      return;
+    }
+    setTransferCfg(loadTransferConfig(sale.ownerId));
+    let cancelled = false;
+    void hydrateTransferConfig(sale.ownerId).then((cfg) => {
+      if (!cancelled) setTransferCfg(cfg);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [sale]);
 
   const matchedClient = useMemo(() => {
     if (!sale) return undefined;

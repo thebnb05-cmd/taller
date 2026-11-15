@@ -23,6 +23,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { deleteRow, updateRow } from '../lib/db';
+import { sanitizeDbErrorMessage } from '../utils/validation';
 import type {
   ClientRecord,
   ProductRecord,
@@ -1106,8 +1107,7 @@ export const SuppliersPage: React.FC<SuppliersPageProps> = ({
       await deleteRow('suppliers', s.id);
       notify('Proveedor eliminado.');
     } catch (err) {
-      console.error(err);
-      notify('No se pudo eliminar.', 'error');
+      notify(sanitizeDbErrorMessage(err, 'No se pudo eliminar el proveedor.'), 'error');
     }
   };
 
@@ -1231,8 +1231,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
     try {
       await updateRow('sales', s.id, { status: next });
     } catch (err) {
-      console.error(err);
-      notify('No se pudo actualizar la venta.', 'error');
+      notify(sanitizeDbErrorMessage(err, 'No se pudo actualizar la venta.'), 'error');
     }
   };
 
@@ -1241,8 +1240,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       await deleteRow('sales', s.id);
       notify('Venta eliminada.');
     } catch (err) {
-      console.error(err);
-      notify('No se pudo eliminar.', 'error');
+      notify(sanitizeDbErrorMessage(err, 'No se pudo eliminar la venta.'), 'error');
     }
   };
 
@@ -1406,8 +1404,7 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({ purchases, onNewPu
     try {
       await updateRow('purchases', p.id, { status: next });
     } catch (err) {
-      console.error(err);
-      notify('No se pudo actualizar la compra.', 'error');
+      notify(sanitizeDbErrorMessage(err, 'No se pudo actualizar la compra.'), 'error');
     }
   };
 
@@ -1416,8 +1413,7 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({ purchases, onNewPu
       await deleteRow('purchases', p.id);
       notify('Compra eliminada.');
     } catch (err) {
-      console.error(err);
-      notify('No se pudo eliminar.', 'error');
+      notify(sanitizeDbErrorMessage(err, 'No se pudo eliminar la compra.'), 'error');
     }
   };
 

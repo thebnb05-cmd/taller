@@ -1,3 +1,5 @@
+import { sanitizeMediaUrl, sanitizePlainLine, sanitizeText } from './validation';
+
 export interface TechMediaItem {
   id: string;
   type: 'image' | 'video';
@@ -8,6 +10,8 @@ export interface TechMediaItem {
 
 const MEDIA_MARKER = '\n<!--TH3BNB_MEDIA:';
 const MEDIA_END = '-->';
+const YOUTUBE_ID_RE = /^[a-zA-Z0-9_-]{6,20}$/;
+const DRIVE_ID_RE = /^[a-zA-Z0-9_-]{10,120}$/;
 
 export const MAX_INLINE_VIDEO_BYTES = 6 * 1024 * 1024; // 6 MB
 
@@ -16,29 +20,44 @@ export function parseWorkDetailAndMedia(raw?: string | null): {
   media: TechMediaItem[];
 } {
   if (!raw) return { text: '', media: [] };
-  const idx = raw.indexOf(MEDIA_MARKER);
+  const idx = raw.lastIndexOf(MEDIA_MARKER);
   if (idx === -1) {
-    return { text: raw, media: [] };
+    return { text: sanitizeText(raw, 2000), media: [] };
   }
-  const text = raw.slice(0, idx).trim();
+  const text = sanitizeText(raw.slice(0, idx), 2000);
   const after = raw.slice(idx + MEDIA_MARKER.length);
   const endIdx = after.lastIndexOf(MEDIA_END);
   const jsonPart = endIdx !== -1 ? after.slice(0, endIdx) : after;
   try {
     const parsed = JSON.parse(jsonPart);
     if (Array.isArray(parsed)) {
-      const media: TechMediaItem[] = parsed.filter(
-        (item): item is TechMediaItem =>
-          Boolean(item) &&
-          typeof item === 'object' &&
-          (item.type === 'image' || item.type === 'video') &&
-          typeof item.url === 'string' &&
-          item.url.length > 0
-      );
+      const media: TechMediaItem[] = [];
+      for (const item of parsed.slice(0, 12)) {
+        if (
+          !item ||
+          typeof item !== 'object' ||
+          (item.type !== 'image' && item.type !== 'video') ||
+          typeof item.url !== 'string'
+        ) {
+          continue;
+        }
+        const safeUrl = sanitizeMediaUrl(item.url, item.type);
+        if (!safeUrl) continue;
+        media.push({
+          id: sanitizePlainLine(String(item.id || createMediaId()), 64) || createMediaId(),
+          type: item.type,
+          url: safeUrl,
+          caption: typeof item.caption === 'string' ? sanitizePlainLine(item.caption, 160) : undefined,
+          createdAt:
+            typeof item.createdAt === 'number' && Number.isFinite(item.createdAt)
+              ? item.createdAt
+              : Date.now(),
+        });
+      }
       return { text, media };
     }
   } catch {
-    // Fallback to raw text if marker payload is malformed
+    // Fallback to clean text if marker payload is malformed
   }
   return { text, media: [] };
 }
@@ -47,18 +66,29 @@ export function serializeWorkDetailAndMedia(
   text: string,
   media: TechMediaItem[]
 ): string {
-  const cleanText = text.trim().slice(0, 2000);
-  if (!media || media.length === 0) {
+  const cleanText = sanitizeText(text, 2000)
+    .replace(/<!--TH3BNB_MEDIA:/g, '')
+    .replace(/-->/g, '')
+    .trim();
+  const safeMedia = (media || [])
+    .slice(0, 10)
+    .map((item) => {
+      const safeUrl = sanitizeMediaUrl(item.url, item.type);
+      if (!safeUrl) return null;
+      return {
+        id: sanitizePlainLine(item.id, 64) || createMediaId(),
+        type: item.type,
+        url: safeUrl,
+        caption: item.caption ? sanitizePlainLine(item.caption, 160) : undefined,
+        createdAt: item.createdAt || Date.now(),
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+
+  if (safeMedia.length === 0) {
     return cleanText;
   }
-  const compactMedia = media.map((item) => ({
-    id: item.id,
-    type: item.type,
-    url: item.url,
-    caption: item.caption ? item.caption.trim().slice(0, 160) : undefined,
-    createdAt: item.createdAt || Date.now(),
-  }));
-  return `${cleanText}${MEDIA_MARKER}${JSON.stringify(compactMedia)}${MEDIA_END}`;
+  return `${cleanText}${MEDIA_MARKER}${JSON.stringify(safeMedia)}${MEDIA_END}`;
 }
 
 export async function compressPhotoForTracking(
@@ -81,7 +111,7 @@ export async function compressPhotoForTracking(
         canvas.height = h;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
-          resolve(String(reader.result));
+          reject(new Error('No se pudo procesar la imagen.'));
           return;
         }
         ctx.fillStyle = '#ffffff';
@@ -99,32 +129,45 @@ export function readVideoAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('No se pudo leer el video.'));
-    reader.onload = () => resolve(String(reader.result));
+    reader.onload = () => {
+      const raw = String(reader.result || '');
+      const safe = sanitizeMediaUrl(raw, 'video');
+      if (!safe) {
+        reject(new Error('Formato de video no compatible.'));
+        return;
+      }
+      resolve(safe);
+    };
     reader.readAsDataURL(file);
   });
 }
 
 export function getEmbedVideoUrl(url: string): string | null {
-  const trimmed = url.trim();
+  const trimmed = (url || '').trim();
   if (!trimmed || trimmed.startsWith('data:')) return null;
   try {
     const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
     const host = parsed.hostname.toLowerCase();
-    if (host.includes('youtube.com')) {
+    if (
+      host === 'youtube.com' ||
+      host === 'www.youtube.com' ||
+      host === 'm.youtube.com'
+    ) {
       if (parsed.pathname.startsWith('/shorts/')) {
-        const id = parsed.pathname.split('/')[2];
-        return id ? `https://www.youtube.com/embed/${id}` : null;
+        const id = parsed.pathname.split('/')[2] || '';
+        return YOUTUBE_ID_RE.test(id) ? `https://www.youtube.com/embed/${id}` : null;
       }
-      const v = parsed.searchParams.get('v');
-      return v ? `https://www.youtube.com/embed/${v}` : null;
+      const v = parsed.searchParams.get('v') || '';
+      return YOUTUBE_ID_RE.test(v) ? `https://www.youtube.com/embed/${v}` : null;
     }
     if (host === 'youtu.be') {
-      const id = parsed.pathname.replace(/^\//, '');
-      return id ? `https://www.youtube.com/embed/${id}` : null;
+      const id = parsed.pathname.replace(/^\//, '').split('/')[0] || '';
+      return YOUTUBE_ID_RE.test(id) ? `https://www.youtube.com/embed/${id}` : null;
     }
-    if (host.includes('drive.google.com')) {
+    if (host === 'drive.google.com') {
       const match = /\/file\/d\/([^/]+)/.exec(parsed.pathname);
-      if (match?.[1]) {
+      if (match?.[1] && DRIVE_ID_RE.test(match[1])) {
         return `https://drive.google.com/file/d/${match[1]}/preview`;
       }
     }

@@ -12,6 +12,14 @@ import {
 } from '../lib/db';
 import type { ClientRecord, RepairRecord, SaleRecord } from '../types/workshop';
 import { formatCurrency, formatDateShort, getStatusMeta } from '../utils/formatters';
+import {
+  isValidEmail,
+  sanitizeDbErrorMessage,
+  sanitizeDni,
+  sanitizeEmail,
+  sanitizePhone,
+  sanitizePlainLine,
+} from '../utils/validation';
 import { ModalShell } from './ModalShell';
 import { useToast } from './ToastProvider';
 
@@ -47,27 +55,34 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) {
+    const cleanName = sanitizePlainLine(name, 160);
+    if (!cleanName) {
       notify('Ingresá el nombre del cliente.', 'error');
+      return;
+    }
+    const cleanEmail = sanitizeEmail(email, 200);
+    if (cleanEmail && !isValidEmail(cleanEmail)) {
+      notify('El correo electrónico del cliente no tiene un formato válido.', 'error');
       return;
     }
     setSaving(true);
     try {
       const updatePayload = stripUndefined({
-        name: clampStr(name, 160),
-        phone: clampStr(phone, 60),
-        dni: clampStr(dni, 40),
-        email: clampStr(email, 200),
-        address: clampStr(address, 240),
+        name: cleanName,
+        phone: sanitizePhone(phone, 60),
+        dni: sanitizeDni(dni, 40),
+        email: cleanEmail,
+        address: clampStr(sanitizePlainLine(address, 240), 240),
       });
       if (editClient) {
         const path = `clients/${editClient.id}`;
         try {
           await updateRow('clients', editClient.id, updatePayload);
           notify('Cliente actualizado.');
+          onClose();
         } catch (err) {
-          notify('No se pudo guardar el cliente.', 'error');
-          await handleDbError(err, OperationType.UPDATE, path);
+          notify(sanitizeDbErrorMessage(err, 'No se pudo guardar el cliente.'), 'error');
+          void handleDbError(err, OperationType.UPDATE, path).catch(() => {});
         }
       } else {
         const clientId = generateDocId('clients');
@@ -80,12 +95,12 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
             createdAt: new Date().toISOString(),
           });
           notify('Cliente guardado.');
+          onClose();
         } catch (err) {
-          notify('No se pudo guardar el cliente.', 'error');
-          await handleDbError(err, OperationType.CREATE, path);
+          notify(sanitizeDbErrorMessage(err, 'No se pudo guardar el cliente.'), 'error');
+          void handleDbError(err, OperationType.CREATE, path).catch(() => {});
         }
       }
-      onClose();
     } finally {
       setSaving(false);
     }
@@ -232,8 +247,8 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
       notify('Cliente eliminado.');
       onClose();
     } catch (err) {
-      notify('No se pudo eliminar el cliente.', 'error');
-      await handleDbError(err, OperationType.DELETE, path);
+      notify(sanitizeDbErrorMessage(err, 'No se pudo eliminar el cliente.'), 'error');
+      void handleDbError(err, OperationType.DELETE, path).catch(() => {});
     }
   };
 

@@ -44,6 +44,7 @@ import {
 import {
   buildTransferQrPayload,
   buildTransferWhatsAppText,
+  hydrateTransferConfig,
   loadTransferConfig,
   PAYMENT_METHOD_LABELS,
   parsePaymentInfo,
@@ -64,6 +65,21 @@ import {
 import { extractBatchRef } from '../utils/batchRef';
 import { buildTrackingUrl } from '../utils/tracking';
 import { getFunctionalCheckFields, getPhysicalCheckFields } from '../utils/checkFields';
+import {
+  isValidEmail,
+  parseSafePositiveNumber,
+  sanitizeAlias,
+  sanitizeCbu,
+  sanitizeDbErrorMessage,
+  sanitizeDni,
+  sanitizeEmail,
+  sanitizeImageDataUrl,
+  sanitizeMediaUrl,
+  sanitizePhone,
+  sanitizePlainLine,
+  sanitizeSafeUrl,
+  sanitizeText,
+} from '../utils/validation';
 import { ModalShell } from './ModalShell';
 import { PatternLock } from './PatternLock';
 import { RepairPrintDocuments } from './RepairPrintDocuments';
@@ -157,6 +173,14 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     setPhysicalCheck({ ...(repair.physicalCheck || {}) });
     setFunctionalCheck({ ...(repair.functionalCheck || {}) });
     setTransferConfig(loadTransferConfig(repair.ownerId));
+
+    let cancelled = false;
+    void hydrateTransferConfig(repair.ownerId).then((cfg) => {
+      if (!cancelled) setTransferConfig(cfg);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [repair]);
 
   const currentPendingBalance = repair
@@ -228,10 +252,16 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
 
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanEmail = sanitizeEmail(clientEmail, 200);
+    if (cleanEmail && !isValidEmail(cleanEmail)) {
+      notify('El correo electrónico del cliente no es válido.', 'error');
+      return;
+    }
     setSaving(true);
     try {
-      const budget = Math.max(0, Number(price || 0));
-      const advance = Math.max(0, Number(deposit || 0));
+      const budget = parseSafePositiveNumber(price, 0);
+      const advance = parseSafePositiveNumber(deposit, 0);
+      const safeProgress = Math.min(100, Math.max(0, Math.round(Number(progress) || 0)));
       const existingPaidStatus =
         repair.paymentStatus && repair.paymentStatus.startsWith('pagado')
           ? repair.paymentStatus
@@ -244,7 +274,10 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
           : advance > 0
           ? 'parcial'
           : 'pendiente';
-      const cleanName = clampStr(clientName || repair.clientName, 160) || repair.clientName;
+      const cleanName = sanitizePlainLine(clientName || repair.clientName, 160) || repair.clientName;
+      const cleanPhone = sanitizePhone(clientPhone, 60);
+      const cleanDni = sanitizeDni(clientDni, 40);
+      const cleanAddress = sanitizePlainLine(clientAddress, 240);
       const combinedWorkDetail = serializeWorkDetailAndMedia(workDetail, mediaItems);
       const nowIso = new Date().toISOString();
 
@@ -253,19 +286,19 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
         repair.id,
         stripUndefined({
           status,
-          progress,
-          notes: clampStr(notes, 2000),
+          progress: safeProgress,
+          notes: sanitizeText(notes, 2000),
           clientName: cleanName,
-          clientPhone: clampStr(clientPhone, 60),
-          clientDni: clampStr(clientDni, 40),
-          clientEmail: clampStr(clientEmail, 200),
-          clientAddress: clampStr(clientAddress, 240),
+          clientPhone: cleanPhone,
+          clientDni: cleanDni,
+          clientEmail: cleanEmail,
+          clientAddress: cleanAddress,
           price: budget,
           deposit: advance,
           paidAmount: advance,
           paymentStatus,
           workDetail: combinedWorkDetail,
-          checkoutState: clampStr(checkoutState, 500),
+          checkoutState: sanitizePlainLine(checkoutState, 500),
           physicalCheck,
           functionalCheck,
           updatedAt: nowIso,
@@ -302,17 +335,17 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
               brand: repair.brand,
               model: repair.model,
               status,
-              progress,
-              dateIn: repair.dateIn,
-              dateEst: repair.dateEst || '',
-              problemSummary: clampStr(repair.problem, 200),
-              workDetail: combinedWorkDetail,
-              price: budget,
-              deposit: advance,
-              updatedAt: nowIso,
-            })
-          );
-        }
+            progress: safeProgress,
+            dateIn: repair.dateIn,
+            dateEst: repair.dateEst || '',
+            problemSummary: clampStr(repair.problem, 200),
+            workDetail: combinedWorkDetail,
+            price: budget,
+            deposit: advance,
+            updatedAt: nowIso,
+          })
+        );
+      }
       }
 
       if (repair.clientId && clients.some((c) => c.id === repair.clientId)) {
@@ -321,10 +354,10 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
           repair.clientId,
           stripUndefined({
             name: cleanName,
-            phone: clampStr(clientPhone, 60),
-            dni: clampStr(clientDni, 40),
-            email: clampStr(clientEmail, 200),
-            address: clampStr(clientAddress, 240),
+            phone: cleanPhone,
+            dni: cleanDni,
+            email: cleanEmail,
+            address: cleanAddress,
           })
         );
       }
@@ -332,8 +365,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       notify('Reparación actualizada.');
       setTab('detail');
     } catch (err) {
-      console.error(err);
-      notify('No se pudieron guardar los cambios.', 'error');
+      notify(sanitizeDbErrorMessage(err, 'No se pudieron guardar los cambios.'), 'error');
     } finally {
       setSaving(false);
     }
@@ -384,8 +416,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       }
       notify(successMessage);
     } catch (err) {
-      console.error(err);
-      notify('No se pudo actualizar el seguimiento en línea.', 'error');
+      notify(sanitizeDbErrorMessage(err, 'No se pudo actualizar el seguimiento en línea.'), 'error');
     } finally {
       setSendingMedia(false);
     }
@@ -403,15 +434,21 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     try {
       const created: TechMediaItem[] = [];
       for (const file of files) {
+        if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) {
+          notify(`"${file.name}": formato no permitido (usá JPG, PNG o WebP).`, 'error');
+          continue;
+        }
         if (file.size > 12 * 1024 * 1024) {
           notify(`"${file.name}" supera 12 MB.`, 'error');
           continue;
         }
         const compressed = await compressPhotoForTracking(file);
+        const safeUrl = sanitizeMediaUrl(compressed, 'image');
+        if (!safeUrl) continue;
         created.push({
           id: createMediaId(),
           type: 'image',
-          url: compressed,
+          url: safeUrl,
           createdAt: Date.now(),
         });
       }
@@ -432,6 +469,10 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    if (!['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime'].includes(file.type)) {
+      notify('Formato de video no soportado. Usá MP4, WebM o MOV.', 'error');
+      return;
+    }
     if (mediaItems.length >= 10) {
       notify('Podés adjuntar hasta 10 archivos por orden.', 'error');
       return;
@@ -446,12 +487,17 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     setMediaBusy(true);
     try {
       const dataUrl = await readVideoAsDataUrl(file);
+      const safeUrl = sanitizeMediaUrl(dataUrl, 'video');
+      if (!safeUrl) {
+        notify('El video seleccionado no es válido.', 'error');
+        return;
+      }
       setMediaItems((prev) => [
         ...prev,
         {
           id: createMediaId(),
           type: 'video',
-          url: dataUrl,
+          url: safeUrl,
           createdAt: Date.now(),
         },
       ]);
@@ -464,16 +510,10 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   };
 
   const handleAddMediaLink = () => {
-    const trimmed = mediaLinkUrl.trim();
-    if (!trimmed) return;
-    try {
-      const parsed = new URL(trimmed);
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        notify('Ingresá una URL válida que empiece con https://', 'error');
-        return;
-      }
-    } catch {
-      notify('El enlace ingresado no es válido.', 'error');
+    const safeLink = sanitizeSafeUrl(mediaLinkUrl, 1000);
+    if (!mediaLinkUrl.trim()) return;
+    if (!safeLink) {
+      notify('Ingresá una URL válida que empiece con https:// o http://', 'error');
       return;
     }
     if (mediaItems.length >= 10) {
@@ -485,7 +525,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       {
         id: createMediaId(),
         type: mediaLinkType,
-        url: trimmed,
+        url: safeLink,
         createdAt: Date.now(),
       },
     ]);
@@ -495,7 +535,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   };
 
   const handleRegisterFullPayment = async () => {
-    const budget = Math.max(0, Number(repair.price || 0));
+    const budget = parseSafePositiveNumber(repair.price, 0);
     if (budget <= 0) {
       notify('Definí un presupuesto mayor a 0 en la pestaña Técnico antes de cobrar.', 'error');
       return;
@@ -526,8 +566,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       setJustPaid(true);
       setTab('receipt');
     } catch (err) {
-      console.error(err);
-      notify('No se pudo registrar el pago.', 'error');
+      notify(sanitizeDbErrorMessage(err, 'No se pudo registrar el pago.'), 'error');
     } finally {
       setPaying(false);
     }
@@ -535,26 +574,50 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
 
   const handleUploadTransferQr = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      notify('Usá una imagen PNG, JPG o WebP.', 'error');
+      return;
+    }
     if (file.size > 1.5 * 1024 * 1024) {
       notify('La imagen del QR no puede superar 1,5 MB.', 'error');
       return;
     }
     try {
       const compressed = await compressImageToDataUrl(file, 420, 0.9);
-      const nextCfg = { ...transferConfig, qrImageDataUrl: compressed };
+      const safeQr = sanitizeImageDataUrl(compressed, 1_200_000);
+      if (!safeQr) {
+        notify('La imagen procesada supera el límite permitido.', 'error');
+        return;
+      }
+      const nextCfg = { ...transferConfig, qrImageDataUrl: safeQr };
       setTransferConfig(nextCfg);
       saveTransferConfig(repair.ownerId, nextCfg);
-      notify('Imagen QR guardada.');
+      notify('Imagen QR guardada (cifrada).');
     } catch {
       notify('No se pudo cargar la imagen del QR.', 'error');
     }
   };
 
   const handleSaveTransferConfig = () => {
-    saveTransferConfig(repair.ownerId, transferConfig);
+    const rawLink = transferConfig.paymentLink.trim();
+    const safeLink = sanitizeSafeUrl(rawLink, 400);
+    if (rawLink && !safeLink) {
+      notify('El link de pago debe empezar con https:// o http://', 'error');
+      return;
+    }
+    const cleaned: TransferConfig = {
+      alias: sanitizeAlias(transferConfig.alias),
+      cbu: sanitizeCbu(transferConfig.cbu),
+      holder: sanitizePlainLine(transferConfig.holder, 120),
+      paymentLink: safeLink,
+      qrImageDataUrl: sanitizeImageDataUrl(transferConfig.qrImageDataUrl, 1_200_000),
+    };
+    setTransferConfig(cleaned);
+    saveTransferConfig(repair.ownerId, cleaned);
     setEditingTransferConfig(false);
-    notify('Datos de transferencia guardados.');
+    notify('Datos de transferencia guardados (cifrados).');
   };
 
   const handleCopyText = async (value: string, label: string) => {
@@ -580,8 +643,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       notify(`Orden ${repair.code} eliminada.`);
       onClose();
     } catch (err) {
-      console.error(err);
-      notify('No se pudo eliminar la reparación.', 'error');
+      notify(sanitizeDbErrorMessage(err, 'No se pudo eliminar la reparación.'), 'error');
     }
   };
 
@@ -1150,11 +1212,14 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     {detailWork.media.map((item) => {
-                      const embedUrl = item.type === 'video' ? getEmbedVideoUrl(item.url) : null;
+                      const safeUrl = sanitizeMediaUrl(item.url, item.type);
+                      if (!safeUrl) return null;
+                      const embedUrl = item.type === 'video' ? getEmbedVideoUrl(safeUrl) : null;
+                      const safeExternalHref = sanitizeSafeUrl(safeUrl, 1000);
                       const isDirectVideo =
                         item.type === 'video' &&
-                        (item.url.startsWith('data:video/') ||
-                          /\.(mp4|webm|mov|m4v|ogg)(\?.*)?$/i.test(item.url));
+                        (safeUrl.startsWith('data:video/') ||
+                          /\.(mp4|webm|mov|m4v|ogg)(\?.*)?$/i.test(safeUrl));
                       return (
                         <div
                           key={item.id}
@@ -1163,12 +1228,13 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                           {item.type === 'image' ? (
                             <button
                               type="button"
-                              onClick={() => setLightboxImage(item.url)}
+                              onClick={() => setLightboxImage(safeUrl)}
                               className="block w-full overflow-hidden text-left"
                             >
                               <img
-                                src={item.url}
+                                src={safeUrl}
                                 alt={item.caption || 'Foto técnica'}
+                                referrerPolicy="no-referrer"
                                 className="h-40 w-full object-cover transition hover:opacity-90"
                               />
                             </button>
@@ -1178,20 +1244,22 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                                 src={embedUrl}
                                 title={item.caption || 'Video técnico'}
                                 className="h-full w-full"
+                                sandbox="allow-scripts allow-same-origin allow-presentation"
+                                referrerPolicy="strict-origin-when-cross-origin"
                                 allowFullScreen
                               />
                             </div>
                           ) : isDirectVideo ? (
                             <video
-                              src={item.url}
+                              src={safeUrl}
                               controls
                               playsInline
                               preload="metadata"
                               className="h-40 w-full bg-black object-contain"
                             />
-                          ) : (
+                          ) : safeExternalHref ? (
                             <a
-                              href={item.url}
+                              href={safeExternalHref}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="flex h-28 flex-col items-center justify-center gap-1.5 text-xs font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
@@ -1202,7 +1270,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                                 <ExternalLink className="h-3 w-3" />
                               </span>
                             </a>
-                          )}
+                          ) : null}
                           {item.caption && (
                             <div className="border-t border-slate-200/80 px-2.5 py-1.5 text-xs text-slate-700 dark:border-slate-700/60 dark:text-slate-200">
                               {item.caption}
@@ -1505,11 +1573,14 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
               {mediaItems.length > 0 && (
                 <div className="grid gap-3 sm:grid-cols-2">
                   {mediaItems.map((item) => {
-                    const embedUrl = item.type === 'video' ? getEmbedVideoUrl(item.url) : null;
+                    const safeUrl = sanitizeMediaUrl(item.url, item.type);
+                    if (!safeUrl) return null;
+                    const embedUrl = item.type === 'video' ? getEmbedVideoUrl(safeUrl) : null;
+                    const safeExternalHref = sanitizeSafeUrl(safeUrl, 1000);
                     const isDirectVideo =
                       item.type === 'video' &&
-                      (item.url.startsWith('data:video/') ||
-                        /\.(mp4|webm|mov|m4v|ogg)(\?.*)?$/i.test(item.url));
+                      (safeUrl.startsWith('data:video/') ||
+                        /\.(mp4|webm|mov|m4v|ogg)(\?.*)?$/i.test(safeUrl));
                     return (
                       <div
                         key={item.id}
@@ -1519,12 +1590,13 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                           {item.type === 'image' ? (
                             <button
                               type="button"
-                              onClick={() => setLightboxImage(item.url)}
+                              onClick={() => setLightboxImage(safeUrl)}
                               className="block w-full overflow-hidden text-left"
                             >
                               <img
-                                src={item.url}
+                                src={safeUrl}
                                 alt={item.caption || 'Foto adjunta'}
+                                referrerPolicy="no-referrer"
                                 className="h-36 w-full object-cover"
                               />
                             </button>
@@ -1534,20 +1606,22 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                                 src={embedUrl}
                                 title={item.caption || 'Video adjunto'}
                                 className="h-full w-full"
+                                sandbox="allow-scripts allow-same-origin allow-presentation"
+                                referrerPolicy="strict-origin-when-cross-origin"
                                 allowFullScreen
                               />
                             </div>
                           ) : isDirectVideo ? (
                             <video
-                              src={item.url}
+                              src={safeUrl}
                               controls
                               playsInline
                               preload="metadata"
                               className="h-36 w-full bg-black object-contain"
                             />
-                          ) : (
+                          ) : safeExternalHref ? (
                             <a
-                              href={item.url}
+                              href={safeExternalHref}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="flex h-28 flex-col items-center justify-center gap-1 bg-slate-100 text-xs font-semibold text-[#0072BB] dark:bg-slate-800 dark:text-sky-400"
@@ -1558,7 +1632,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                                 <ExternalLink className="h-3 w-3" />
                               </span>
                             </a>
-                          )}
+                          ) : null}
 
                           <button
                             type="button"

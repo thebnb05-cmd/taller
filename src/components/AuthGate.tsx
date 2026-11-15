@@ -11,6 +11,13 @@ import {
 import { DEFAULT_RECEIPT_TERMS } from '../data/catalog';
 import { compressImageToDataUrl } from '../utils/formatters';
 import { isPrivatePreviewOrigin } from '../utils/tracking';
+import {
+  isValidEmail,
+  sanitizeEmail,
+  sanitizeImageDataUrl,
+  sanitizePhone,
+  sanitizePlainLine,
+} from '../utils/validation';
 import { useToast } from './ToastProvider';
 
 interface AuthScreenProps {
@@ -49,13 +56,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
       const msg =
         err && typeof err === 'object' && 'message' in err
           ? String((err as { message?: unknown }).message)
-          : 'No se pudo iniciar sesión con Google.';
+          : '';
       if (msg.toLowerCase().includes('provider is not enabled')) {
         setErrorMsg(
           'Falta activar Google en tu panel de Supabase (Authentication → Providers → Google).'
         );
       } else {
-        setErrorMsg(msg);
+        setErrorMsg('No se pudo iniciar sesión con Google. Intentá nuevamente.');
       }
       setGoogleLoading(false);
     }
@@ -63,8 +70,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim() || !password) {
-      setErrorMsg('Completá tu correo electrónico y contraseña.');
+    const cleanEmail = sanitizeEmail(email);
+    if (!cleanEmail || !isValidEmail(cleanEmail)) {
+      setErrorMsg('Ingresá un correo electrónico válido.');
+      return;
+    }
+    if (!password) {
+      setErrorMsg('Ingresá tu contraseña.');
+      return;
+    }
+    if (mode === 'signup' && password.length < 8) {
+      setErrorMsg('Para crear una cuenta, la contraseña debe tener al menos 8 caracteres.');
       return;
     }
     setLoading(true);
@@ -73,14 +89,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
     try {
       if (mode === 'login') {
         const { error } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
+          email: cleanEmail,
           password,
         });
         if (error) throw error;
         notify('Sesión iniciada correctamente.');
       } else {
         const { data, error } = await supabase.auth.signUp({
-          email: email.trim(),
+          email: cleanEmail,
           password,
           options: {
             emailRedirectTo: window.location.origin,
@@ -99,14 +115,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
     } catch (err: unknown) {
       const msg =
         err && typeof err === 'object' && 'message' in err
-          ? String((err as { message?: unknown }).message)
-          : 'No se pudo iniciar sesión.';
-      if (msg.toLowerCase().includes('invalid login credentials')) {
+          ? String((err as { message?: unknown }).message).toLowerCase()
+          : '';
+      if (msg.includes('invalid login credentials')) {
         setErrorMsg('Correo o contraseña incorrectos.');
-      } else if (msg.toLowerCase().includes('email not confirmed')) {
+      } else if (msg.includes('email not confirmed')) {
         setErrorMsg('Tu correo todavía no está confirmado. Revisá tu bandeja de entrada.');
+      } else if (msg.includes('user already registered')) {
+        setErrorMsg('Ya existe una cuenta registrada con ese correo.');
+      } else if (msg.includes('rate limit') || msg.includes('too many')) {
+        setErrorMsg('Demasiados intentos. Esperá unos minutos e intentá nuevamente.');
+      } else if (msg.includes('password')) {
+        setErrorMsg('La contraseña no cumple con los requisitos mínimos de seguridad.');
       } else {
-        setErrorMsg(msg);
+        setErrorMsg('No se pudo completar la autenticación. Verificá tus datos e intentá otra vez.');
       }
     } finally {
       setLoading(false);
@@ -272,10 +294,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
                 <input
                   type="password"
                   required
-                  minLength={6}
+                  minLength={mode === 'signup' ? 8 : 6}
+                  maxLength={128}
+                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Mínimo 6 caracteres"
+                  placeholder={mode === 'signup' ? 'Mínimo 8 caracteres' : 'Tu contraseña'}
                   className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
@@ -345,6 +369,12 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanFirst = sanitizePlainLine(firstName, 100);
+    const cleanLast = sanitizePlainLine(lastName, 100);
+    if (!cleanFirst || !cleanLast) {
+      notify('Completá tu nombre y apellido.', 'error');
+      return;
+    }
     setSaving(true);
     const path = `workshop_profiles/${userId}`;
     try {
@@ -352,16 +382,16 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
       const payload = stripUndefined({
         id: userId,
         ownerId: userId,
-        email: clampStr(userEmail, 200),
-        firstName: clampStr(firstName, 100),
-        lastName: clampStr(lastName, 100),
-        role,
-        brandName: clampStr(brandName || 'TH3 BNB', 80) || 'TH3 BNB',
+        email: clampStr(sanitizeEmail(userEmail || ''), 200),
+        firstName: clampStr(cleanFirst, 100),
+        lastName: clampStr(cleanLast, 100),
+        role: role === 'operator' ? 'operator' : 'admin',
+        brandName: clampStr(sanitizePlainLine(brandName, 80) || 'TH3 BNB', 80) || 'TH3 BNB',
         subtitle: 'Servicio técnico',
-        businessPhone: clampStr(businessPhone, 50),
-        businessAddress: clampStr(businessAddress, 200),
+        businessPhone: clampStr(sanitizePhone(businessPhone, 40), 50),
+        businessAddress: clampStr(sanitizePlainLine(businessAddress, 200), 200),
         wordColors: ['#0F172A', '#0072BB'],
-        logoDataUrl: logoDataUrl || '',
+        logoDataUrl: sanitizeImageDataUrl(logoDataUrl, 700000),
         logoScale: 100,
         logoTransparent: true,
         receiptTerms: clampStr(DEFAULT_RECEIPT_TERMS, 2000),
@@ -375,7 +405,7 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
       notify('Perfil del taller guardado correctamente.');
     } catch (err) {
       notify('No se pudo guardar el perfil. Intentá de nuevo.', 'error');
-      await handleDbError(err, OperationType.CREATE, path);
+      void handleDbError(err, OperationType.CREATE, path).catch(() => {});
     } finally {
       setSaving(false);
     }

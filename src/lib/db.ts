@@ -1,4 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
+import { createHardenedAuthStorage } from '../utils/cookieStorage';
+import { decryptRecordFields, encryptRecordFields } from '../utils/crypto';
+import {
+  isSafeId,
+  sanitizeDbErrorMessage,
+  stripPrototypeKeys,
+} from '../utils/validation';
 
 export const SUPABASE_URL =
   import.meta.env.VITE_SUPABASE_URL || 'https://fjkxnvqqmhxfycqbkmqy.supabase.co';
@@ -12,6 +19,8 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
+    storage: typeof window !== 'undefined' ? createHardenedAuthStorage() : undefined,
+    storageKey: 'th3bnb-auth-session',
   },
 });
 
@@ -42,23 +51,37 @@ export interface DbErrorInfo {
   userId?: string | null;
 }
 
+const TRACKING_CODE_RE = /^[a-zA-Z0-9_-]{1,40}$/;
+
+async function getAuthenticatedOwnerId(): Promise<string> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    if (data?.session?.user?.id) return data.session.user.id;
+    const { data: userData } = await supabase.auth.getUser();
+    return userData?.user?.id ?? '';
+  } catch {
+    return '';
+  }
+}
+
 export async function handleDbError(
   error: unknown,
   operationType: OperationType,
   path: string | null
 ): Promise<never> {
-  const { data } = await supabase.auth.getUser().catch(() => ({ data: { user: null } }));
+  const userId = await getAuthenticatedOwnerId().catch(() => '');
+  const safeMsg = sanitizeDbErrorMessage(
+    error,
+    'No se pudo completar la operación en la base de datos.'
+  );
   const errInfo: DbErrorInfo = {
-    error:
-      error && typeof error === 'object' && 'message' in error
-        ? String((error as { message?: unknown }).message)
-        : String(error),
+    error: safeMsg,
     operationType,
     path,
-    userId: data?.user?.id ?? null,
+    userId: userId || null,
   };
   console.error('Supabase Error:', JSON.stringify(errInfo));
-  throw new Error(errInfo.error || 'Error de base de datos en Supabase.');
+  throw new Error(safeMsg);
 }
 
 export function isMissingTableError(error: unknown): boolean {
@@ -96,15 +119,19 @@ export function toMillis(value: unknown): number {
 }
 
 export function clampStr(value: string | undefined | null, maxLen: number): string {
-  return (value ?? '').trim().slice(0, maxLen);
+  return (value ?? '')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .trim()
+    .slice(0, maxLen);
 }
 
 export function stripUndefined<T extends Record<string, unknown>>(
   obj: T,
   keepNull = false
 ): Record<string, unknown> {
+  const cleanSource = stripPrototypeKeys(obj);
   const result: Record<string, unknown> = {};
-  for (const [key, val] of Object.entries(obj)) {
+  for (const [key, val] of Object.entries(cleanSource)) {
     if (val === undefined) continue;
     if (val === null && !keepNull) continue;
     if (typeof val === 'number' && !Number.isFinite(val)) continue;
@@ -145,8 +172,9 @@ const NUMERIC_FIELDS = new Set([
 ]);
 
 export function toSnakeRecord(obj: Record<string, unknown>, keepNull = false): Record<string, unknown> {
+  const cleanSource = stripPrototypeKeys(obj);
   const out: Record<string, unknown> = {};
-  for (const [key, val] of Object.entries(obj)) {
+  for (const [key, val] of Object.entries(cleanSource)) {
     if (val === undefined) continue;
     if (val === null && !keepNull) continue;
     if (typeof val === 'number' && !Number.isFinite(val)) continue;
@@ -157,7 +185,7 @@ export function toSnakeRecord(obj: Record<string, unknown>, keepNull = false): R
 
 export function fromDbRow<T>(row: Record<string, unknown>): T {
   const out: Record<string, unknown> = {};
-  for (const [key, val] of Object.entries(row)) {
+  for (const [key, val] of Object.entries(stripPrototypeKeys(row))) {
     const camel = snakeToCamel(key);
     if (camel === 'createdAt' || camel === 'updatedAt') {
       out[camel] = toMillis(val);
@@ -199,6 +227,9 @@ export function subscribeTableChanges(table: TableName, callback: () => void): (
 }
 
 export async function fetchOwnerRows<T>(table: TableName, ownerId: string): Promise<T[]> {
+  if (!isSafeId(ownerId)) {
+    throw new Error('Identificador de sesión inválido.');
+  }
   const { data, error } = await supabase
     .from(table)
     .select('*')
@@ -206,27 +237,41 @@ export async function fetchOwnerRows<T>(table: TableName, ownerId: string): Prom
   if (error) {
     throw error;
   }
-  return (data || []).map((row) => fromDbRow<T>(row as Record<string, unknown>));
+  const rows = (data || []).map((row) => fromDbRow<Record<string, unknown>>(row as Record<string, unknown>));
+  const decrypted = await Promise.all(
+    rows.map((row) => decryptRecordFields<Record<string, unknown>>(table, row, ownerId))
+  );
+  return decrypted as unknown as T[];
 }
 
 export async function fetchSingleById<T>(table: TableName, id: string): Promise<T | null> {
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .eq('id', id)
-    .maybeSingle();
+  if (!isSafeId(id)) return null;
+  let query = supabase.from(table).select('*').eq('id', id);
+  const authOwnerId = table !== 'public_tickets' ? await getAuthenticatedOwnerId() : '';
+  if (authOwnerId && table !== 'public_tickets') {
+    query = query.eq('owner_id', authOwnerId);
+  }
+  const { data, error } = await query.maybeSingle();
   if (error) {
     throw error;
   }
   if (!data) return null;
-  return fromDbRow<T>(data as Record<string, unknown>);
+  const mapped = fromDbRow<Record<string, unknown>>(data as Record<string, unknown>);
+  const decrypted = await decryptRecordFields<Record<string, unknown>>(
+    table,
+    mapped,
+    authOwnerId || undefined
+  );
+  return decrypted as unknown as T;
 }
 
 export async function fetchPublicTicketByCode<T>(trackingCode: string): Promise<T | null> {
+  const cleaned = (trackingCode || '').trim().toUpperCase();
+  if (!TRACKING_CODE_RE.test(cleaned)) return null;
   const { data, error } = await supabase
     .from('public_tickets')
     .select('*')
-    .eq('id', trackingCode)
+    .eq('id', cleaned)
     .maybeSingle();
   if (error) {
     throw error;
@@ -239,7 +284,17 @@ export async function upsertRow(
   table: TableName,
   record: Record<string, unknown>
 ): Promise<void> {
-  const payload = toSnakeRecord(record, false);
+  const authOwnerId = await getAuthenticatedOwnerId();
+  const recordOwnerId =
+    typeof record.ownerId === 'string' && record.ownerId ? record.ownerId : authOwnerId;
+  if (authOwnerId && recordOwnerId && recordOwnerId !== authOwnerId) {
+    await handleDbError(new Error('permission denied'), OperationType.WRITE, table);
+  }
+  if (record.id !== undefined && !isSafeId(record.id)) {
+    await handleDbError(new Error('invalid input syntax'), OperationType.WRITE, table);
+  }
+  const prepared = await encryptRecordFields(table, record, recordOwnerId || authOwnerId);
+  const payload = toSnakeRecord(prepared, false);
   const { error } = await supabase.from(table).upsert(payload, { onConflict: 'id' });
   if (error) {
     await handleDbError(error, OperationType.WRITE, `${table}/${String(record.id ?? '')}`);
@@ -252,7 +307,21 @@ export async function insertRows(
   records: Array<Record<string, unknown>>
 ): Promise<void> {
   if (records.length === 0) return;
-  const payload = records.map((r) => toSnakeRecord(r, false));
+  const authOwnerId = await getAuthenticatedOwnerId();
+  const payload = await Promise.all(
+    records.map(async (r) => {
+      const recordOwnerId =
+        typeof r.ownerId === 'string' && r.ownerId ? r.ownerId : authOwnerId;
+      if (authOwnerId && recordOwnerId && recordOwnerId !== authOwnerId) {
+        throw new Error('permission denied');
+      }
+      if (r.id !== undefined && !isSafeId(r.id)) {
+        throw new Error('invalid input syntax');
+      }
+      const prepared = await encryptRecordFields(table, r, recordOwnerId || authOwnerId);
+      return toSnakeRecord(prepared, false);
+    })
+  );
   const { error } = await supabase.from(table).insert(payload);
   if (error) {
     await handleDbError(error, OperationType.CREATE, table);
@@ -266,8 +335,23 @@ export async function updateRow(
   patch: Record<string, unknown>,
   keepNull = false
 ): Promise<void> {
-  const payload = toSnakeRecord(patch, keepNull);
-  const { error } = await supabase.from(table).update(payload).eq('id', id);
+  if (!isSafeId(id)) {
+    await handleDbError(new Error('invalid input syntax'), OperationType.UPDATE, table);
+  }
+  const authOwnerId = await getAuthenticatedOwnerId();
+  const cleanPatch = stripPrototypeKeys(patch);
+  // Prevent client-side owner_id hijacking on update
+  delete cleanPatch.ownerId;
+  delete cleanPatch.owner_id;
+
+  const prepared = await encryptRecordFields(table, cleanPatch, authOwnerId);
+  const payload = toSnakeRecord(prepared, keepNull);
+
+  let query = supabase.from(table).update(payload).eq('id', id);
+  if (authOwnerId) {
+    query = query.eq('owner_id', authOwnerId);
+  }
+  const { error } = await query;
   if (error) {
     await handleDbError(error, OperationType.UPDATE, `${table}/${id}`);
   }
@@ -275,9 +359,18 @@ export async function updateRow(
 }
 
 export async function deleteRow(table: TableName, id: string): Promise<void> {
-  const { error } = await supabase.from(table).delete().eq('id', id);
+  if (!isSafeId(id)) {
+    await handleDbError(new Error('invalid input syntax'), OperationType.DELETE, table);
+  }
+  const authOwnerId = await getAuthenticatedOwnerId();
+  let query = supabase.from(table).delete().eq('id', id);
+  if (authOwnerId) {
+    query = query.eq('owner_id', authOwnerId);
+  }
+  const { error } = await query;
   if (error) {
     await handleDbError(error, OperationType.DELETE, `${table}/${id}`);
   }
   notifyTableChanged(table);
 }
+

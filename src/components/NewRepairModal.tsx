@@ -30,6 +30,17 @@ import {
 } from '../utils/formatters';
 import { appendBatchRefToNotes, generateBatchRef } from '../utils/batchRef';
 import { getFunctionalCheckFields, getPhysicalCheckFields } from '../utils/checkFields';
+import {
+  isValidEmail,
+  parseSafePositiveNumber,
+  sanitizeDbErrorMessage,
+  sanitizeDni,
+  sanitizeEmail,
+  sanitizeImei,
+  sanitizePhone,
+  sanitizePlainLine,
+  sanitizeText,
+} from '../utils/validation';
 import { ModalShell } from './ModalShell';
 import { PatternLock } from './PatternLock';
 import { useToast } from './ToastProvider';
@@ -454,9 +465,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   const showCapacity =
     deviceType === 'Celular' || deviceType === 'Tablet' || deviceType === 'Smartwatch';
 
-  const manualBudget = Math.max(0, Number(price || 0));
+  const manualBudget = parseSafePositiveNumber(price, 0);
   const totalBudget = manualBudget + selectedPartsTotal;
-  const pendingBalance = Math.max(0, totalBudget - Math.max(0, Number(deposit || 0)));
+  const pendingBalance = Math.max(0, totalBudget - parseSafePositiveNumber(deposit, 0));
 
   const physicalFields = useMemo(() => getPhysicalCheckFields(deviceType), [deviceType]);
 
@@ -491,11 +502,18 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
       notify('Seleccioná un tipo de equipo.', 'error');
       return null;
     }
-    if (!clientName.trim()) {
+    const cleanClientName = sanitizePlainLine(clientName, 160);
+    if (!cleanClientName) {
       notify('Ingresá el nombre del cliente.', 'error');
       return null;
     }
-    if (!problem.trim()) {
+    const cleanClientEmail = sanitizeEmail(clientEmail, 200);
+    if (cleanClientEmail && !isValidEmail(cleanClientEmail)) {
+      notify('El correo electrónico del cliente no es válido.', 'error');
+      return null;
+    }
+    const cleanProblem = sanitizeText(problem, 2000);
+    if (!cleanProblem) {
       notify('Describí el problema reportado del equipo.', 'error');
       return null;
     }
@@ -516,41 +534,45 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
       id: generateDocId('draft'),
       deviceType,
       deviceIcon,
-      brand: clampStr(finalBrand, 80) || 'Genérico',
-      model: clampStr(finalModel, 120) || deviceType,
-      color: clampStr(color, 60),
+      brand: sanitizePlainLine(finalBrand, 80) || 'Genérico',
+      model: sanitizePlainLine(finalModel, 120) || deviceType,
+      color: sanitizePlainLine(color, 60),
       capacity:
         showCapacity || isSpeaker || isConsole || isHeadphones || isNotebook
-          ? clampStr(capacity, 40)
+          ? sanitizePlainLine(capacity, 40)
           : '',
-      imei: clampStr(imei, 80),
-      problem: clampStr(problem, 2000),
+      imei: sanitizeImei(imei, 80),
+      problem: cleanProblem,
       priority,
       dateIn: clampStr(dateIn || todayISO(), 40),
       dateEst: clampStr(dateEst, 40),
       selectedPartIds: [...selectedPartIds],
       budget: totalBudget,
-      deposit: Math.max(0, Number(deposit || 0)),
+      deposit: parseSafePositiveNumber(deposit, 0),
       status,
       accessories: isConsole ? [] : accessories.slice(0, 30),
       consoleAcc: { ...consoleAcc },
       physicalCheck: { ...physicalCheck },
       functionalCheck: { ...functionalCheck },
-      notes: clampStr(notes, 1800),
+      notes: sanitizeText(notes, 1800),
       securityTab,
-      securityPin: securityTab === 'pin' ? clampStr(securityPin, 80) : '',
+      securityPin: securityTab === 'pin' ? sanitizePlainLine(securityPin, 80) : '',
       securityPattern: securityTab === 'pattern' ? securityPattern.slice(0, 9) : [],
     };
   };
 
   const handleAddAnotherDevice = () => {
+    if (queuedItems.length >= 30) {
+      notify('Máximo 30 equipos por boleta en lote.', 'error');
+      return;
+    }
     const draft = buildCurrentDraft();
     if (!draft) return;
     const nextCount = queuedItems.length + 1;
     setQueuedItems((prev) => [...prev, draft]);
     resetEquipmentFields();
     setStep('device');
-    notify(`Equipo #${nextCount} sumado al lote. Elegí el siguiente equipo para ${clientName.trim()}.`);
+    notify(`Equipo #${nextCount} sumado al lote. Elegí el siguiente equipo para ${sanitizePlainLine(clientName, 80)}.`);
   };
 
   const handleRemoveQueuedItem = (draftId: string) => {
@@ -570,17 +592,26 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
       notify('Agregá al menos un equipo para guardar.', 'error');
       return;
     }
-    if (!clientName.trim()) {
+    const cleanClientName = sanitizePlainLine(clientName, 160);
+    if (!cleanClientName) {
       notify('Ingresá el nombre del cliente.', 'error');
       return;
     }
+    const cleanClientEmail = sanitizeEmail(clientEmail, 200);
+    if (cleanClientEmail && !isValidEmail(cleanClientEmail)) {
+      notify('El correo electrónico del cliente no es válido.', 'error');
+      return;
+    }
+    const cleanClientPhone = sanitizePhone(clientPhone, 60);
+    const cleanClientDni = sanitizeDni(clientDni, 40);
+    const cleanClientAddress = sanitizePlainLine(clientAddress, 240);
 
     setSaving(true);
     try {
       let resolvedClientId = clientId;
       if (!resolvedClientId) {
         const matched = clients.find(
-          (c) => c.name.trim().toLowerCase() === clientName.trim().toLowerCase()
+          (c) => c.name.trim().toLowerCase() === cleanClientName.toLowerCase()
         );
         if (matched) {
           resolvedClientId = matched.id;
@@ -591,11 +622,11 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
             stripUndefined({
               id: resolvedClientId,
               ownerId,
-              name: clampStr(clientName, 160),
-              phone: clampStr(clientPhone, 60),
-              dni: clampStr(clientDni, 40),
-              email: clampStr(clientEmail, 200),
-              address: clampStr(clientAddress, 240),
+              name: cleanClientName,
+              phone: cleanClientPhone,
+              dni: cleanClientDni,
+              email: cleanClientEmail,
+              address: cleanClientAddress,
             })
           );
         }
@@ -637,11 +668,11 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
           code: repairCode,
           trackingCode,
           clientId: clampStr(resolvedClientId, 128),
-          clientName: clampStr(clientName, 160),
-          clientPhone: clampStr(clientPhone, 60),
-          clientDni: clampStr(clientDni, 40),
-          clientEmail: clampStr(clientEmail, 200),
-          clientAddress: clampStr(clientAddress, 240),
+          clientName: cleanClientName,
+          clientPhone: cleanClientPhone,
+          clientDni: cleanClientDni,
+          clientEmail: cleanClientEmail,
+          clientAddress: cleanClientAddress,
           deviceType: clampStr(item.deviceType, 60),
           deviceIcon: clampStr(item.deviceIcon, 16),
           brand: item.brand,
@@ -749,8 +780,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
         }
       }
     } catch (err) {
-      console.error(err);
-      notify('No se pudo guardar la reparación.', 'error');
+      notify(sanitizeDbErrorMessage(err, 'No se pudo guardar la reparación.'), 'error');
     } finally {
       setSaving(false);
     }

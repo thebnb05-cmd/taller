@@ -3,8 +3,15 @@ const DEFAULT_PUBLIC_TRACKING_URL = 'https://taller-ashen.vercel.app';
 export function normalizeTrackingBaseUrl(rawUrl: string): string {
   const trimmed = (rawUrl || '').trim().replace(/\/+$/, '');
   if (!trimmed) return '';
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  return `https://${trimmed}`;
+  if (/^(javascript|data|vbscript|file):/i.test(trimmed)) return '';
+  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return '';
+    return parsed.origin;
+  } catch {
+    return '';
+  }
 }
 
 export function isPrivatePreviewOrigin(url: string): boolean {

@@ -88,33 +88,38 @@ export function computeProductPricing(params: {
   vat: number;
   rounding: number;
 }): { netPrice: number; finalPrice: number } {
-  const cost = Math.max(0, Number(params.cost || 0));
-  const margin = Number(params.margin || 0);
-  const vat = Math.max(0, Number(params.vat || 0));
-  const rounding = Math.max(0, Number(params.rounding || 0));
+  const safeCost = Number.isFinite(Number(params.cost)) ? Math.max(0, Number(params.cost)) : 0;
+  const safeMargin = Number.isFinite(Number(params.margin)) ? Number(params.margin) : 0;
+  const safeVat = Number.isFinite(Number(params.vat)) ? Math.max(0, Number(params.vat)) : 0;
+  const safeRounding = Number.isFinite(Number(params.rounding)) ? Math.max(0, Number(params.rounding)) : 0;
 
   const netRaw =
-    params.marginMode === 'fixed' ? cost + margin : cost * (1 + margin / 100);
-  const netPrice = Math.max(0, Math.round(netRaw * 100) / 100);
-  let finalRaw = netPrice * (1 + vat / 100);
+    params.marginMode === 'fixed' ? safeCost + safeMargin : safeCost * (1 + safeMargin / 100);
+  const netPrice = Number.isFinite(netRaw) ? Math.max(0, Math.round(netRaw * 100) / 100) : 0;
+  let finalRaw = netPrice * (1 + safeVat / 100);
 
-  if (rounding > 0) {
-    finalRaw = Math.round(finalRaw / rounding) * rounding;
+  if (safeRounding > 0) {
+    finalRaw = Math.round(finalRaw / safeRounding) * safeRounding;
   } else {
     finalRaw = Math.round(finalRaw * 100) / 100;
   }
 
   return {
     netPrice,
-    finalPrice: Math.max(0, finalRaw),
+    finalPrice: Number.isFinite(finalRaw) ? Math.max(0, finalRaw) : 0,
   };
 }
+
+const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
 export async function compressImageToDataUrl(
   file: File,
   maxDimension = 720,
   quality = 0.82
 ): Promise<string> {
+  if (!ALLOWED_IMAGE_MIME_TYPES.has(file.type)) {
+    throw new Error('Usá una imagen PNG, JPG o WebP.');
+  }
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('No se pudo leer la imagen.'));
@@ -130,7 +135,7 @@ export async function compressImageToDataUrl(
         canvas.height = h;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
-          resolve(String(reader.result));
+          reject(new Error('No se pudo procesar la imagen.'));
           return;
         }
         ctx.drawImage(img, 0, 0, w, h);
