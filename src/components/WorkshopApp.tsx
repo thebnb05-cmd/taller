@@ -492,6 +492,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                   clients={clients}
                   products={products}
                   sales={sales}
+                  purchases={purchases}
                   onNavigate={navigateTo}
                   onNewRepair={() => openNewRepairFlow()}
                   onNewClient={() => {
