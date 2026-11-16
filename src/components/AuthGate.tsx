@@ -477,7 +477,7 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
         lastName: clampStr(cleanLast, 100),
         role: role === 'operator' ? 'operator' : 'admin',
         brandName: clampStr(sanitizePlainLine(brandName, 80) || 'TH3 BNB', 80) || 'TH3 BNB',
-        subtitle: clampStr(encodedSubtitle, 900),
+        subtitle: clampStr(encodedSubtitle, 2000),
         businessPhone: clampStr(sanitizePhone(businessPhone, 50), 50),
         businessAddress: clampStr(sanitizePlainLine(businessAddress, 200), 200),
         wordColors: safeColors,

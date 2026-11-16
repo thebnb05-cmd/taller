@@ -21,6 +21,11 @@ export interface CurrencyOption {
   label: string;
 }
 
+export interface SecondaryCurrencyConfig {
+  code: CurrencyCode;
+  rate: number;
+}
+
 export const DEFAULT_CURRENCY: CurrencyCode = 'ARS';
 
 export const CURRENCY_OPTIONS: readonly CurrencyOption[] = [
@@ -99,6 +104,12 @@ const CURRENCY_MAP = new Map<CurrencyCode, CurrencyOption>(
 const CURRENCY_COOKIE_KEY = 'th3bnb_currency';
 const CURRENCY_STORAGE_KEY = 'th3bnb-currency';
 
+export function isValidCurrencyCode(raw: unknown): raw is CurrencyCode {
+  if (typeof raw !== 'string') return false;
+  const upper = raw.trim().toUpperCase() as CurrencyCode;
+  return CURRENCY_MAP.has(upper);
+}
+
 export function sanitizeCurrencyCode(raw: unknown): CurrencyCode {
   if (typeof raw !== 'string') return DEFAULT_CURRENCY;
   const upper = raw.trim().toUpperCase() as CurrencyCode;
@@ -108,6 +119,46 @@ export function sanitizeCurrencyCode(raw: unknown): CurrencyCode {
 export function getCurrencyOption(code?: string | null): CurrencyOption {
   const valid = sanitizeCurrencyCode(code);
   return CURRENCY_MAP.get(valid) ?? CURRENCY_OPTIONS[0];
+}
+
+export function sanitizeSecondaryCurrencies(
+  raw: unknown,
+  baseCurrency: CurrencyCode
+): SecondaryCurrencyConfig[] {
+  if (!Array.isArray(raw)) return [];
+  const base = sanitizeCurrencyCode(baseCurrency);
+  const seen = new Set<CurrencyCode>();
+  const result: SecondaryCurrencyConfig[] = [];
+
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as { c?: unknown; r?: unknown; code?: unknown; rate?: unknown };
+    const rawCode = record.code ?? record.c;
+    if (!isValidCurrencyCode(rawCode)) continue;
+    const code = rawCode.trim().toUpperCase() as CurrencyCode;
+    if (code === base || seen.has(code)) continue;
+
+    const rawRate = record.rate ?? record.r;
+    const numericRate =
+      typeof rawRate === 'string' ? Number(rawRate.trim().replace(',', '.')) : Number(rawRate);
+    if (!Number.isFinite(numericRate) || numericRate <= 0) continue;
+
+    const normalizedRate = Math.round(numericRate * 1_000_000) / 1_000_000;
+    if (!Number.isFinite(normalizedRate) || normalizedRate <= 0) continue;
+
+    seen.add(code);
+    result.push({ code, rate: normalizedRate });
+    if (result.length >= CURRENCY_OPTIONS.length - 1) break;
+  }
+
+  return result;
+}
+
+export function convertFromBaseCurrency(amountInBase: number, rate: number): number {
+  if (!Number.isFinite(amountInBase) || !Number.isFinite(rate) || rate <= 0) {
+    return 0;
+  }
+  return amountInBase / rate;
 }
 
 function readInitialCurrency(): CurrencyCode {

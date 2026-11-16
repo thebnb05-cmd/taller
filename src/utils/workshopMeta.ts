@@ -1,5 +1,11 @@
 import type { WorkshopProfile } from '../types/workshop';
-import { DEFAULT_CURRENCY, sanitizeCurrencyCode, type CurrencyCode } from './currency';
+import {
+  DEFAULT_CURRENCY,
+  sanitizeCurrencyCode,
+  sanitizeSecondaryCurrencies,
+  type CurrencyCode,
+  type SecondaryCurrencyConfig,
+} from './currency';
 
 export interface WorkshopReceiptMeta {
   subtitle: string;
@@ -9,6 +15,7 @@ export interface WorkshopReceiptMeta {
   businessEmail: string;
   footerNote: string;
   currency: CurrencyCode;
+  secondaryCurrencies: SecondaryCurrencyConfig[];
 }
 
 const DEFAULT_SUBTITLE = 'Servicio técnico';
@@ -29,7 +36,9 @@ export function parseWorkshopMeta(
         e: string;
         f: string;
         c: string;
+        sc: unknown;
       }>;
+      const currency = sanitizeCurrencyCode(parsed.c);
       return {
         subtitle: typeof parsed.s === 'string' ? parsed.s : '',
         hours: typeof parsed.h === 'string' ? parsed.h : '',
@@ -38,7 +47,8 @@ export function parseWorkshopMeta(
         businessEmail:
           typeof parsed.e === 'string' && parsed.e.trim() ? parsed.e.trim() : baseEmail,
         footerNote: typeof parsed.f === 'string' ? parsed.f : '',
-        currency: sanitizeCurrencyCode(parsed.c),
+        currency,
+        secondaryCurrencies: sanitizeSecondaryCurrencies(parsed.sc, currency),
       };
     } catch {
       // Fallback to treating raw as plain subtitle
@@ -53,6 +63,7 @@ export function parseWorkshopMeta(
     businessEmail: baseEmail,
     footerNote: '',
     currency: DEFAULT_CURRENCY,
+    secondaryCurrencies: [],
   };
 }
 
@@ -64,6 +75,7 @@ export function serializeWorkshopSubtitle(meta: {
   businessEmail: string;
   footerNote: string;
   currency?: CurrencyCode;
+  secondaryCurrencies?: SecondaryCurrencyConfig[];
 }): string {
   const s = meta.subtitle.trim().slice(0, 120);
   const h = meta.hours.trim().slice(0, 120);
@@ -72,8 +84,12 @@ export function serializeWorkshopSubtitle(meta: {
   const e = meta.businessEmail.trim().slice(0, 120);
   const f = meta.footerNote.trim().slice(0, 220);
   const c = sanitizeCurrencyCode(meta.currency);
+  const sc = sanitizeSecondaryCurrencies(meta.secondaryCurrencies, c).map((item) => ({
+    c: item.code,
+    r: item.rate,
+  }));
 
-  if (!h && !r && !t && !e && !f && c === DEFAULT_CURRENCY) {
+  if (!h && !r && !t && !e && !f && c === DEFAULT_CURRENCY && sc.length === 0) {
     return s || DEFAULT_SUBTITLE;
   }
 
@@ -85,5 +101,6 @@ export function serializeWorkshopSubtitle(meta: {
     ...(e ? { e } : {}),
     ...(f ? { f } : {}),
     ...(c !== DEFAULT_CURRENCY ? { c } : {}),
+    ...(sc.length > 0 ? { sc } : {}),
   });
 }

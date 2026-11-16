@@ -1,12 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { Coins, Image as ImageIcon, Store, Trash2, UploadCloud } from 'lucide-react';
+import { Coins, Image as ImageIcon, Plus, Store, Trash2, UploadCloud } from 'lucide-react';
 import { clampStr, handleDbError, OperationType, stripUndefined, updateRow } from '../lib/db';
 import { DEFAULT_RECEIPT_TERMS } from '../data/catalog';
 import {
   CURRENCY_OPTIONS,
+  convertFromBaseCurrency,
+  getCurrencyOption,
   sanitizeCurrencyCode,
+  sanitizeSecondaryCurrencies,
   setActiveCurrency,
   type CurrencyCode,
+  type SecondaryCurrencyConfig,
 } from '../utils/currency';
 import { compressImageToDataUrl, formatCurrency } from '../utils/formatters';
 import {
@@ -36,6 +40,11 @@ interface BrandSettingsModalProps {
   profile: WorkshopProfile;
 }
 
+interface SecondaryCurrencyRow {
+  code: CurrencyCode;
+  rate: string;
+}
+
 export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
   open,
   onClose,
@@ -53,6 +62,12 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
   const [businessEmail, setBusinessEmail] = useState(initialMeta.businessEmail);
   const [footerNote, setFooterNote] = useState(initialMeta.footerNote);
   const [currency, setCurrency] = useState<CurrencyCode>(initialMeta.currency);
+  const [secondaryRows, setSecondaryRows] = useState<SecondaryCurrencyRow[]>(() =>
+    initialMeta.secondaryCurrencies.map((item) => ({
+      code: item.code,
+      rate: String(item.rate),
+    }))
+  );
   const [wordColors, setWordColors] = useState<string[]>(
     profile.wordColors || ['#0F172A', '#0072BB']
   );
@@ -81,6 +96,12 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
     setBusinessEmail(meta.businessEmail);
     setFooterNote(meta.footerNote);
     setCurrency(meta.currency);
+    setSecondaryRows(
+      meta.secondaryCurrencies.map((item) => ({
+        code: item.code,
+        rate: String(item.rate),
+      }))
+    );
     setWordColors(profile.wordColors || ['#0F172A', '#0072BB']);
     setLogoDataUrl(profile.logoDataUrl || '');
     setLogoScale(profile.logoScale ?? 100);
@@ -88,6 +109,41 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
     setReceiptTerms(profile.receiptTerms ?? DEFAULT_RECEIPT_TERMS);
     setTrackingBaseUrl(resolveTrackingBaseUrl(profile.trackingBaseUrl));
   }, [open, profile]);
+
+  const baseCurrencyOption = getCurrencyOption(currency);
+  const unusedSecondaryOptions = CURRENCY_OPTIONS.filter(
+    (opt) => opt.code !== currency && !secondaryRows.some((row) => row.code === opt.code)
+  );
+
+  const handleBaseCurrencyChange = (nextRaw: string) => {
+    const nextBase = sanitizeCurrencyCode(nextRaw);
+    setCurrency(nextBase);
+    setSecondaryRows((prev) => prev.filter((row) => row.code !== nextBase));
+  };
+
+  const handleAddSecondaryCurrency = () => {
+    const nextOption = unusedSecondaryOptions[0];
+    if (!nextOption) return;
+    setSecondaryRows((prev) => [...prev, { code: nextOption.code, rate: '' }]);
+  };
+
+  const handleUpdateSecondaryCode = (index: number, nextRaw: string) => {
+    const nextCode = sanitizeCurrencyCode(nextRaw);
+    if (nextCode === currency) return;
+    setSecondaryRows((prev) =>
+      prev.map((row, idx) => (idx === index ? { ...row, code: nextCode } : row))
+    );
+  };
+
+  const handleUpdateSecondaryRate = (index: number, nextRate: string) => {
+    setSecondaryRows((prev) =>
+      prev.map((row, idx) => (idx === index ? { ...row, rate: nextRate } : row))
+    );
+  };
+
+  const handleRemoveSecondaryCurrency = (index: number) => {
+    setSecondaryRows((prev) => prev.filter((_, idx) => idx !== index));
+  };
 
   const words = (brandName || 'TH3 BNB').trim().split(/\s+/).filter(Boolean);
 
@@ -128,13 +184,37 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
       return;
     }
 
+    const safeCurrency = sanitizeCurrencyCode(currency);
+    const parsedSecondary: SecondaryCurrencyConfig[] = [];
+    const seenSecondary = new Set<CurrencyCode>();
+
+    for (const row of secondaryRows) {
+      if (row.code === safeCurrency) continue;
+      if (seenSecondary.has(row.code)) {
+        notify(`La moneda secundaria ${row.code} está repetida.`, 'error');
+        return;
+      }
+      const normalizedRate = row.rate.trim().replace(',', '.');
+      const numericRate = Number(normalizedRate);
+      if (!normalizedRate || !Number.isFinite(numericRate) || numericRate <= 0) {
+        const rowOption = getCurrencyOption(row.code);
+        notify(
+          `Ingresá una tasa de conversión válida mayor a 0 para ${rowOption.name} (${rowOption.code}).`,
+          'error'
+        );
+        return;
+      }
+      seenSecondary.add(row.code);
+      parsedSecondary.push({ code: row.code, rate: numericRate });
+    }
+
     setSaving(true);
     const path = `workshop_profiles/${profile.id}`;
     try {
       const safeTrackingBaseUrl = isPrivatePreviewOrigin(cleanedTrackingUrl)
         ? ''
         : clampStr(cleanedTrackingUrl, 250);
-      const safeCurrency = sanitizeCurrencyCode(currency);
+      const safeSecondaryCurrencies = sanitizeSecondaryCurrencies(parsedSecondary, safeCurrency);
       const encodedSubtitle = serializeWorkshopSubtitle({
         subtitle: sanitizePlainLine(subtitleText, 80),
         hours: sanitizePlainLine(hours, 100),
@@ -143,6 +223,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
         businessEmail: cleanEmail,
         footerNote: sanitizePlainLine(footerNote, 180),
         currency: safeCurrency,
+        secondaryCurrencies: safeSecondaryCurrencies,
       });
       const safeColors = wordColors
         .slice(0, 12)
@@ -152,7 +233,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
 
       const payload = stripUndefined({
         brandName: sanitizePlainLine(brandName || 'TH3 BNB', 80) || 'TH3 BNB',
-        subtitle: clampStr(encodedSubtitle, 900),
+        subtitle: clampStr(encodedSubtitle, 2000),
         businessPhone: sanitizePhone(businessPhone, 50),
         businessAddress: sanitizePlainLine(businessAddress, 200),
         wordColors: safeColors,
@@ -253,7 +334,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-800/40">
+        <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-800/40">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
@@ -264,7 +345,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
                   htmlFor="workshop-currency-select"
                   className="block text-xs font-bold text-slate-800 dark:text-slate-100"
                 >
-                  Moneda del taller, presupuestos y boletas
+                  Moneda base del taller, presupuestos y boletas
                 </label>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
                   Se aplica en presupuestos, señas, inventario, ventas, WhatsApp y boletas A4, 80mm y PDF.
@@ -276,11 +357,11 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
             </div>
           </div>
 
-          <div className="mt-3">
+          <div>
             <select
               id="workshop-currency-select"
               value={currency}
-              onChange={(e) => setCurrency(sanitizeCurrencyCode(e.target.value))}
+              onChange={(e) => handleBaseCurrencyChange(e.target.value)}
               className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
             >
               {CURRENCY_OPTIONS.map((opt) => (
@@ -289,6 +370,116 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="border-t border-slate-200/80 pt-3.5 dark:border-slate-700/80">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                  Monedas secundarias y tasas de conversión
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Definí monedas alternativas y su equivalencia respecto a {baseCurrencyOption.code} ({baseCurrencyOption.symbol}).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleAddSecondaryCurrency}
+                disabled={unusedSecondaryOptions.length === 0}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#0072BB]/30 bg-white px-2.5 text-xs font-semibold text-[#0072BB] transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-sky-700/50 dark:bg-slate-900 dark:text-sky-300 dark:hover:bg-sky-950/40"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Agregar moneda
+              </button>
+            </div>
+
+            {secondaryRows.length === 0 ? (
+              <p className="mt-2.5 rounded-xl border border-dashed border-slate-200 bg-white/70 px-3 py-2.5 text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-400">
+                No hay monedas secundarias configuradas. Podés agregar por ejemplo USD o EUR con su cotización frente a {baseCurrencyOption.code}.
+              </p>
+            ) : (
+              <div className="mt-3 space-y-2.5">
+                {secondaryRows.map((row, index) => {
+                  const rowOption = getCurrencyOption(row.code);
+                  const rowChoices = CURRENCY_OPTIONS.filter(
+                    (opt) =>
+                      opt.code !== currency &&
+                      (opt.code === row.code || !secondaryRows.some((other) => other.code === opt.code))
+                  );
+                  const parsedRate = Number(row.rate.trim().replace(',', '.'));
+                  const hasValidRate =
+                    row.rate.trim().length > 0 && Number.isFinite(parsedRate) && parsedRate > 0;
+                  const convertedSample = hasValidRate
+                    ? convertFromBaseCurrency(15000, parsedRate)
+                    : 0;
+
+                  return (
+                    <div
+                      key={`${row.code}-${index}`}
+                      className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900"
+                    >
+                      <div className="grid gap-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_auto] sm:items-center">
+                        <select
+                          aria-label={`Moneda secundaria ${index + 1}`}
+                          value={row.code}
+                          onChange={(e) => handleUpdateSecondaryCode(index, e.target.value)}
+                          className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                        >
+                          {rowChoices.map((opt) => (
+                            <option key={opt.code} value={opt.code}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+
+                        <div className="flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 focus-within:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800">
+                          <span className="shrink-0 font-mono-num text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                            1 {rowOption.symbol} =
+                          </span>
+                          <input
+                            type="number"
+                            min="0.000001"
+                            step="any"
+                            inputMode="decimal"
+                            aria-label={`Tasa de conversión para ${rowOption.code}`}
+                            value={row.rate}
+                            onChange={(e) => handleUpdateSecondaryRate(index, e.target.value)}
+                            placeholder="Ej: 1200"
+                            className="w-full min-w-0 bg-transparent font-mono-num text-xs font-semibold text-slate-900 outline-none dark:text-white"
+                          />
+                          <span className="shrink-0 font-mono-num text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                            {baseCurrencyOption.symbol}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSecondaryCurrency(index)}
+                          aria-label={`Quitar ${rowOption.name}`}
+                          className="inline-flex h-10 w-full items-center justify-center gap-1 rounded-xl border border-red-200 bg-red-50/70 px-2.5 text-xs font-medium text-red-600 transition hover:bg-red-100 sm:w-10 sm:px-0 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-950/60"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          <span className="sm:hidden">Quitar</span>
+                        </button>
+                      </div>
+
+                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                        {hasValidRate ? (
+                          <span className="font-mono-num text-emerald-700 dark:text-emerald-300">
+                            Ref: {formatCurrency(15000, currency)} ≈{' '}
+                            {formatCurrency(convertedSample, row.code)}
+                          </span>
+                        ) : (
+                          <span className="text-amber-600 dark:text-amber-400">
+                            Ingresá cuántos {baseCurrencyOption.code} equivalen a 1 {rowOption.code}.
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 
