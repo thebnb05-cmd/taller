@@ -1,5 +1,16 @@
 import React, { useState } from 'react';
-import { Building2, LogIn, Mail, ShieldCheck, Smartphone, Upload } from 'lucide-react';
+import {
+  Building2,
+  Coins,
+  Image as ImageIcon,
+  LogIn,
+  Mail,
+  ShieldCheck,
+  Smartphone,
+  Store,
+  Trash2,
+  UploadCloud,
+} from 'lucide-react';
 import {
   clampStr,
   handleDbError,
@@ -9,15 +20,31 @@ import {
   upsertRow,
 } from '../lib/db';
 import { DEFAULT_RECEIPT_TERMS } from '../data/catalog';
-import { compressImageToDataUrl } from '../utils/formatters';
-import { isPrivatePreviewOrigin } from '../utils/tracking';
+import {
+  CURRENCY_OPTIONS,
+  DEFAULT_CURRENCY,
+  sanitizeCurrencyCode,
+  setActiveCurrency,
+  type CurrencyCode,
+} from '../utils/currency';
+import { compressImageToDataUrl, formatCurrency } from '../utils/formatters';
+import {
+  isPrivatePreviewOrigin,
+  normalizeTrackingBaseUrl,
+  resolveTrackingBaseUrl,
+} from '../utils/tracking';
+import { serializeWorkshopSubtitle } from '../utils/workshopMeta';
 import {
   isValidEmail,
+  sanitizeDbErrorMessage,
   sanitizeEmail,
+  sanitizeHexColor,
   sanitizeImageDataUrl,
   sanitizePhone,
   sanitizePlainLine,
+  sanitizeText,
 } from '../utils/validation';
+import { BrandMark } from './BrandMark';
 import { useToast } from './ToastProvider';
 
 interface AuthScreenProps {
@@ -345,25 +372,55 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
   const initialParts = (displayName || '').trim().split(/\s+/);
   const [firstName, setFirstName] = useState(initialParts[0] || '');
   const [lastName, setLastName] = useState(initialParts.slice(1).join(' ') || '');
+  const [role, setRole] = useState<'admin' | 'operator'>('admin');
+
+  const [brandName, setBrandName] = useState('TH3 BNB');
+  const [subtitleText, setSubtitleText] = useState('Servicio técnico');
   const [businessPhone, setBusinessPhone] = useState('');
   const [businessAddress, setBusinessAddress] = useState('');
-  const [role, setRole] = useState<'admin' | 'operator'>('admin');
-  const [brandName, setBrandName] = useState('TH3 BNB');
+  const [currency, setCurrency] = useState<CurrencyCode>(DEFAULT_CURRENCY);
+
+  const [hours, setHours] = useState('');
+  const [social, setSocial] = useState('');
+  const [taxId, setTaxId] = useState('');
+  const [businessEmail, setBusinessEmail] = useState(userEmail || '');
+  const [footerNote, setFooterNote] = useState('');
+
+  const [wordColors, setWordColors] = useState<string[]>(['#0F172A', '#0072BB']);
   const [logoDataUrl, setLogoDataUrl] = useState('');
+  const [logoScale, setLogoScale] = useState(100);
+  const [logoTransparent, setLogoTransparent] = useState(true);
+  const [receiptTerms, setReceiptTerms] = useState(DEFAULT_RECEIPT_TERMS);
+  const [trackingBaseUrl, setTrackingBaseUrl] = useState(() =>
+    isPrivatePreviewOrigin(window.location.origin)
+      ? ''
+      : resolveTrackingBaseUrl(window.location.origin)
+  );
+  const [dragOver, setDragOver] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const words = (brandName || 'TH3 BNB').trim().split(/\s+/).filter(Boolean);
+
+  const handleLogoFile = async (file: File | undefined) => {
     if (!file) return;
-    if (file.size > 1.5 * 1024 * 1024) {
-      notify('El logo no puede superar 1,5 MB.', 'error');
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      notify('Usá una imagen PNG, JPG o WebP.', 'error');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      notify('El logo no puede superar los 2 MB.', 'error');
       return;
     }
     try {
-      const compressed = await compressImageToDataUrl(file, 480, 0.85);
-      setLogoDataUrl(compressed);
+      const compressed = await compressImageToDataUrl(file, 480, 0.88);
+      const safeLogo = sanitizeImageDataUrl(compressed, 700000);
+      if (!safeLogo) {
+        notify('El logo procesado no tiene un formato válido o supera el límite.', 'error');
+        return;
+      }
+      setLogoDataUrl(safeLogo);
     } catch {
-      notify('No se pudo procesar la imagen del logo.', 'error');
+      notify('No se pudo cargar la imagen del logo.', 'error');
     }
   };
 
@@ -375,10 +432,43 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
       notify('Completá tu nombre y apellido.', 'error');
       return;
     }
+
+    const cleanContactEmail = sanitizeEmail(businessEmail, 100);
+    if (cleanContactEmail && !isValidEmail(cleanContactEmail)) {
+      notify('El email de contacto del taller no tiene un formato válido.', 'error');
+      return;
+    }
+
+    const rawTracking = trackingBaseUrl.trim();
+    const cleanedTrackingUrl = normalizeTrackingBaseUrl(rawTracking);
+    if (rawTracking && !cleanedTrackingUrl) {
+      notify('La dirección del sitio de seguimiento debe empezar con https:// o http://', 'error');
+      return;
+    }
+
     setSaving(true);
     const path = `workshop_profiles/${userId}`;
     try {
       const nowIso = new Date().toISOString();
+      const safeCurrency = sanitizeCurrencyCode(currency);
+      const safeTrackingBaseUrl = isPrivatePreviewOrigin(cleanedTrackingUrl)
+        ? ''
+        : clampStr(cleanedTrackingUrl, 250);
+      const encodedSubtitle = serializeWorkshopSubtitle({
+        subtitle: sanitizePlainLine(subtitleText, 80),
+        hours: sanitizePlainLine(hours, 100),
+        social: sanitizePlainLine(social, 100),
+        taxId: sanitizePlainLine(taxId, 60),
+        businessEmail: cleanContactEmail,
+        footerNote: sanitizePlainLine(footerNote, 180),
+        currency: safeCurrency,
+      });
+      const safeColors = wordColors
+        .slice(0, 12)
+        .map((c, idx) => sanitizeHexColor(c, idx === 0 ? '#0F172A' : '#0072BB'));
+      const safeScale = Math.min(200, Math.max(50, Math.round(Number(logoScale) || 100)));
+      const safeLogoDataUrl = logoDataUrl ? sanitizeImageDataUrl(logoDataUrl, 700000) : '';
+
       const payload = stripUndefined({
         id: userId,
         ownerId: userId,
@@ -387,24 +477,23 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
         lastName: clampStr(cleanLast, 100),
         role: role === 'operator' ? 'operator' : 'admin',
         brandName: clampStr(sanitizePlainLine(brandName, 80) || 'TH3 BNB', 80) || 'TH3 BNB',
-        subtitle: 'Servicio técnico',
-        businessPhone: clampStr(sanitizePhone(businessPhone, 40), 50),
+        subtitle: clampStr(encodedSubtitle, 900),
+        businessPhone: clampStr(sanitizePhone(businessPhone, 50), 50),
         businessAddress: clampStr(sanitizePlainLine(businessAddress, 200), 200),
-        wordColors: ['#0F172A', '#0072BB'],
-        logoDataUrl: sanitizeImageDataUrl(logoDataUrl, 700000),
-        logoScale: 100,
-        logoTransparent: true,
-        receiptTerms: clampStr(DEFAULT_RECEIPT_TERMS, 2000),
-        trackingBaseUrl: isPrivatePreviewOrigin(window.location.origin)
-          ? ''
-          : clampStr(window.location.origin, 250),
+        wordColors: safeColors,
+        logoDataUrl: safeLogoDataUrl,
+        logoScale: safeScale,
+        logoTransparent,
+        receiptTerms: sanitizeText(receiptTerms, 2000),
+        trackingBaseUrl: safeTrackingBaseUrl,
         createdAt: nowIso,
         updatedAt: nowIso,
       });
       await upsertRow('workshop_profiles', payload);
+      setActiveCurrency(safeCurrency);
       notify('Perfil del taller guardado correctamente.');
     } catch (err) {
-      notify('No se pudo guardar el perfil. Intentá de nuevo.', 'error');
+      notify(sanitizeDbErrorMessage(err, 'No se pudo guardar el perfil. Intentá de nuevo.'), 'error');
       void handleDbError(err, OperationType.CREATE, path).catch(() => {});
     } finally {
       setSaving(false);
@@ -412,22 +501,23 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10 dark:bg-slate-950">
-      <div className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8 dark:border-slate-800 dark:bg-slate-900">
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-8 dark:bg-slate-950">
+      <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8 dark:border-slate-800 dark:bg-slate-900">
         <div className="mb-6">
           <h2 className="text-2xl font-bold text-slate-900 dark:text-white font-display">
             Configurá tu taller
           </h2>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Completá los datos de tu local para personalizar las boletas y el seguimiento de clientes.
+            Completá tus datos, marca, moneda, logo y opciones visibles en cada boleta y presupuesto.
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {/* Datos del responsable */}
+          <div className="grid gap-4 sm:grid-cols-3">
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Nombre
+                Nombre *
               </label>
               <input
                 type="text"
@@ -441,7 +531,7 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Apellido
+                Apellido *
               </label>
               <input
                 type="text"
@@ -450,22 +540,6 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
                 value={lastName}
                 onChange={(e) => setLastName(e.target.value)}
                 placeholder="Tu apellido"
-                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-              />
-            </div>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Teléfono del local
-              </label>
-              <input
-                type="tel"
-                maxLength={50}
-                value={businessPhone}
-                onChange={(e) => setBusinessPhone(e.target.value)}
-                placeholder="11-5555-0199"
                 className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
@@ -484,48 +558,372 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
             </div>
           </div>
 
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Dirección del local
-            </label>
-            <input
-              type="text"
-              maxLength={200}
-              value={businessAddress}
-              onChange={(e) => setBusinessAddress(e.target.value)}
-              placeholder="Av. Principal 1234"
-              className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            />
+          {/* Sección Taller · Marca y comprobantes */}
+          <div className="flex items-center gap-2 border-b border-slate-200 pb-2.5 pt-1 dark:border-slate-800">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-50 text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300">
+              <Store className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="text-sm font-bold text-slate-900 dark:text-white font-display">
+                Taller · Marca y comprobantes
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                Todos estos datos se reflejan automáticamente en tus boletas A4, 80mm y PDF.
+              </div>
+            </div>
           </div>
 
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Nombre o marca del taller
-            </label>
-            <input
-              type="text"
-              maxLength={80}
-              value={brandName}
-              onChange={(e) => setBrandName(e.target.value)}
-              placeholder="TH3 BNB"
-              className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Nombre o marca del taller
+              </label>
+              <input
+                type="text"
+                maxLength={60}
+                value={brandName}
+                onChange={(e) => setBrandName(e.target.value)}
+                placeholder="TH3 BNB"
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Subtítulo / Rubro del taller
+              </label>
+              <input
+                type="text"
+                maxLength={80}
+                value={subtitleText}
+                onChange={(e) => setSubtitleText(e.target.value)}
+                placeholder="Ej: Servicio técnico especializado"
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Teléfono del local
+              </label>
+              <input
+                type="tel"
+                maxLength={40}
+                value={businessPhone}
+                onChange={(e) => setBusinessPhone(e.target.value)}
+                placeholder="11-5555-0199"
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Dirección del local
+              </label>
+              <input
+                type="text"
+                maxLength={120}
+                value={businessAddress}
+                onChange={(e) => setBusinessAddress(e.target.value)}
+                placeholder="Av. Principal 1234"
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
+            </div>
           </div>
 
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Logo (PNG, JPG o WebP, máximo 1,5 MB)
-            </label>
-            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-xs font-medium text-slate-600 transition hover:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-300">
-              <Upload className="h-4 w-4" />
-              <span>{logoDataUrl ? 'Logo cargado · Cambiar imagen' : 'Seleccionar imagen opcional'}</span>
+          {/* Moneda */}
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-800/40">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+                  <Coins className="h-4 w-4" />
+                </span>
+                <div>
+                  <label
+                    htmlFor="onboarding-currency-select"
+                    className="block text-xs font-bold text-slate-800 dark:text-slate-100"
+                  >
+                    Moneda del taller, presupuestos y boletas
+                  </label>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Se aplica en presupuestos, señas, inventario, ventas, WhatsApp y boletas A4, 80mm y PDF.
+                  </p>
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-mono-num text-xs font-bold text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-sky-300">
+                Ej: {formatCurrency(15000, currency)}
+              </div>
+            </div>
+
+            <div className="mt-3">
+              <select
+                id="onboarding-currency-select"
+                value={currency}
+                onChange={(e) => setCurrency(sanitizeCurrencyCode(e.target.value))}
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+              >
+                {CURRENCY_OPTIONS.map((opt) => (
+                  <option key={opt.code} value={opt.code}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Opciones extra para mostrar en cada boleta */}
+          <div className="space-y-3 rounded-2xl border border-sky-200/80 bg-sky-50/40 p-4 dark:border-sky-900/50 dark:bg-sky-950/20">
+            <div>
+              <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                Opciones extra para mostrar en cada boleta
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                Completá las que quieras imprimir en boletas de reparación, ventas, lotes y PDF.
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Horarios de atención
+                </label>
+                <input
+                  type="text"
+                  maxLength={100}
+                  value={hours}
+                  onChange={(e) => setHours(e.target.value)}
+                  placeholder="Ej: Lun a Vie 9:30 a 19:00 · Sáb 10 a 14"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Instagram / Web
+                </label>
+                <input
+                  type="text"
+                  maxLength={100}
+                  value={social}
+                  onChange={(e) => setSocial(e.target.value)}
+                  placeholder="Ej: @th3bnb.servicio · www.th3bnb.com"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  CUIT / Documento comercial (opcional)
+                </label>
+                <input
+                  type="text"
+                  maxLength={60}
+                  value={taxId}
+                  onChange={(e) => setTaxId(e.target.value)}
+                  placeholder="Ej: CUIT 20-12345678-9"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Email de contacto
+                </label>
+                <input
+                  type="email"
+                  maxLength={100}
+                  value={businessEmail}
+                  onChange={(e) => setBusinessEmail(e.target.value)}
+                  placeholder="Ej: contacto@tutaller.com"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Garantía o mensaje destacado al pie de boleta
+                </label>
+                <input
+                  type="text"
+                  maxLength={180}
+                  value={footerNote}
+                  onChange={(e) => setFooterNote(e.target.value)}
+                  placeholder="Ej: Garantía 30 días sobre el trabajo realizado · ¡Gracias por elegirnos!"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Color por palabra y vista previa */}
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
+            <div className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Color por palabra y vista previa
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              {words.map((word, idx) => (
+                <label
+                  key={`${word}-${idx}`}
+                  className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                >
+                  <input
+                    type="color"
+                    value={wordColors[idx] || (idx === 0 ? '#0F172A' : '#0072BB')}
+                    onChange={(e) => {
+                      const next = [...wordColors];
+                      next[idx] = e.target.value;
+                      setWordColors(next);
+                    }}
+                    className="h-6 w-6 cursor-pointer rounded border-0 bg-transparent p-0"
+                  />
+                  <span>{word}</span>
+                </label>
+              ))}
+            </div>
+            <div className="mt-3 flex items-center justify-center rounded-xl border border-slate-200 bg-white py-3 dark:border-slate-700 dark:bg-slate-900">
+              <BrandMark
+                profile={{
+                  brandName,
+                  wordColors,
+                  logoDataUrl,
+                  logoScale,
+                  logoTransparent,
+                }}
+                size="lg"
+                showLogoImage={false}
+              />
+            </div>
+          </div>
+
+          {/* Logo del taller */}
+          <div className="space-y-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                <ImageIcon className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
+                <span>Logo del taller (opcional)</span>
+              </div>
+              {logoDataUrl && (
+                <button
+                  type="button"
+                  onClick={() => setLogoDataUrl('')}
+                  className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Quitar logo
+                </button>
+              )}
+            </div>
+
+            <label
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                void handleLogoFile(e.dataTransfer.files?.[0]);
+              }}
+              className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed p-5 text-center transition ${
+                dragOver
+                  ? 'border-[#0072BB] bg-sky-50 dark:bg-sky-950/30'
+                  : 'border-slate-200 bg-slate-50 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800/40'
+              }`}
+            >
               <input
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
-                onChange={handleLogoUpload}
+                onChange={(e) => void handleLogoFile(e.target.files?.[0])}
                 className="hidden"
               />
+              {logoDataUrl ? (
+                <div
+                  className={`rounded-xl p-2 ${
+                    logoTransparent ? '' : 'bg-white shadow-xs'
+                  }`}
+                >
+                  <img
+                    src={logoDataUrl}
+                    alt="Vista previa del logo"
+                    referrerPolicy="no-referrer"
+                    style={{ height: `${Math.round((48 * logoScale) / 100)}px` }}
+                    className="max-w-full object-contain"
+                  />
+                </div>
+              ) : (
+                <>
+                  <UploadCloud className="h-7 w-7 text-slate-400" />
+                  <div className="text-xs text-slate-600 dark:text-slate-300">
+                    <strong>Clic para seleccionar</strong> o arrastrá una imagen
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    PNG transparente recomendado · Máx 2 MB
+                  </div>
+                </>
+              )}
             </label>
+
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-xs font-medium text-slate-700 dark:text-slate-300">
+                <span>Tamaño del logo</span>
+                <span className="font-mono-num">{logoScale}%</span>
+              </div>
+              <input
+                type="range"
+                min={50}
+                max={200}
+                step={10}
+                value={logoScale}
+                onChange={(e) => setLogoScale(Number(e.target.value))}
+                className="w-full accent-[#0072BB]"
+              />
+            </div>
+
+            <label className="flex cursor-pointer items-start gap-2.5 text-xs text-slate-600 dark:text-slate-300">
+              <input
+                type="checkbox"
+                checked={logoTransparent}
+                onChange={(e) => setLogoTransparent(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded accent-[#0072BB]"
+              />
+              <span>
+                <strong className="block text-slate-900 dark:text-white">
+                  Mi logo tiene fondo transparente
+                </strong>
+                Si subiste un JPG o PNG con fondo blanco, desmarcalo para mostrarlo sobre un recuadro
+                claro.
+              </span>
+            </label>
+          </div>
+
+          {/* Términos y condiciones */}
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Términos y condiciones
+            </label>
+            <textarea
+              rows={4}
+              maxLength={2000}
+              value={receiptTerms}
+              onChange={(e) => setReceiptTerms(e.target.value)}
+              placeholder="Escribí los términos y condiciones que aparecerán en la boleta del cliente..."
+              className="w-full rounded-xl border border-slate-200 bg-white p-3 text-xs leading-relaxed text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            />
+          </div>
+
+          {/* URL pública de seguimiento */}
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Dirección pública del sitio para links de seguimiento (opcional)
+            </label>
+            <input
+              type="url"
+              value={trackingBaseUrl}
+              onChange={(e) => setTrackingBaseUrl(e.target.value)}
+              placeholder="https://tu-taller.vercel.app"
+              className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            />
           </div>
 
           <div className="flex items-center justify-between gap-3 pt-2">
