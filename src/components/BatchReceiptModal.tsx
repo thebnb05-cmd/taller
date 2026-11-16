@@ -6,6 +6,7 @@ import {
   FileText,
   Layers,
   MessageCircle,
+  PenTool,
   Printer,
   ReceiptText,
   Scissors,
@@ -13,6 +14,7 @@ import {
   Tag,
 } from 'lucide-react';
 import { DEFAULT_RECEIPT_TERMS } from '../data/catalog';
+import { updateRow } from '../lib/db';
 import type { RepairRecord, WorkshopProfile } from '../types/workshop';
 import {
   convertFromBaseCurrency,
@@ -27,9 +29,15 @@ import {
   buildBatchRepairReceiptPdf,
   downloadBatchRepairReceiptPdf,
 } from '../utils/pdfReport';
+import {
+  parseCheckoutAndSignature,
+  serializeCheckoutAndSignature,
+} from '../utils/signatureMeta';
+import { sanitizeDbErrorMessage } from '../utils/validation';
 import { BrandMark } from './BrandMark';
 import { ModalShell } from './ModalShell';
 import type { PrintFormat } from './RepairPrintDocuments';
+import { SignaturePadModal } from './SignaturePadModal';
 import { useToast } from './ToastProvider';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
 
@@ -148,6 +156,21 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
   const [generatingPdf, setGeneratingPdf] = useState(false);
 
   const first = repairs[0];
+  const parsedFirstCheckout = useMemo(
+    () => parseCheckoutAndSignature(first?.checkoutState),
+    [first?.checkoutState]
+  );
+  const [savedSignature, setSavedSignature] = useState<string>(
+    parsedFirstCheckout.signatureDataUrl
+  );
+  const [signatureModalOpen, setSignatureModalOpen] = useState(false);
+  const [savingSignature, setSavingSignature] = useState(false);
+
+  React.useEffect(() => {
+    if (open) {
+      setSavedSignature(parsedFirstCheckout.signatureDataUrl);
+    }
+  }, [open, batchRef, parsedFirstCheckout.signatureDataUrl]);
   const totalBudget = useMemo(
     () => repairs.reduce((sum, r) => sum + Number(r.price || 0), 0),
     [repairs]
@@ -204,6 +227,33 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
 
   if (!open || repairs.length === 0 || !first) return null;
 
+  const handleSaveSignature = async (nextSignatureUrl: string) => {
+    setSavingSignature(true);
+    try {
+      const nowIso = new Date().toISOString();
+      await Promise.all(
+        repairs.map((r) => {
+          const parsed = parseCheckoutAndSignature(r.checkoutState);
+          return updateRow('repairs', r.id, {
+            checkoutState: serializeCheckoutAndSignature(parsed.text, nextSignatureUrl),
+            updatedAt: nowIso,
+          });
+        })
+      );
+      setSavedSignature(nextSignatureUrl);
+      setSignatureModalOpen(false);
+      notify(
+        nextSignatureUrl
+          ? 'Firma guardada en la boleta múltiple, térmico 80mm y PDF.'
+          : 'Firma eliminada de la boleta múltiple.'
+      );
+    } catch (err) {
+      notify(sanitizeDbErrorMessage(err, 'No se pudo guardar la firma.'), 'error');
+    } finally {
+      setSavingSignature(false);
+    }
+  };
+
   const handleDownloadPdf = async (forWhatsApp = false) => {
     if (generatingPdf) return;
     setGeneratingPdf(true);
@@ -214,6 +264,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
         profile,
         currencyCode: selectedCurrency,
         exchangeRate: activeRate,
+        clientSignatureDataUrl: savedSignature,
       });
       notify(
         forWhatsApp
@@ -238,6 +289,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
         profile,
         currencyCode: selectedCurrency,
         exchangeRate: activeRate,
+        clientSignatureDataUrl: savedSignature,
       });
       const pdfFile = new File([blob], fileName, { type: 'application/pdf' });
       await navigator.share({
@@ -452,8 +504,45 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
           </div>
         </div>
         <div className="text-right">
-          <div className="mt-4 w-52 border-b border-slate-400" />
-          <div className="mt-1 text-[10px] text-slate-500">Firma y aclaración del cliente</div>
+          {savedSignature ? (
+            <div className="flex flex-col items-center">
+              <img
+                src={savedSignature}
+                alt={`Firma de ${first.clientName}`}
+                className="mx-auto mb-1 h-12 max-w-[190px] object-contain"
+              />
+              <div className="w-52 border-b border-slate-400" />
+              <div className="mt-1 text-[10px] text-slate-500">Firma y aclaración del cliente</div>
+              {!isPrintMode && (
+                <button
+                  type="button"
+                  onClick={() => setSignatureModalOpen(true)}
+                  className="mt-1 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold text-[#0072BB] hover:bg-sky-50"
+                >
+                  <PenTool className="h-3 w-3" />
+                  Cambiar firma
+                </button>
+              )}
+            </div>
+          ) : !isPrintMode ? (
+            <button
+              type="button"
+              onClick={() => setSignatureModalOpen(true)}
+              className="flex flex-col items-center rounded-xl border border-dashed border-sky-300 bg-sky-50/40 px-3 py-2 text-center transition hover:border-[#0072BB] hover:bg-sky-50"
+            >
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#0072BB]">
+                <PenTool className="h-3.5 w-3.5" />
+                Tocá acá para firmar en pantalla
+              </span>
+              <div className="mt-3 w-52 border-b border-slate-400" />
+              <div className="mt-1 text-[10px] text-slate-500">Firma y aclaración del cliente</div>
+            </button>
+          ) : (
+            <div>
+              <div className="mt-4 w-52 border-b border-slate-400" />
+              <div className="mt-1 text-[10px] text-slate-500">Firma y aclaración del cliente</div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -553,8 +642,45 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
             {workshopMeta.footerNote}
           </div>
         )}
-        <div className="mx-auto mb-1 mt-2 w-44 border-b border-black" />
-        <div>Firma y aclaración</div>
+        {savedSignature ? (
+          <div className="mt-2">
+            <img
+              src={savedSignature}
+              alt={`Firma de ${first.clientName}`}
+              className="mx-auto mb-1 h-12 max-w-[175px] object-contain grayscale contrast-150"
+            />
+            <div className="mx-auto mb-1 w-44 border-b border-black" />
+            <div>Firma y aclaración del cliente</div>
+            {!isPrintMode && (
+              <button
+                type="button"
+                onClick={() => setSignatureModalOpen(true)}
+                className="mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-[10px] font-semibold text-[#0072BB] hover:bg-sky-50"
+              >
+                <PenTool className="h-3 w-3" />
+                Cambiar firma
+              </button>
+            )}
+          </div>
+        ) : !isPrintMode ? (
+          <button
+            type="button"
+            onClick={() => setSignatureModalOpen(true)}
+            className="mt-2 w-full rounded-lg border border-dashed border-sky-400 bg-sky-50/40 px-2 py-2 text-center font-sans transition hover:bg-sky-50"
+          >
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#0072BB]">
+              <PenTool className="h-3 w-3" />
+              Tocá para firmar cliente
+            </span>
+            <div className="mx-auto mb-1 mt-2 w-44 border-b border-black" />
+            <div className="font-mono text-[9.5px] text-black">Firma y aclaración</div>
+          </button>
+        ) : (
+          <>
+            <div className="mx-auto mb-1 mt-4 w-44 border-b border-black" />
+            <div>Firma y aclaración</div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -729,6 +855,19 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
+                  onClick={() => setSignatureModalOpen(true)}
+                  className={`inline-flex h-10 items-center gap-1.5 rounded-xl border px-3 text-xs font-semibold transition ${
+                    savedSignature
+                      ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                      : 'border-sky-300 bg-sky-50 text-[#0072BB] hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300'
+                  }`}
+                >
+                  <PenTool className="h-4 w-4" />
+                  {savedSignature ? 'Firma guardada ✓' : 'Firmar cliente'}
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => void handleDownloadPdf(false)}
                   disabled={generatingPdf}
                   className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-sky-400 dark:hover:text-sky-300"
@@ -843,6 +982,16 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
           </div>
         )}
       </div>
+
+      <SignaturePadModal
+        open={signatureModalOpen}
+        clientName={first.clientName}
+        orderLabel={`Lote ${batchRef} (${repairs.length} equipos)`}
+        initialSignatureUrl={savedSignature}
+        saving={savingSignature}
+        onClose={() => setSignatureModalOpen(false)}
+        onSave={handleSaveSignature}
+      />
     </>
   );
 };

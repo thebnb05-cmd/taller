@@ -6,6 +6,7 @@ import {
   FileDown,
   FileText,
   MessageCircle,
+  PenTool,
   Printer,
   ReceiptText,
   Scissors,
@@ -14,6 +15,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { DEFAULT_RECEIPT_TERMS } from '../data/catalog';
+import { updateRow } from '../lib/db';
 import type { RepairRecord, WorkshopProfile } from '../types/workshop';
 import {
   convertFromBaseCurrency,
@@ -28,7 +30,13 @@ import {
   buildClientRepairReceiptPdf,
   downloadClientRepairReceiptPdf,
 } from '../utils/pdfReport';
+import {
+  parseCheckoutAndSignature,
+  serializeCheckoutAndSignature,
+} from '../utils/signatureMeta';
+import { sanitizeDbErrorMessage } from '../utils/validation';
 import { BrandMark } from './BrandMark';
+import { SignaturePadModal } from './SignaturePadModal';
 import { useToast } from './ToastProvider';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
 
@@ -162,6 +170,18 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
     [isConverted, activeRate, selectedCurrency]
   );
 
+  const parsedCheckout = useMemo(
+    () => parseCheckoutAndSignature(repair.checkoutState),
+    [repair.checkoutState]
+  );
+  const [savedSignature, setSavedSignature] = useState<string>(parsedCheckout.signatureDataUrl);
+  const [signatureModalOpen, setSignatureModalOpen] = useState(false);
+  const [savingSignature, setSavingSignature] = useState(false);
+
+  useEffect(() => {
+    setSavedSignature(parsedCheckout.signatureDataUrl);
+  }, [repair.id, parsedCheckout.signatureDataUrl]);
+
   const [printFormat, setPrintFormat] = useState<PrintFormat>('a4');
   const [trackingQrDataUrl, setTrackingQrDataUrl] = useState('');
   const [generatingPdf, setGeneratingPdf] = useState(false);
@@ -207,6 +227,28 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
     ? `https://wa.me/${cleanPhoneForWa}?text=${encodeURIComponent(waReceiptMessage)}`
     : `https://wa.me/?text=${encodeURIComponent(waReceiptMessage)}`;
 
+  const handleSaveSignature = async (nextSignatureUrl: string) => {
+    setSavingSignature(true);
+    try {
+      const nextCheckout = serializeCheckoutAndSignature(parsedCheckout.text, nextSignatureUrl);
+      await updateRow('repairs', repair.id, {
+        checkoutState: nextCheckout,
+        updatedAt: new Date().toISOString(),
+      });
+      setSavedSignature(nextSignatureUrl);
+      setSignatureModalOpen(false);
+      notify(
+        nextSignatureUrl
+          ? 'Firma guardada en la boleta, térmico 80mm y PDF.'
+          : 'Firma eliminada del comprobante.'
+      );
+    } catch (err) {
+      notify(sanitizeDbErrorMessage(err, 'No se pudo guardar la firma.'), 'error');
+    } finally {
+      setSavingSignature(false);
+    }
+  };
+
   const handleDownloadClientPdf = async (forWhatsApp = false) => {
     if (generatingPdf) return;
     setGeneratingPdf(true);
@@ -218,6 +260,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
         trackingQrDataUrl,
         currencyCode: selectedCurrency,
         exchangeRate: activeRate,
+        clientSignatureDataUrl: savedSignature,
       });
       notify(
         forWhatsApp
@@ -243,6 +286,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
         trackingQrDataUrl,
         currencyCode: selectedCurrency,
         exchangeRate: activeRate,
+        clientSignatureDataUrl: savedSignature,
       });
       const pdfFile = new File([blob], fileName, { type: 'application/pdf' });
       await navigator.share({
@@ -563,8 +607,45 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
           </div>
         </div>
         <div className="text-right">
-          <div className="mt-4 w-52 border-b border-slate-400" />
-          <div className="mt-1 text-[10px] text-slate-500">Firma y aclaración del cliente</div>
+          {savedSignature ? (
+            <div className="flex flex-col items-center">
+              <img
+                src={savedSignature}
+                alt={`Firma de ${repair.clientName}`}
+                className="mx-auto mb-1 h-12 max-w-[190px] object-contain"
+              />
+              <div className="w-52 border-b border-slate-400" />
+              <div className="mt-1 text-[10px] text-slate-500">Firma y aclaración del cliente</div>
+              {!isPrintMode && (
+                <button
+                  type="button"
+                  onClick={() => setSignatureModalOpen(true)}
+                  className="mt-1 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold text-[#0072BB] hover:bg-sky-50"
+                >
+                  <PenTool className="h-3 w-3" />
+                  Cambiar firma
+                </button>
+              )}
+            </div>
+          ) : !isPrintMode ? (
+            <button
+              type="button"
+              onClick={() => setSignatureModalOpen(true)}
+              className="group flex flex-col items-center rounded-xl border border-dashed border-sky-300 bg-sky-50/40 px-3 py-2 text-center transition hover:border-[#0072BB] hover:bg-sky-50"
+            >
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#0072BB]">
+                <PenTool className="h-3.5 w-3.5" />
+                Tocá acá para firmar en pantalla
+              </span>
+              <div className="mt-3 w-52 border-b border-slate-400" />
+              <div className="mt-1 text-[10px] text-slate-500">Firma y aclaración del cliente</div>
+            </button>
+          ) : (
+            <div>
+              <div className="mt-4 w-52 border-b border-slate-400" />
+              <div className="mt-1 text-[10px] text-slate-500">Firma y aclaración del cliente</div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -950,7 +1031,42 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
             <div className="break-all font-bold">{trackingUrl}</div>
           )}
           <div className="font-bold">Código: {repair.trackingCode}</div>
-          <div className="mt-6 border-t border-black pt-1">Firma y aclaración del cliente</div>
+          {savedSignature ? (
+            <div className="mt-2">
+              <img
+                src={savedSignature}
+                alt={`Firma de ${repair.clientName}`}
+                className="mx-auto mb-1 h-12 max-w-[175px] object-contain grayscale contrast-150"
+              />
+              <div className="border-t border-black pt-1">Firma y aclaración del cliente</div>
+              {!isPrintMode && (
+                <button
+                  type="button"
+                  onClick={() => setSignatureModalOpen(true)}
+                  className="mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-sans text-[10px] font-semibold text-[#0072BB] hover:bg-sky-50"
+                >
+                  <PenTool className="h-3 w-3" />
+                  Cambiar firma
+                </button>
+              )}
+            </div>
+          ) : !isPrintMode ? (
+            <button
+              type="button"
+              onClick={() => setSignatureModalOpen(true)}
+              className="mt-3 w-full rounded-lg border border-dashed border-sky-400 bg-sky-50/40 px-2 py-2 text-center font-sans transition hover:bg-sky-50"
+            >
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#0072BB]">
+                <PenTool className="h-3 w-3" />
+                Tocá para firmar cliente
+              </span>
+              <div className="mt-2 border-t border-black pt-1 font-mono text-[9.5px] text-black">
+                Firma y aclaración del cliente
+              </div>
+            </button>
+          ) : (
+            <div className="mt-6 border-t border-black pt-1">Firma y aclaración del cliente</div>
+          )}
           <div className="mt-2 text-[9px] tracking-widest">--------------------------------</div>
         </div>
       </div>
@@ -1283,6 +1399,20 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
+                onClick={() => setSignatureModalOpen(true)}
+                title="Capturar o actualizar la firma manuscrita del cliente"
+                className={`inline-flex h-10 items-center gap-1.5 rounded-xl border px-3 text-xs font-semibold transition ${
+                  savedSignature
+                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                    : 'border-sky-300 bg-sky-50 text-[#0072BB] hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300'
+                }`}
+              >
+                <PenTool className="h-4 w-4" />
+                {savedSignature ? 'Firma guardada ✓' : 'Firmar cliente'}
+              </button>
+
+              <button
+                type="button"
                 onClick={() => void handleDownloadClientPdf(false)}
                 disabled={generatingPdf}
                 title="Descargar PDF de la Boleta del Cliente"
@@ -1486,6 +1616,16 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
           </>
         )}
       </div>
+
+      <SignaturePadModal
+        open={signatureModalOpen}
+        clientName={repair.clientName}
+        orderLabel={`Orden ${repair.code}`}
+        initialSignatureUrl={savedSignature}
+        saving={savingSignature}
+        onClose={() => setSignatureModalOpen(false)}
+        onSave={handleSaveSignature}
+      />
     </>
   );
 };

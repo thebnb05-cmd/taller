@@ -13,6 +13,7 @@ import { convertFromBaseCurrency, type CurrencyCode } from './currency';
 import { formatCurrency, formatDateShort, getStatusLabel, todayISO } from './formatters';
 import { parsePaymentInfo } from './payment';
 import { parseSalePaymentInfo } from './saleMeta';
+import { parseCheckoutAndSignature } from './signatureMeta';
 import { parseWorkshopMeta } from './workshopMeta';
 
 interface PdfBrandHeader {
@@ -440,6 +441,7 @@ export async function buildClientRepairReceiptPdf(params: {
   trackingQrDataUrl?: string;
   currencyCode?: CurrencyCode;
   exchangeRate?: number;
+  clientSignatureDataUrl?: string;
 }): Promise<{ doc: jsPDF; fileName: string; blob: Blob }> {
   const { repair, profile, trackingUrl } = params;
   const brand = resolveBrand(profile);
@@ -848,15 +850,36 @@ export async function buildClientRepairReceiptPdf(params: {
   doc.setTextColor(100, 116, 139);
   doc.text(wrappedTrackingUrl.slice(0, 2), qrTextX, cursorY + 17.5);
 
-  // Signature line on right
+  // Signature line on right (with saved handwritten signature when present)
+  const rawSignature =
+    params.clientSignatureDataUrl !== undefined
+      ? params.clientSignatureDataUrl
+      : parseCheckoutAndSignature(repair.checkoutState).signatureDataUrl;
+  const sigPng = rawSignature ? await toPngDataUrl(rawSignature) : null;
+
   const sigW = 58;
   const sigX = pageWidth - margin - sigW;
+  const sigLineY = cursorY + 17;
+  if (sigPng) {
+    const maxSigW = sigW - 6;
+    const maxSigH = 14.5;
+    const ratio = sigPng.width / Math.max(1, sigPng.height);
+    let drawW = maxSigW;
+    let drawH = drawW / Math.max(0.2, ratio);
+    if (drawH > maxSigH) {
+      drawH = maxSigH;
+      drawW = drawH * Math.max(0.2, ratio);
+    }
+    const drawX = sigX + (sigW - drawW) / 2;
+    const drawY = sigLineY - drawH - 0.8;
+    doc.addImage(sigPng.dataUrl, 'PNG', drawX, drawY, drawW, drawH);
+  }
   doc.setDrawColor(148, 163, 184);
-  doc.line(sigX, cursorY + 17, sigX + sigW, cursorY + 17);
+  doc.line(sigX, sigLineY, sigX + sigW, sigLineY);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(71, 85, 105);
-  doc.text('Firma y aclaración del cliente', sigX + sigW / 2, cursorY + 21, { align: 'center' });
+  doc.text('Firma y aclaración del cliente', sigX + sigW / 2, sigLineY + 4, { align: 'center' });
 
   const safeCode = (repair.code || 'orden').replace(/[^a-zA-Z0-9_-]/g, '-');
   const fileName = `boleta-cliente-${safeCode}.pdf`;
@@ -872,6 +895,7 @@ export async function downloadClientRepairReceiptPdf(params: {
   trackingQrDataUrl?: string;
   currencyCode?: CurrencyCode;
   exchangeRate?: number;
+  clientSignatureDataUrl?: string;
 }): Promise<{ fileName: string; blob: Blob }> {
   const { doc, fileName, blob } = await buildClientRepairReceiptPdf(params);
   doc.save(fileName);
@@ -884,6 +908,7 @@ export async function buildBatchRepairReceiptPdf(params: {
   profile?: WorkshopProfile | null;
   currencyCode?: CurrencyCode;
   exchangeRate?: number;
+  clientSignatureDataUrl?: string;
 }): Promise<{ doc: jsPDF; fileName: string; blob: Blob }> {
   const { repairs, batchRef, profile } = params;
   const brand = resolveBrand(profile);
@@ -1137,19 +1162,40 @@ export async function buildBatchRepairReceiptPdf(params: {
     cursorY += noteH + 5;
   }
 
-  if (cursorY > pageHeight - 25) {
+  const rawBatchSignature =
+    params.clientSignatureDataUrl !== undefined
+      ? params.clientSignatureDataUrl
+      : parseCheckoutAndSignature(first?.checkoutState).signatureDataUrl;
+  const batchSigPng = rawBatchSignature ? await toPngDataUrl(rawBatchSignature) : null;
+
+  if (cursorY > pageHeight - (batchSigPng ? 32 : 25)) {
     doc.addPage();
     cursorY = 18;
   }
 
   const sigW = 62;
   const sigX = pageWidth - margin - sigW;
+  const batchSigLineY = batchSigPng ? cursorY + 17 : cursorY + 10;
+  if (batchSigPng) {
+    const maxSigW = sigW - 6;
+    const maxSigH = 14.5;
+    const ratio = batchSigPng.width / Math.max(1, batchSigPng.height);
+    let drawW = maxSigW;
+    let drawH = drawW / Math.max(0.2, ratio);
+    if (drawH > maxSigH) {
+      drawH = maxSigH;
+      drawW = drawH * Math.max(0.2, ratio);
+    }
+    const drawX = sigX + (sigW - drawW) / 2;
+    const drawY = batchSigLineY - drawH - 0.8;
+    doc.addImage(batchSigPng.dataUrl, 'PNG', drawX, drawY, drawW, drawH);
+  }
   doc.setDrawColor(148, 163, 184);
-  doc.line(sigX, cursorY + 10, sigX + sigW, cursorY + 10);
+  doc.line(sigX, batchSigLineY, sigX + sigW, batchSigLineY);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(71, 85, 105);
-  doc.text('Firma y aclaración del cliente', sigX + sigW / 2, cursorY + 14, { align: 'center' });
+  doc.text('Firma y aclaración del cliente', sigX + sigW / 2, batchSigLineY + 4, { align: 'center' });
 
   addPageFooters(doc, brand.brandName);
 
@@ -1165,6 +1211,7 @@ export async function downloadBatchRepairReceiptPdf(params: {
   profile?: WorkshopProfile | null;
   currencyCode?: CurrencyCode;
   exchangeRate?: number;
+  clientSignatureDataUrl?: string;
 }): Promise<{ fileName: string; blob: Blob }> {
   const { doc, fileName, blob } = await buildBatchRepairReceiptPdf(params);
   doc.save(fileName);

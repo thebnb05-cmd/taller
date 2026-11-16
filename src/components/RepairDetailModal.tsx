@@ -14,6 +14,7 @@ import {
   Link2,
   MessageCircle,
   Package,
+  PenTool,
   Printer,
   QrCode,
   Search,
@@ -82,6 +83,10 @@ import {
 } from '../utils/currency';
 import { buildTrackingUrl } from '../utils/tracking';
 import { getFunctionalCheckFields, getPhysicalCheckFields } from '../utils/checkFields';
+import {
+  parseCheckoutAndSignature,
+  serializeCheckoutAndSignature,
+} from '../utils/signatureMeta';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
 import {
   isValidEmail,
@@ -229,7 +234,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     const parsedWork = parseWorkDetailAndMedia(repair.workDetail);
     setWorkDetail(parsedWork.text);
     setMediaItems(parsedWork.media);
-    setCheckoutState(repair.checkoutState || '');
+    setCheckoutState(parseCheckoutAndSignature(repair.checkoutState).text);
     setPhysicalCheck({ ...(repair.physicalCheck || {}) });
     setFunctionalCheck({ ...(repair.functionalCheck || {}) });
     setTransferConfig(loadTransferConfig(repair.ownerId));
@@ -529,7 +534,10 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
           partIds: nextPartIds,
           partNames: nextPartNames,
           workDetail: combinedWorkDetail,
-          checkoutState: sanitizePlainLine(checkoutState, 500),
+          checkoutState: serializeCheckoutAndSignature(
+            checkoutState,
+            parseCheckoutAndSignature(repair.checkoutState).signatureDataUrl
+          ),
           physicalCheck,
           functionalCheck,
           updatedAt: nowIso,
@@ -1002,6 +1010,16 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                         <User className="h-3 w-3 text-[#0072BB] dark:text-sky-400" />
                         {paymentInfo.technician}
                       </span>
+                    )}
+                    {parseCheckoutAndSignature(repair.checkoutState).signatureDataUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setTab('receipt')}
+                        className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+                      >
+                        <PenTool className="h-3 w-3" />
+                        Firmada por el cliente ✓
+                      </button>
                     )}
                   </div>
                 </div>
