@@ -5,6 +5,7 @@ import {
   Boxes,
   CalendarDays,
   Factory,
+  HelpCircle,
   Home,
   LogOut,
   Moon,
@@ -30,6 +31,18 @@ import {
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useActiveCurrency } from '../utils/currency';
 import { clearTransferConfigCache, hydrateTransferConfig } from '../utils/payment';
+import {
+  ACTION_GUIDES,
+  getPendingContextualGuide,
+  loadOnboardingState,
+  markGuideScopeSeen,
+  markWelcomeStepsSeen,
+  PAGE_GUIDES,
+  saveOnboardingState,
+  WELCOME_TOUR_STEPS,
+  type ActionGuideId,
+  type OnboardingState,
+} from '../utils/onboardingTour';
 import { sanitizeDbErrorMessage } from '../utils/validation';
 import type {
   ClientRecord,
@@ -56,6 +69,7 @@ import { BatchReceiptModal } from './BatchReceiptModal';
 import { BrandSettingsModal } from './BrandSettingsModal';
 import { ClientDetailModal, NewClientModal } from './ClientModals';
 import { GlobalSearchBar } from './GlobalSearchBar';
+import { ContextualWindowGuide, WelcomeSpotlightTour } from './GuidedTourOverlay';
 import { NewPurchaseModal } from './NewPurchaseModal';
 import { NewRepairModal } from './NewRepairModal';
 import { NewSaleModal } from './NewSaleModal';
@@ -246,6 +260,31 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   const [selectedPrintSale, setSelectedPrintSale] = useState<SaleRecord | null>(null);
   const [showNewPurchase, setShowNewPurchase] = useState(false);
 
+  // Onboarding tour & per-window first-visit guides
+  const [onboardingState, setOnboardingState] = useState<OnboardingState>(() =>
+    loadOnboardingState(userId)
+  );
+  const [welcomeTourOpen, setWelcomeTourOpen] = useState(false);
+
+  useEffect(() => {
+    setOnboardingState(loadOnboardingState(userId));
+  }, [userId]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    if (!onboardingState.welcomeTourDone && !onboardingState.dismissAllGuides) {
+      setWelcomeTourOpen(true);
+    }
+  }, [isLoading, onboardingState.welcomeTourDone, onboardingState.dismissAllGuides]);
+
+  const updateOnboarding = (updater: (prev: OnboardingState) => OnboardingState) => {
+    setOnboardingState((prev) => {
+      const next = updater(prev);
+      saveOnboardingState(userId, next);
+      return next;
+    });
+  };
+
   const lowStockCount = useMemo(
     () => products.filter((p) => p.trackStock && p.stock <= p.minStock).length,
     [products]
@@ -257,6 +296,52 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
       (justCreatedRepair?.id === selectedRepairId ? justCreatedRepair : null),
     [repairs, selectedRepairId, justCreatedRepair]
   );
+
+  const activeContextualGuide = useMemo(() => {
+    if (
+      isLoading ||
+      welcomeTourOpen ||
+      !onboardingState.welcomeTourDone ||
+      onboardingState.dismissAllGuides
+    ) {
+      return null;
+    }
+
+    let actionId: ActionGuideId | null = null;
+    if (showNewRepair) actionId = 'new_repair';
+    else if (selectedRepair) actionId = 'repair_detail';
+    else if (showNewSale) actionId = 'new_sale';
+    else if (showBrandSettings) actionId = 'brand_settings';
+
+    if (actionId) {
+      const def = ACTION_GUIDES[actionId];
+      const resolved = getPendingContextualGuide(`action:${actionId}`, def, onboardingState);
+      if (!resolved) return null;
+      return {
+        scopeKey: `action:${actionId}`,
+        def,
+        resolved,
+      };
+    }
+
+    const pageDef = PAGE_GUIDES[page];
+    const resolvedPage = getPendingContextualGuide(`page:${page}`, pageDef, onboardingState);
+    if (!resolvedPage) return null;
+    return {
+      scopeKey: `page:${page}`,
+      def: pageDef,
+      resolved: resolvedPage,
+    };
+  }, [
+    isLoading,
+    welcomeTourOpen,
+    onboardingState,
+    showNewRepair,
+    selectedRepair,
+    showNewSale,
+    showBrandSettings,
+    page,
+  ]);
 
   const selectedClient = useMemo(
     () => clients.find((c) => c.id === selectedClientId) || null,
@@ -288,7 +373,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 py-4">
-          <nav className="space-y-5" aria-label="Secciones principales">
+          <nav data-tour="sidebar-nav" className="space-y-5" aria-label="Secciones principales">
             {NAV_GROUPS.map((group) => (
               <div key={group.title}>
                 <div className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
@@ -324,7 +409,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
             ))}
           </nav>
 
-          <div className="mt-6 border-t border-slate-100 pt-4 dark:border-slate-800">
+          <div data-tour="quick-actions" className="mt-6 border-t border-slate-100 pt-4 dark:border-slate-800">
             <div className="mb-2 px-3 text-[11px] font-semibold text-slate-400">
               Acciones rápidas
             </div>
@@ -400,8 +485,18 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
             onSelectProduct={(p) => setSelectedProductId(p.id)}
           />
 
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+          <div data-tour="header-actions" className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             <PWAInstallButton />
+
+            <button
+              type="button"
+              onClick={() => setWelcomeTourOpen(true)}
+              aria-label="Ver tour guiado"
+              title="Tour guiado"
+              className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              <HelpCircle className="h-4 w-4" />
+            </button>
 
             <button
               type="button"
@@ -606,6 +701,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
 
       {/* Mobile / Tablet Bottom Navigation (compact <= 64px) */}
       <nav
+        data-tour="mobile-nav"
         aria-label="Navegación móvil"
         className="no-print fixed bottom-0 left-0 right-0 z-30 grid h-16 grid-cols-5 border-t border-slate-200 bg-white/95 backdrop-blur-md lg:hidden dark:border-slate-800 dark:bg-slate-900/95"
       >
@@ -869,6 +965,36 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         ownerId={userId}
         suppliers={suppliers}
         profile={profile}
+      />
+
+      <WelcomeSpotlightTour
+        open={welcomeTourOpen}
+        steps={WELCOME_TOUR_STEPS}
+        onComplete={() => {
+          setWelcomeTourOpen(false);
+          updateOnboarding((prev) => markWelcomeStepsSeen(prev, WELCOME_TOUR_STEPS));
+        }}
+        onSkip={() => {
+          setWelcomeTourOpen(false);
+          updateOnboarding((prev) => markWelcomeStepsSeen(prev, WELCOME_TOUR_STEPS));
+        }}
+      />
+
+      <ContextualWindowGuide
+        guide={activeContextualGuide?.resolved || null}
+        onDismissCurrent={() => {
+          if (!activeContextualGuide) return;
+          updateOnboarding((prev) =>
+            markGuideScopeSeen(prev, activeContextualGuide.scopeKey, activeContextualGuide.def)
+          );
+        }}
+        onDismissAll={() => {
+          setWelcomeTourOpen(false);
+          updateOnboarding((prev) => ({
+            ...markWelcomeStepsSeen(prev, WELCOME_TOUR_STEPS),
+            dismissAllGuides: true,
+          }));
+        }}
       />
     </div>
   );

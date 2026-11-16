@@ -476,6 +476,7 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
       {/* Mobile trigger button */}
       <button
         type="button"
+        data-tour="global-search-mobile"
         onClick={() => {
           setMobileOpen(true);
           setOpen(true);
@@ -489,7 +490,7 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
       </button>
 
       {/* Desktop / Tablet inline search bar */}
-      <div className="relative hidden w-full max-w-md sm:block">
+      <div data-tour="global-search" className="relative hidden w-full max-w-md sm:block">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <input
           ref={desktopInputRef}
