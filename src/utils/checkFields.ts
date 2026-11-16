@@ -171,6 +171,29 @@ export const FUNCTIONAL_HEADPHONES_FIELDS: CheckFieldOption[] = [
   { key: 'Cancelación ruido (ANC)', label: 'Cancelación ruido (ANC)', options: ['OK', 'Falla', 'No tiene'] },
 ];
 
+export const PHYSICAL_OTHER_FIELDS: CheckFieldOption[] = [
+  { key: 'Carcasa / Gabinete', label: 'Carcasa / Gabinete', options: ['OK', 'Rayada', 'Rajada / Rota', 'Falta tapa'] },
+  { key: 'Pantalla / Display', label: 'Pantalla / Display', options: ['OK', 'Rayada', 'Rota', 'No tiene'] },
+  { key: 'Cable / Ficha aliment.', label: 'Cable / Ficha aliment.', options: ['OK', 'Pelado / Dañado', 'Sin cable', 'No aplica'] },
+  { key: 'Puertos / Conectores', label: 'Puertos / Conectores', options: ['OK', 'Flojos', 'Dañados', 'No tiene'] },
+  { key: 'Botones / Perillas', label: 'Botones / Perillas', options: ['OK', 'Trabados', 'Faltantes', 'Rotos'] },
+  { key: 'Tornillos / Sellos', label: 'Tornillos / Sellos', options: ['Completos', 'Faltan tornillos', 'Abierto antes'] },
+  { key: 'Humedad / Óxido', label: 'Humedad / Óxido', options: ['No', 'Leve', 'Severa'] },
+  { key: 'Suciedad / Polvo', label: 'Suciedad / Polvo', options: ['Limpio', 'Moderado', 'Muy sucio'] },
+  { key: 'Golpes visibles', label: 'Golpes visibles', options: ['No', 'Leves', 'Severos'] },
+];
+
+export const FUNCTIONAL_OTHER_FIELDS: CheckFieldOption[] = [
+  { key: 'Enciende / Alimentación', label: 'Enciende / Alimentación', options: ['OK', 'No enciende', 'Se apaga', 'Intermitente'] },
+  { key: 'Luz piloto / LED', label: 'Luz piloto / LED', options: ['OK', 'Parpadea / Error', 'No prende', 'No tiene'] },
+  { key: 'Imagen / Display', label: 'Imagen / Display', options: ['OK', 'Sin imagen', 'Líneas / Manchas', 'No tiene'] },
+  { key: 'Sonido / Audio', label: 'Sonido / Audio', options: ['OK', 'Distorsiona', 'Sin audio', 'No tiene'] },
+  { key: 'Conectividad (WiFi/Red/BT)', label: 'Conectividad (WiFi/Red/BT)', options: ['OK', 'Falla', 'No probado', 'No tiene'] },
+  { key: 'Motor / Cooler / Mecánica', label: 'Motor / Cooler / Mecánica', options: ['OK', 'Ruidoso', 'Trabado', 'No tiene'] },
+  { key: 'Batería / Carga', label: 'Batería / Carga', options: ['OK', 'No carga', 'Solo enchufado', 'No tiene'] },
+  { key: 'Olor a quemado / Corto', label: 'Olor a quemado / Corto', options: ['No', 'Sí'] },
+];
+
 export function getPhysicalCheckFields(deviceType?: string): CheckFieldOption[] {
   if (deviceType === 'PC de escritorio') {
     return PHYSICAL_PC_FIELDS;
@@ -189,6 +212,9 @@ export function getPhysicalCheckFields(deviceType?: string): CheckFieldOption[] 
   }
   if (deviceType === 'Notebook') {
     return PHYSICAL_NOTEBOOK_FIELDS;
+  }
+  if (deviceType === 'Otros equipos') {
+    return PHYSICAL_OTHER_FIELDS;
   }
   return PHYSICAL_DEFAULT_FIELDS;
 }
@@ -212,5 +238,27 @@ export function getFunctionalCheckFields(deviceType?: string): CheckFieldOption[
   if (deviceType === 'Consola / joystick') {
     return FUNCTIONAL_CONSOLE_FIELDS;
   }
+  if (deviceType === 'Otros equipos') {
+    return FUNCTIONAL_OTHER_FIELDS;
+  }
   return FUNCTIONAL_DEFAULT_FIELDS;
+}
+
+export function getCapacityFieldLabel(deviceType?: string): string {
+  if (deviceType === 'Parlante' || deviceType === 'Auriculares') {
+    return 'Tipo / Formato';
+  }
+  if (deviceType === 'Consola / joystick') {
+    return 'Edición / Capacidad';
+  }
+  if (deviceType === 'Smartwatch') {
+    return 'Medida / Caja';
+  }
+  if (deviceType === 'Notebook') {
+    return 'Almacenamiento';
+  }
+  if (deviceType === 'Otros equipos') {
+    return 'Categoría / Tipo de equipo';
+  }
+  return 'Capacidad';
 }

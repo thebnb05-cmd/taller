@@ -720,7 +720,18 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
               )}
               {repair.capacity && (
                 <span>
-                  <strong>Cap.:</strong> {repair.capacity}
+                  <strong>
+                    {repair.deviceType === 'Otros equipos'
+                      ? 'Tipo:'
+                      : repair.deviceType === 'Notebook'
+                        ? 'Almac.:'
+                        : repair.deviceType === 'Parlante' || repair.deviceType === 'Auriculares'
+                          ? 'Tipo:'
+                          : repair.deviceType === 'Smartwatch'
+                            ? 'Medida:'
+                            : 'Cap.:'}
+                  </strong>{' '}
+                  {repair.capacity}
                 </span>
               )}
               <span>
@@ -748,7 +759,8 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
                 </div>
               ) : (
                 <div className="mt-1.5 font-mono-num text-sm font-bold text-slate-900">
-                  {repair.securityPin?.trim() || 'Sin clave'}
+                  {repair.securityPin?.trim() ||
+                    (repair.deviceType === 'Otros equipos' ? 'No aplica / Sin clave' : 'Sin clave')}
                 </div>
               )}
             </div>
@@ -1142,7 +1154,10 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
               <span className="font-bold">{repair.securityPattern.join(' → ')}</span>
             </div>
           ) : (
-            <div className="font-bold">{repair.securityPin?.trim() || 'Sin clave'}</div>
+            <div className="font-bold">
+              {repair.securityPin?.trim() ||
+                (repair.deviceType === 'Otros equipos' ? 'No aplica / Sin clave' : 'Sin clave')}
+            </div>
           )}
         </div>
 

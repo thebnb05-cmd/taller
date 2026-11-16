@@ -309,6 +309,51 @@ const HEADPHONES_FORMAT_OPTIONS = [
   'Cableados 3.5mm / Tipo C',
   'Otro',
 ];
+const OTHER_DEVICE_ACCESSORIES = [
+  'Cable poder / 220V',
+  'Fuente / Transformador',
+  'Control remoto',
+  'Cables (HDMI / USB / Audio)',
+  'Batería / Pilas',
+  'Caja / Bolso',
+  'Otro',
+];
+const OTHER_DEVICE_TYPE_SUGGESTIONS = [
+  'TV / Smart TV',
+  'Monitor',
+  'Impresora / Escáner',
+  'Router / Módem / Repetidor',
+  'Cámara / DVR / Seguridad',
+  'Fuente / Cargador',
+  'Electrodoméstico pequeño',
+  'Herramienta eléctrica',
+  'Placa electrónica',
+  'Otro equipo',
+];
+const OTHER_DEVICE_BRAND_SUGGESTIONS = [
+  'Samsung',
+  'LG',
+  'Sony',
+  'Philips',
+  'HP',
+  'Epson',
+  'Canon',
+  'Brother',
+  'TP-Link',
+  'Hikvision',
+  'Noblex',
+  'BGH',
+  'Xiaomi',
+  'Genérico',
+];
+const OTHER_DEVICE_MODEL_SUGGESTIONS = [
+  'Smart TV 32" / 43" / 50"',
+  'Monitor 24" / 27"',
+  'Epson L3210 / L3250',
+  'Router / Módem WiFi',
+  'Cámara IP / DVR',
+  'Fuente 12V / 24V',
+];
 
 export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   open,
@@ -522,6 +567,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   const isSpeaker = deviceType === 'Parlante';
   const isSmartwatch = deviceType === 'Smartwatch';
   const isHeadphones = deviceType === 'Auriculares';
+  const isOtherDevice = deviceType === 'Otros equipos';
   const showCapacity =
     deviceType === 'Celular' || deviceType === 'Tablet' || deviceType === 'Smartwatch';
 
@@ -653,8 +699,8 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
       model: sanitizePlainLine(finalModel, 120) || deviceType,
       color: sanitizePlainLine(color, 60),
       capacity:
-        showCapacity || isSpeaker || isConsole || isHeadphones || isNotebook
-          ? sanitizePlainLine(capacity, 40)
+        showCapacity || isSpeaker || isConsole || isHeadphones || isNotebook || isOtherDevice
+          ? sanitizePlainLine(capacity, 60)
           : '',
       imei: sanitizeImei(imei, 80),
       problem: cleanProblem,
@@ -673,9 +719,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
       physicalCheck: { ...physicalCheck },
       functionalCheck: { ...functionalCheck },
       notes: sanitizeText(notes, 1800),
-      securityTab,
-      securityPin: securityTab === 'pin' ? sanitizePlainLine(securityPin, 80) : '',
-      securityPattern: securityTab === 'pattern' ? securityPattern.slice(0, 9) : [],
+      securityTab: isOtherDevice ? 'pin' : securityTab,
+      securityPin: isOtherDevice || securityTab === 'pin' ? sanitizePlainLine(securityPin, 80) : '',
+      securityPattern: !isOtherDevice && securityTab === 'pattern' ? securityPattern.slice(0, 9) : [],
     };
   };
 
@@ -1038,8 +1084,14 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                                   ? 'In-ear TWS (Bluetooth)'
                                   : opt.type === 'Notebook'
                                     ? '240 / 256 GB SSD'
-                                    : '128 GB'
+                                    : opt.type === 'Otros equipos'
+                                      ? ''
+                                      : '128 GB'
                         );
+                        if (opt.type === 'Otros equipos') {
+                          setSecurityTab('pin');
+                          setSecurityPattern([]);
+                        }
                       }
                       setDeviceType(opt.type);
                       setDeviceIcon(opt.icon);
@@ -1301,7 +1353,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                                 ? 'headphones-brands-datalist'
                                 : isNotebook
                                   ? 'notebook-brands-datalist'
-                                  : undefined
+                                  : isOtherDevice
+                                    ? 'other-brands-datalist'
+                                    : undefined
                       }
                       value={customBrand}
                       onChange={(e) => setCustomBrand(e.target.value)}
@@ -1316,7 +1370,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                                 ? 'Ej: Apple, JBL, Sony, Xiaomi, HyperX...'
                                 : isNotebook
                                   ? 'Ej: Lenovo, HP, Dell, Asus, MacBook...'
-                                  : `Marca de ${deviceType}`
+                                  : isOtherDevice
+                                    ? 'Ej: Samsung, LG, Epson, TP-Link, Genérico...'
+                                    : `Marca de ${deviceType}`
                       }
                       className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     />
@@ -1351,6 +1407,13 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                     {isNotebook && (
                       <datalist id="notebook-brands-datalist">
                         {NOTEBOOK_BRAND_SUGGESTIONS.map((b) => (
+                          <option key={b} value={b} />
+                        ))}
+                      </datalist>
+                    )}
+                    {isOtherDevice && (
+                      <datalist id="other-brands-datalist">
+                        {OTHER_DEVICE_BRAND_SUGGESTIONS.map((b) => (
                           <option key={b} value={b} />
                         ))}
                       </datalist>
@@ -1402,7 +1465,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                               ? 'headphones-models-datalist'
                               : isNotebook
                                 ? 'notebook-models-datalist'
-                                : undefined
+                                : isOtherDevice
+                                  ? 'other-models-datalist'
+                                  : undefined
                       }
                       value={customModel}
                       onChange={(e) => setCustomModel(e.target.value)}
@@ -1417,7 +1482,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                                 ? 'Ej: AirPods Pro, Galaxy Buds, JBL Tune 510...'
                                 : isNotebook
                                   ? 'Ej: IdeaPad 3, Pavilion 15, Inspiron, MacBook Air...'
-                                  : `Modelo de ${deviceType}`
+                                  : isOtherDevice
+                                    ? 'Ej: Smart TV 43", L3250, Archer C6, Fuente 12V...'
+                                    : `Modelo de ${deviceType}`
                       }
                       className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     />
@@ -1445,6 +1512,13 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                     {isNotebook && (
                       <datalist id="notebook-models-datalist">
                         {NOTEBOOK_MODEL_SUGGESTIONS.map((m) => (
+                          <option key={m} value={m} />
+                        ))}
+                      </datalist>
+                    )}
+                    {isOtherDevice && (
+                      <datalist id="other-models-datalist">
+                        {OTHER_DEVICE_MODEL_SUGGESTIONS.map((m) => (
                           <option key={m} value={m} />
                         ))}
                       </datalist>
@@ -1490,7 +1564,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                 />
               </div>
 
-              {(showCapacity || isSpeaker || isConsole || isHeadphones || isNotebook) && (
+              {(showCapacity || isSpeaker || isConsole || isHeadphones || isNotebook || isOtherDevice) && (
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
                     {isSpeaker || isHeadphones
@@ -1501,36 +1575,56 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                           ? 'Medida / Caja'
                           : isNotebook
                             ? 'Almacenamiento'
-                            : 'Capacidad'}
+                            : isOtherDevice
+                              ? 'Categoría / Tipo de equipo'
+                              : 'Capacidad'}
                   </label>
-                  <select
-                    value={capacity}
-                    onChange={(e) => setCapacity(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                  >
-                    {(isSpeaker
-                      ? SPEAKER_FORMAT_OPTIONS
-                      : isHeadphones
-                        ? HEADPHONES_FORMAT_OPTIONS
-                        : isConsole
-                          ? CONSOLE_EDITION_OPTIONS
-                          : isSmartwatch
-                            ? SMARTWATCH_SIZE_OPTIONS
-                            : isNotebook
-                              ? NOTEBOOK_STORAGE_OPTIONS
-                              : CAPACITY_OPTIONS
-                    ).map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
+                  {isOtherDevice ? (
+                    <>
+                      <input
+                        type="text"
+                        list="other-device-types-datalist"
+                        value={capacity}
+                        onChange={(e) => setCapacity(e.target.value)}
+                        placeholder="Ej: Smart TV, Monitor, Impresora, Router, Microondas..."
+                        className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                      />
+                      <datalist id="other-device-types-datalist">
+                        {OTHER_DEVICE_TYPE_SUGGESTIONS.map((opt) => (
+                          <option key={opt} value={opt} />
+                        ))}
+                      </datalist>
+                    </>
+                  ) : (
+                    <select
+                      value={capacity}
+                      onChange={(e) => setCapacity(e.target.value)}
+                      className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    >
+                      {(isSpeaker
+                        ? SPEAKER_FORMAT_OPTIONS
+                        : isHeadphones
+                          ? HEADPHONES_FORMAT_OPTIONS
+                          : isConsole
+                            ? CONSOLE_EDITION_OPTIONS
+                            : isSmartwatch
+                              ? SMARTWATCH_SIZE_OPTIONS
+                              : isNotebook
+                                ? NOTEBOOK_STORAGE_OPTIONS
+                                : CAPACITY_OPTIONS
+                      ).map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               )}
 
               <div
                 className={
-                  showCapacity || isSpeaker || isConsole || isHeadphones || isNotebook
+                  showCapacity || isSpeaker || isConsole || isHeadphones || isNotebook || isOtherDevice
                     ? 'sm:col-span-2'
                     : ''
                 }
@@ -1833,7 +1927,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                         ? HEADPHONES_ACCESSORIES
                         : isNotebook
                           ? NOTEBOOK_ACCESSORIES
-                          : DEFAULT_ACCESSORIES
+                          : isOtherDevice
+                            ? OTHER_DEVICE_ACCESSORIES
+                            : DEFAULT_ACCESSORIES
                 ).map((acc) => {
                   const active = accessories.includes(acc);
                   return (
@@ -1856,9 +1952,16 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
           </section>
 
           <section className="space-y-4 border-t border-slate-100 pt-5 dark:border-slate-800">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white font-display">
-              Check-in · Estado físico y funcional
-            </h3>
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white font-display">
+                Check-in · Estado físico y funcional
+              </h3>
+              {isOtherDevice && (
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  Marcá solo los ítems que apliquen a este equipo (podés usar «No tiene» o dejar sin marcar los que no correspondan).
+                </p>
+              )}
+            </div>
 
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="space-y-2.5 rounded-2xl border border-slate-200 p-3.5 dark:border-slate-800">
@@ -1953,40 +2056,46 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
           <section className="space-y-3 border-t border-slate-100 pt-5 dark:border-slate-800">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white font-display">
-                Seguridad del equipo
+                {isOtherDevice ? 'Clave / Acceso del equipo (opcional)' : 'Seguridad del equipo'}
               </h3>
-              <div className="flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setSecurityTab('pin')}
-                  className={`rounded-lg px-3 py-1 text-xs font-semibold transition ${
-                    securityTab === 'pin'
-                      ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-700 dark:text-white'
-                      : 'text-slate-500 dark:text-slate-400'
-                  }`}
-                >
-                  PIN / Clave
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSecurityTab('pattern')}
-                  className={`rounded-lg px-3 py-1 text-xs font-semibold transition ${
-                    securityTab === 'pattern'
-                      ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-700 dark:text-white'
-                      : 'text-slate-500 dark:text-slate-400'
-                  }`}
-                >
-                  Patrón
-                </button>
-              </div>
+              {!isOtherDevice && (
+                <div className="flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setSecurityTab('pin')}
+                    className={`rounded-lg px-3 py-1 text-xs font-semibold transition ${
+                      securityTab === 'pin'
+                        ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-700 dark:text-white'
+                        : 'text-slate-500 dark:text-slate-400'
+                    }`}
+                  >
+                    PIN / Clave
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSecurityTab('pattern')}
+                    className={`rounded-lg px-3 py-1 text-xs font-semibold transition ${
+                      securityTab === 'pattern'
+                        ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-700 dark:text-white'
+                        : 'text-slate-500 dark:text-slate-400'
+                    }`}
+                  >
+                    Patrón
+                  </button>
+                </div>
+              )}
             </div>
 
-            {securityTab === 'pin' ? (
+            {isOtherDevice || securityTab === 'pin' ? (
               <input
                 type="text"
                 value={securityPin}
                 onChange={(e) => setSecurityPin(e.target.value)}
-                placeholder="PIN, contraseña o sin clave"
+                placeholder={
+                  isOtherDevice
+                    ? 'Solo si aplica (ej: clave WiFi, PIN de menú o admin), sino dejar vacío'
+                    : 'PIN, contraseña o sin clave'
+                }
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             ) : (
