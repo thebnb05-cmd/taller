@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Package, Search, Smartphone, Users, X } from 'lucide-react';
 import type { ClientRecord, ProductRecord, RepairRecord } from '../types/workshop';
 import { formatCurrency, getStatusMeta } from '../utils/formatters';
+import { parseClientMeta } from '../utils/clientMeta';
 
 type SearchCategory = 'all' | 'clients' | 'repairs' | 'products';
 
@@ -55,12 +56,16 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
     }
 
     const matchedClients = clients.filter((c) => {
+      const meta = parseClientMeta(c);
       return (
         c.name.toLowerCase().includes(normalizedQuery) ||
         (c.phone || '').toLowerCase().includes(normalizedQuery) ||
+        meta.altPhone.toLowerCase().includes(normalizedQuery) ||
         (c.dni || '').toLowerCase().includes(normalizedQuery) ||
+        meta.cuit.toLowerCase().includes(normalizedQuery) ||
         (c.email || '').toLowerCase().includes(normalizedQuery) ||
-        (c.address || '').toLowerCase().includes(normalizedQuery)
+        (c.address || '').toLowerCase().includes(normalizedQuery) ||
+        meta.neighborhood.toLowerCase().includes(normalizedQuery)
       );
     });
 

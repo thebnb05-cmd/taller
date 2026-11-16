@@ -22,6 +22,12 @@ import {
 } from '../utils/validation';
 import { ModalShell } from './ModalShell';
 import { useToast } from './ToastProvider';
+import {
+  CLIENT_TYPE_LABELS,
+  parseClientMeta,
+  serializeClientNotes,
+  type ClientType,
+} from '../utils/clientMeta';
 
 interface NewClientModalProps {
   open: boolean;
@@ -39,18 +45,29 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
   const { notify } = useToast();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [altPhone, setAltPhone] = useState('');
+  const [clientType, setClientType] = useState<ClientType>('particular');
   const [dni, setDni] = useState('');
+  const [cuit, setCuit] = useState('');
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState('');
+  const [neighborhood, setNeighborhood] = useState('');
+  const [existingNotes, setExistingNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!open) return;
+    const meta = parseClientMeta(editClient);
     setName(editClient?.name || '');
     setPhone(editClient?.phone || '');
+    setAltPhone(meta.altPhone);
+    setClientType(meta.clientType);
     setDni(editClient?.dni || '');
+    setCuit(meta.cuit);
     setEmail(editClient?.email || '');
     setAddress(editClient?.address || '');
+    setNeighborhood(meta.neighborhood);
+    setExistingNotes(meta.notes);
   }, [open, editClient]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -67,12 +84,20 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
     }
     setSaving(true);
     try {
+      const encodedNotes = serializeClientNotes({
+        altPhone,
+        clientType,
+        cuit,
+        neighborhood,
+        notes: existingNotes,
+      });
       const updatePayload = stripUndefined({
         name: cleanName,
         phone: sanitizePhone(phone, 60),
         dni: sanitizeDni(dni, 40),
         email: cleanEmail,
         address: clampStr(sanitizePlainLine(address, 240), 240),
+        notes: clampStr(encodedNotes, 2000),
       });
       if (editClient) {
         const path = `clients/${editClient.id}`;
@@ -115,22 +140,48 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
     >
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
+          <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+            Tipo de cliente
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {(['particular', 'empresa', 'gremio'] as const).map((type) => {
+              const active = clientType === type;
+              return (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => setClientType(type)}
+                  className={`h-9 rounded-xl border px-2 text-xs font-semibold transition ${
+                    active
+                      ? 'border-[#0072BB] bg-[#0072BB] text-white'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  {CLIENT_TYPE_LABELS[type]}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Nombre *
+            {clientType === 'empresa' ? 'Nombre / Razón social *' : 'Nombre completo *'}
           </label>
           <input
             type="text"
             required
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Nombre completo"
+            placeholder={clientType === 'empresa' ? 'Ej: TechStore SRL' : 'Nombre completo'}
             className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
           />
         </div>
+
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Teléfono
+              Teléfono principal
             </label>
             <input
               type="tel"
@@ -142,17 +193,45 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+              Teléfono alternativo
+            </label>
+            <input
+              type="tel"
+              value={altPhone}
+              onChange={(e) => setAltPhone(e.target.value)}
+              placeholder="Familiar o contacto secundario"
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            />
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
               DNI
             </label>
             <input
               type="text"
               value={dni}
               onChange={(e) => setDni(e.target.value)}
-              placeholder="DNI"
+              placeholder="Ej: 35.123.456"
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+              CUIT / CUIL
+            </label>
+            <input
+              type="text"
+              value={cuit}
+              onChange={(e) => setCuit(e.target.value)}
+              placeholder="Ej: 20-12345678-9"
               className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
           </div>
         </div>
+
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
             Email
@@ -165,18 +244,34 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
             className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
           />
         </div>
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Dirección
-          </label>
-          <input
-            type="text"
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            placeholder="Dirección"
-            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-          />
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+              Dirección
+            </label>
+            <input
+              type="text"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="Calle y altura"
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+              Localidad / Barrio
+            </label>
+            <input
+              type="text"
+              value={neighborhood}
+              onChange={(e) => setNeighborhood(e.target.value)}
+              placeholder="Ej: Centro, Palermo..."
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            />
+          </div>
         </div>
+
         <div className="flex gap-3 pt-2">
           <button
             type="button"
@@ -226,6 +321,8 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
 
   if (!client) return null;
 
+  const clientMeta = parseClientMeta(client);
+
   const clientRepairs = repairs.filter(
     (r) =>
       r.clientId === client.id ||
@@ -257,15 +354,31 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
       open={Boolean(client)}
       onClose={onClose}
       title={client.name}
-      subtitle={`${clientRepairs.length} reparaciones · Total acumulado ${formatCurrency(totalSpent)}`}
+      subtitle={`${CLIENT_TYPE_LABELS[clientMeta.clientType]} · ${clientRepairs.length} reparaciones · Total acumulado ${formatCurrency(totalSpent)}`}
       maxWidth="2xl"
     >
       <div className="space-y-5">
         <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs sm:grid-cols-2 dark:border-slate-800 dark:bg-slate-800/40">
           <div>
-            <span className="text-slate-500">Teléfono: </span>
+            <span className="text-slate-500">Tipo de cliente: </span>
+            <strong className="text-slate-900 dark:text-white">
+              {CLIENT_TYPE_LABELS[clientMeta.clientType]}
+            </strong>
+          </div>
+          <div>
+            <span className="text-slate-500">Email: </span>
+            <strong className="text-slate-900 dark:text-white">{client.email || '—'}</strong>
+          </div>
+          <div>
+            <span className="text-slate-500">Teléfono principal: </span>
             <strong className="font-mono-num text-slate-900 dark:text-white">
               {client.phone || '—'}
+            </strong>
+          </div>
+          <div>
+            <span className="text-slate-500">Teléfono alternativo: </span>
+            <strong className="font-mono-num text-slate-900 dark:text-white">
+              {clientMeta.altPhone || '—'}
             </strong>
           </div>
           <div>
@@ -275,12 +388,20 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
             </strong>
           </div>
           <div>
-            <span className="text-slate-500">Email: </span>
-            <strong className="text-slate-900 dark:text-white">{client.email || '—'}</strong>
+            <span className="text-slate-500">CUIT / CUIL: </span>
+            <strong className="font-mono-num text-slate-900 dark:text-white">
+              {clientMeta.cuit || '—'}
+            </strong>
           </div>
           <div>
             <span className="text-slate-500">Dirección: </span>
             <strong className="text-slate-900 dark:text-white">{client.address || '—'}</strong>
+          </div>
+          <div>
+            <span className="text-slate-500">Localidad / Barrio: </span>
+            <strong className="text-slate-900 dark:text-white">
+              {clientMeta.neighborhood || '—'}
+            </strong>
           </div>
         </div>
 

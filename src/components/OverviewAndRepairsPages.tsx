@@ -27,6 +27,7 @@ import type {
   SaleRecord,
 } from '../types/workshop';
 import { extractBatchRef } from '../utils/batchRef';
+import { CLIENT_TYPE_LABELS, parseClientMeta } from '../utils/clientMeta';
 import {
   formatCompactCurrency,
   formatCurrency,
@@ -793,11 +794,15 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({
       .sort((a, b) => a.name.localeCompare(b.name))
       .filter((c) => {
         if (!q) return true;
+        const meta = parseClientMeta(c);
         return (
           c.name.toLowerCase().includes(q) ||
           (c.phone || '').toLowerCase().includes(q) ||
+          meta.altPhone.toLowerCase().includes(q) ||
           (c.email || '').toLowerCase().includes(q) ||
-          (c.dni || '').toLowerCase().includes(q)
+          (c.dni || '').toLowerCase().includes(q) ||
+          meta.cuit.toLowerCase().includes(q) ||
+          meta.neighborhood.toLowerCase().includes(q)
         );
       });
   }, [clients, search]);
@@ -829,7 +834,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({
           type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar por nombre, teléfono, DNI o email..."
+          placeholder="Buscar por nombre, teléfono, DNI, CUIT, barrio o email..."
           className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-800 dark:bg-slate-900 dark:text-white"
         />
       </div>
@@ -844,6 +849,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((c) => {
+            const meta = parseClientMeta(c);
             const cRepairs = repairs.filter(
               (r) =>
                 r.clientId === c.id ||
@@ -869,12 +875,24 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({
                   {c.name.slice(0, 2).toUpperCase()}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-bold text-slate-900 dark:text-white">
-                    {c.name}
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-sm font-bold text-slate-900 dark:text-white">
+                      {c.name}
+                    </span>
+                    {meta.clientType !== 'particular' && (
+                      <span className="shrink-0 rounded-md bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300">
+                        {meta.clientType === 'empresa' ? 'Empresa' : 'Gremio'}
+                      </span>
+                    )}
                   </div>
                   <div className="mt-0.5 truncate font-mono-num text-xs text-slate-500 dark:text-slate-400">
-                    {c.phone || c.email || 'Sin teléfono'}
+                    {c.phone || meta.altPhone || c.email || 'Sin teléfono'}
                   </div>
+                  {meta.neighborhood && (
+                    <div className="mt-0.5 truncate text-[11px] text-slate-400 dark:text-slate-500">
+                      {meta.neighborhood}
+                    </div>
+                  )}
                   <div className="mt-2 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                     <span className="font-mono-num">{cRepairs.length} órd.</span>
                     <span>·</span>

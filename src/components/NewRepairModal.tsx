@@ -32,6 +32,12 @@ import {
 import { appendBatchRefToNotes, generateBatchRef } from '../utils/batchRef';
 import { getFunctionalCheckFields, getPhysicalCheckFields } from '../utils/checkFields';
 import {
+  CLIENT_TYPE_LABELS,
+  parseClientMeta,
+  serializeClientNotes,
+  type ClientType,
+} from '../utils/clientMeta';
+import {
   isValidEmail,
   parseSafePositiveNumber,
   sanitizeDbErrorMessage,
@@ -313,9 +319,13 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   const [clientId, setClientId] = useState('');
   const [clientName, setClientName] = useState('');
   const [clientPhone, setClientPhone] = useState('');
+  const [clientAltPhone, setClientAltPhone] = useState('');
+  const [clientType, setClientType] = useState<ClientType>('particular');
   const [clientDni, setClientDni] = useState('');
+  const [clientCuit, setClientCuit] = useState('');
   const [clientEmail, setClientEmail] = useState('');
   const [clientAddress, setClientAddress] = useState('');
+  const [clientNeighborhood, setClientNeighborhood] = useState('');
 
   const [brand, setBrand] = useState('Samsung');
   const [customBrand, setCustomBrand] = useState('');
@@ -372,19 +382,28 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     setDeviceIcon('📱');
     setQueuedItems([]);
     if (preselectedClient) {
+      const meta = parseClientMeta(preselectedClient);
       setClientId(preselectedClient.id);
       setClientName(preselectedClient.name);
       setClientPhone(preselectedClient.phone || '');
+      setClientAltPhone(meta.altPhone);
+      setClientType(meta.clientType);
       setClientDni(preselectedClient.dni || '');
+      setClientCuit(meta.cuit);
       setClientEmail(preselectedClient.email || '');
       setClientAddress(preselectedClient.address || '');
+      setClientNeighborhood(meta.neighborhood);
     } else {
       setClientId('');
       setClientName('');
       setClientPhone('');
+      setClientAltPhone('');
+      setClientType('particular');
       setClientDni('');
+      setClientCuit('');
       setClientEmail('');
       setClientAddress('');
+      setClientNeighborhood('');
     }
     setBrand('Samsung');
     setCustomBrand('');
@@ -480,11 +499,16 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     setClientId(selectedId);
     const found = clients.find((c) => c.id === selectedId);
     if (found) {
+      const meta = parseClientMeta(found);
       setClientName(found.name);
       setClientPhone(found.phone || '');
+      setClientAltPhone(meta.altPhone);
+      setClientType(meta.clientType);
       setClientDni(found.dni || '');
+      setClientCuit(meta.cuit);
       setClientEmail(found.email || '');
       setClientAddress(found.address || '');
+      setClientNeighborhood(meta.neighborhood);
     }
   };
 
@@ -620,6 +644,13 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
           resolvedClientId = matched.id;
         } else {
           resolvedClientId = generateDocId('clients');
+          const encodedClientNotes = serializeClientNotes({
+            altPhone: clientAltPhone,
+            clientType,
+            cuit: clientCuit,
+            neighborhood: clientNeighborhood,
+            notes: '',
+          });
           await upsertRow(
             'clients',
             stripUndefined({
@@ -630,6 +661,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               dni: cleanClientDni,
               email: cleanClientEmail,
               address: cleanClientAddress,
+              notes: clampStr(encodedClientNotes, 2000),
             })
           );
         }
@@ -1015,9 +1047,33 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <div>
+              <div className="sm:col-span-2">
+                <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  Tipo de cliente
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['particular', 'empresa', 'gremio'] as const).map((type) => {
+                    const active = clientType === type;
+                    return (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setClientType(type)}
+                        className={`h-9 rounded-xl border px-2 text-xs font-semibold transition ${
+                          active
+                            ? 'border-[#0072BB] bg-[#0072BB] text-white'
+                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        {CLIENT_TYPE_LABELS[type]}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="sm:col-span-2">
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Nombre completo *
+                  {clientType === 'empresa' ? 'Nombre / Razón social *' : 'Nombre completo *'}
                 </label>
                 <input
                   type="text"
@@ -1027,13 +1083,13 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                     setClientName(e.target.value);
                     if (clientId) setClientId('');
                   }}
-                  placeholder="Nombre completo"
+                  placeholder={clientType === 'empresa' ? 'Ej: TechStore SRL' : 'Nombre completo'}
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Teléfono
+                  Teléfono principal
                 </label>
                 <input
                   type="tel"
@@ -1045,17 +1101,41 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  Teléfono alternativo
+                </label>
+                <input
+                  type="tel"
+                  value={clientAltPhone}
+                  onChange={(e) => setClientAltPhone(e.target.value)}
+                  placeholder="Familiar o contacto secundario"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
                   DNI
                 </label>
                 <input
                   type="text"
                   value={clientDni}
                   onChange={(e) => setClientDni(e.target.value)}
-                  placeholder="DNI"
+                  placeholder="Ej: 35.123.456"
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
               <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  CUIT / CUIL
+                </label>
+                <input
+                  type="text"
+                  value={clientCuit}
+                  onChange={(e) => setClientCuit(e.target.value)}
+                  placeholder="Ej: 20-12345678-9"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+              <div className="sm:col-span-2">
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
                   Email
                 </label>
@@ -1067,7 +1147,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
-              <div className="sm:col-span-2">
+              <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
                   Dirección
                 </label>
@@ -1075,7 +1155,19 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                   type="text"
                   value={clientAddress}
                   onChange={(e) => setClientAddress(e.target.value)}
-                  placeholder="Dirección"
+                  placeholder="Calle y altura"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  Localidad / Barrio
+                </label>
+                <input
+                  type="text"
+                  value={clientNeighborhood}
+                  onChange={(e) => setClientNeighborhood(e.target.value)}
+                  placeholder="Ej: Centro, Palermo..."
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
