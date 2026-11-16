@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Search, Users } from 'lucide-react';
+import { Download, Plus, Search, Users } from 'lucide-react';
+import { useToast } from '../components/ToastProvider';
 import type { ClientRecord, RepairRecord, SaleRecord } from '../types/workshop';
-import { parseClientMeta } from '../utils/clientMeta';
-import { formatCurrency } from '../utils/formatters';
+import { CLIENT_TYPE_LABELS, parseClientMeta } from '../utils/clientMeta';
+import { downloadCsvFile } from '../utils/csvExport';
+import { formatCurrency, todayISO } from '../utils/formatters';
 
 interface ClientsPageProps {
   clients: ClientRecord[];
@@ -19,6 +21,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({
   onNewClient,
   onSelectClient,
 }) => {
+  const { notify } = useToast();
   const [search, setSearch] = useState('');
 
   const filtered = useMemo(() => {
@@ -40,6 +43,64 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({
       });
   }, [clients, search]);
 
+  const handleExportCsv = () => {
+    if (filtered.length === 0) {
+      notify('No hay clientes para exportar con el filtro actual.', 'error');
+      return;
+    }
+    const headers = [
+      'Nombre',
+      'Tipo de cliente',
+      'DNI',
+      'CUIT',
+      'Teléfono',
+      'Teléfono alternativo',
+      'Email',
+      'Dirección',
+      'Localidad / Barrio',
+      'Órdenes de reparación',
+      'Ventas registradas',
+      'Facturación acumulada',
+      'Fecha de alta',
+      'Notas',
+    ];
+    const rows = filtered.map((c) => {
+      const meta = parseClientMeta(c);
+      const normalizedName = c.name.trim().toLowerCase();
+      const cRepairs = repairs.filter(
+        (r) => r.clientId === c.id || r.clientName.trim().toLowerCase() === normalizedName
+      );
+      const cSales = sales.filter(
+        (s) => s.clientId === c.id || s.clientName.trim().toLowerCase() === normalizedName
+      );
+      const totalBilled =
+        cRepairs.reduce((s, r) => s + Number(r.price || 0), 0) +
+        cSales.reduce((s, x) => s + Number(x.amount || 0), 0);
+      const createdDate = c.createdAt
+        ? new Date(c.createdAt).toISOString().slice(0, 10)
+        : '';
+
+      return [
+        c.name,
+        CLIENT_TYPE_LABELS[meta.clientType],
+        c.dni || '',
+        meta.cuit,
+        c.phone || '',
+        meta.altPhone,
+        c.email || '',
+        c.address || '',
+        meta.neighborhood,
+        cRepairs.length,
+        cSales.length,
+        totalBilled,
+        createdDate,
+        meta.notes,
+      ];
+    });
+    downloadCsvFile(`clientes-${todayISO()}.csv`, headers, rows);
+    notify(`Exportados ${filtered.length} clientes a CSV.`);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -51,14 +112,26 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({
             {clients.length} clientes en base de datos
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onNewClient}
-          className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-xs font-semibold text-white hover:bg-[#005f9c] whitespace-nowrap shrink-0"
-        >
-          <Plus className="h-4 w-4" />
-          Nuevo cliente
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            disabled={filtered.length === 0}
+            title="Descargar listado de clientes en formato CSV"
+            className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] disabled:opacity-50 whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-sky-400 dark:hover:text-sky-300"
+          >
+            <Download className="h-4 w-4" />
+            Exportar CSV
+          </button>
+          <button
+            type="button"
+            onClick={onNewClient}
+            className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-xs font-semibold text-white hover:bg-[#005f9c] whitespace-nowrap shrink-0"
+          >
+            <Plus className="h-4 w-4" />
+            Nuevo cliente
+          </button>
+        </div>
       </div>
 
       <div className="relative">

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  Download,
   FileSpreadsheet,
   LayoutGrid,
   List,
@@ -12,7 +13,8 @@ import {
 import { useToast } from '../components/ToastProvider';
 import { updateRow } from '../lib/db';
 import type { ProductRecord } from '../types/workshop';
-import { formatCompactCurrency, formatCurrency } from '../utils/formatters';
+import { downloadCsvFile } from '../utils/csvExport';
+import { formatCompactCurrency, formatCurrency, todayISO } from '../utils/formatters';
 
 interface InventoryPageProps {
   products: ProductRecord[];
@@ -92,6 +94,65 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({
     }
   };
 
+  const handleExportCsv = () => {
+    if (filtered.length === 0) {
+      notify('No hay productos para exportar con el filtro actual.', 'error');
+      return;
+    }
+    const headers = [
+      'Nombre',
+      'Categoría',
+      'Subcategoría',
+      'Marca',
+      'SKU',
+      'Código de barras',
+      'Código interno',
+      'Ubicación',
+      'Proveedor',
+      'Control de stock',
+      'Stock actual',
+      'Stock mínimo',
+      'Estado stock',
+      'Costo',
+      'Modo margen',
+      'Margen',
+      'IVA (%)',
+      'Precio neto',
+      'Precio final',
+      'Valorizado en stock',
+    ];
+    const rows = filtered.map((p) => {
+      const stockNum = Number(p.stock || 0);
+      const minNum = Number(p.minStock || 0);
+      const low = Boolean(p.trackStock && stockNum <= minNum);
+      const valorizado = Number(p.price || 0) * (p.trackStock ? stockNum : 1);
+      return [
+        p.name,
+        p.category,
+        p.subcategory || '',
+        p.brand || '',
+        p.sku || '',
+        p.barcode || '',
+        p.internalCode || '',
+        p.location || '',
+        p.supplierName || '',
+        p.trackStock,
+        p.trackStock ? stockNum : '',
+        p.trackStock ? minNum : '',
+        p.trackStock ? (low ? 'Bajo stock' : 'OK') : 'Sin control',
+        Number(p.cost || 0),
+        p.marginMode === 'fixed' ? 'Fijo' : 'Porcentaje (%)',
+        Number(p.margin || 0),
+        Number(p.vat || 0),
+        Number(p.netPrice || 0),
+        Number(p.price || 0),
+        valorizado,
+      ];
+    });
+    downloadCsvFile(`inventario-${todayISO()}.csv`, headers, rows);
+    notify(`Exportados ${filtered.length} productos a CSV.`);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -103,7 +164,17 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({
             Catálogo, existencias y reposición de repuestos y accesorios
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            disabled={filtered.length === 0}
+            title="Descargar listado de inventario en formato CSV"
+            className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] disabled:opacity-50 whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-sky-400 dark:hover:text-sky-300"
+          >
+            <Download className="h-4 w-4" />
+            Exportar CSV
+          </button>
           <button
             type="button"
             onClick={onImportProducts}

@@ -1,10 +1,16 @@
 import React, { useMemo } from 'react';
-import { CheckCircle2, Plus, Printer, Trash2 } from 'lucide-react';
+import { CheckCircle2, Download, Plus, Printer, Trash2 } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
 import { deleteRow, updateRow } from '../lib/db';
 import type { ProductRecord, SaleRecord, WorkshopProfile } from '../types/workshop';
+import { downloadCsvFile } from '../utils/csvExport';
 import { convertFromBaseCurrency } from '../utils/currency';
-import { formatCompactCurrency, formatCurrency, formatDateShort } from '../utils/formatters';
+import {
+  formatCompactCurrency,
+  formatCurrency,
+  formatDateShort,
+  todayISO,
+} from '../utils/formatters';
 import { parseSalePaymentInfo, serializeSaleStatus } from '../utils/saleMeta';
 import { sanitizeDbErrorMessage } from '../utils/validation';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
@@ -82,9 +88,70 @@ export const SalesPage: React.FC<SalesPageProps> = ({
     }
   };
 
+  const sortedSales = useMemo(
+    () => [...sales].sort((a, b) => b.createdAt - a.createdAt),
+    [sales]
+  );
+
+  const handleExportCsv = () => {
+    if (sortedSales.length === 0) {
+      notify('No hay ventas registradas para exportar.', 'error');
+      return;
+    }
+    const headers = [
+      'Comprobante',
+      'Fecha',
+      'Cliente',
+      'Producto / Detalle',
+      'Cantidad',
+      'Estado',
+      'Medio de pago',
+      `Moneda base (${baseCurrency}) - Total`,
+      `Moneda base (${baseCurrency}) - Cobrado / Seña`,
+      `Moneda base (${baseCurrency}) - Saldo pendiente`,
+      'Moneda operación',
+      'Tasa de conversión',
+      'Importe moneda operación',
+    ];
+    const rows = sortedSales.map((s) => {
+      const info = parseSalePaymentInfo(s);
+      const badgeLabel = info.isPaid
+        ? 'Cobrado'
+        : info.deposit > 0
+          ? 'Señado'
+          : 'Pendiente';
+      const opCurrency = info.currency || baseCurrency;
+      const opRate =
+        info.currency && info.currency !== baseCurrency && info.rate && info.rate > 0
+          ? info.rate
+          : 1;
+      const opAmount =
+        opRate !== 1
+          ? convertFromBaseCurrency(Number(s.amount || 0), opRate)
+          : Number(s.amount || 0);
+      return [
+        s.invoice,
+        s.dueDate || new Date(s.createdAt || Date.now()).toISOString().slice(0, 10),
+        s.clientName,
+        s.productName || '',
+        Number(s.quantity || 1),
+        badgeLabel,
+        info.methodLabel || '',
+        Number(s.amount || 0),
+        info.deposit,
+        info.pending,
+        opCurrency,
+        opRate,
+        opAmount,
+      ];
+    });
+    downloadCsvFile(`ventas-${todayISO()}.csv`, headers, rows);
+    notify(`Exportadas ${sortedSales.length} ventas a CSV.`);
+  };
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-white font-display">
             Ventas y cobranzas
@@ -93,14 +160,26 @@ export const SalesPage: React.FC<SalesPageProps> = ({
             Mostrador, accesorios y seguimiento de cobros
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onNewSale}
-          className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-xs font-semibold text-white hover:bg-[#005f9c]"
-        >
-          <Plus className="h-4 w-4" />
-          Nueva venta
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            disabled={sortedSales.length === 0}
+            title="Descargar ventas en formato CSV para contabilidad"
+            className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] disabled:opacity-50 whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-sky-400 dark:hover:text-sky-300"
+          >
+            <Download className="h-4 w-4" />
+            Exportar CSV
+          </button>
+          <button
+            type="button"
+            onClick={onNewSale}
+            className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-xs font-semibold text-white hover:bg-[#005f9c] whitespace-nowrap shrink-0"
+          >
+            <Plus className="h-4 w-4" />
+            Nueva venta
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
@@ -125,12 +204,10 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       </div>
 
       <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
-        {sales.length === 0 ? (
+        {sortedSales.length === 0 ? (
           <div className="p-8 text-center text-sm text-slate-500">No hay ventas registradas.</div>
         ) : (
-          [...sales]
-            .sort((a, b) => b.createdAt - a.createdAt)
-            .map((s) => {
+          sortedSales.map((s) => {
               const info = parseSalePaymentInfo(s);
               const badgeLabel = info.isPaid
                 ? 'Cobrado'
