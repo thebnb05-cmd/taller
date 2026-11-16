@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
-import { Banknote, Coins, Copy, CreditCard, Landmark, Package, Printer, Settings2, Upload } from 'lucide-react';
+import { Banknote, Coins, Copy, CreditCard, Landmark, Package, Printer, Settings2, Upload, X } from 'lucide-react';
 import {
   clampStr,
   generateDocId,
@@ -12,7 +12,6 @@ import type {
   ClientRecord,
   ProductRecord,
   SaleRecord,
-  SupplierRecord,
   WorkshopProfile,
 } from '../types/workshop';
 import {
@@ -37,410 +36,24 @@ import {
 import { serializeSaleStatus } from '../utils/saleMeta';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
 import {
-  isValidEmail,
   parseSafeNonNegativeInt,
   parseSafePositiveNumber,
   sanitizeAlias,
   sanitizeCbu,
   sanitizeDbErrorMessage,
-  sanitizeEmail,
   sanitizeImageDataUrl,
-  sanitizePhone,
   sanitizePlainLine,
   sanitizeSafeUrl,
-  sanitizeText,
 } from '../utils/validation';
 import { ModalShell } from './ModalShell';
 import { useToast } from './ToastProvider';
-
-interface NewTaskModalProps {
-  open: boolean;
-  onClose: () => void;
-  ownerId: string;
-}
-
-export const NewTaskModal: React.FC<NewTaskModalProps> = ({ open, onClose, ownerId }) => {
-  const { notify } = useToast();
-  const [title, setTitle] = useState('');
-  const [taskType, setTaskType] = useState('seguimiento');
-  const [priority, setPriority] = useState('media');
-  const [assignee, setAssignee] = useState('Equipo');
-  const [dueDate, setDueDate] = useState(todayISO());
-  const [status, setStatus] = useState('pendiente');
-  const [notes, setNotes] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    setTitle('');
-    setTaskType('seguimiento');
-    setPriority('media');
-    setAssignee('Equipo');
-    setDueDate(todayISO());
-    setStatus('pendiente');
-    setNotes('');
-  }, [open]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanTitle = sanitizePlainLine(title, 200);
-    if (!cleanTitle) {
-      notify('Ingresá un título para la tarea.', 'error');
-      return;
-    }
-    setSaving(true);
-    const taskId = generateDocId('tasks');
-    try {
-      await upsertRow(
-        'tasks',
-        stripUndefined({
-          id: taskId,
-          ownerId,
-          title: cleanTitle,
-          taskType,
-          priority,
-          assignee: sanitizePlainLine(assignee, 100),
-          dueDate: clampStr(dueDate, 40),
-          status,
-          notes: sanitizeText(notes, 1500),
-        })
-      );
-      notify('Tarea agregada a la agenda.');
-      onClose();
-    } catch (err) {
-      notify(sanitizeDbErrorMessage(err, 'No se pudo guardar la tarea.'), 'error');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <ModalShell open={open} onClose={onClose} title="Nueva tarea" maxWidth="lg">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Título *
-          </label>
-          <input
-            type="text"
-            required
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Confirmar repuesto, seguimiento, cobro..."
-            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-          />
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Tipo
-            </label>
-            <select
-              value={taskType}
-              onChange={(e) => setTaskType(e.target.value)}
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            >
-              <option value="seguimiento">Seguimiento</option>
-              <option value="proveedor">Proveedor</option>
-              <option value="finanzas">Finanzas</option>
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Prioridad
-            </label>
-            <select
-              value={priority}
-              onChange={(e) => setPriority(e.target.value)}
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            >
-              <option value="alta">Alta</option>
-              <option value="media">Media</option>
-              <option value="baja">Baja</option>
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Responsable
-            </label>
-            <input
-              type="text"
-              value={assignee}
-              onChange={(e) => setAssignee(e.target.value)}
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Fecha
-            </label>
-            <input
-              type="date"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            />
-          </div>
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Estado
-          </label>
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-          >
-            <option value="pendiente">Pendiente</option>
-            <option value="hoy">Hoy</option>
-            <option value="completado">Completada</option>
-          </select>
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Notas
-          </label>
-          <textarea
-            rows={2}
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Detalles, seguimiento o comentarios..."
-            className="w-full rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-          />
-        </div>
-        <div className="flex gap-3 pt-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-11 flex-1 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300"
-          >
-            Cancelar
-          </button>
-          <button
-            type="submit"
-            disabled={saving}
-            className="h-11 flex-1 rounded-xl bg-[#0072BB] text-sm font-semibold text-white hover:bg-[#005f9c]"
-          >
-            {saving ? 'Guardando...' : 'Guardar tarea'}
-          </button>
-        </div>
-      </form>
-    </ModalShell>
-  );
-};
-
-interface NewSupplierModalProps {
-  open: boolean;
-  onClose: () => void;
-  ownerId: string;
-  editSupplier?: SupplierRecord | null;
-}
-
-export const NewSupplierModal: React.FC<NewSupplierModalProps> = ({
-  open,
-  onClose,
-  ownerId,
-  editSupplier,
-}) => {
-  const { notify } = useToast();
-  const [name, setName] = useState('');
-  const [category, setCategory] = useState('Repuestos');
-  const [contact, setContact] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [leadTime, setLeadTime] = useState('48h');
-  const [balance, setBalance] = useState('0');
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    if (editSupplier) {
-      setName(editSupplier.name);
-      setCategory(editSupplier.category);
-      setContact(editSupplier.contact || '');
-      setPhone(editSupplier.phone || '');
-      setEmail(editSupplier.email || '');
-      setLeadTime(editSupplier.leadTime || '48h');
-      setBalance(String(editSupplier.balance ?? 0));
-    } else {
-      setName('');
-      setCategory('Repuestos');
-      setContact('');
-      setPhone('');
-      setEmail('');
-      setLeadTime('48h');
-      setBalance('0');
-    }
-  }, [open, editSupplier]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanName = sanitizePlainLine(name, 160);
-    if (!cleanName) {
-      notify('Ingresá el nombre del proveedor.', 'error');
-      return;
-    }
-    const cleanEmail = sanitizeEmail(email, 200);
-    if (cleanEmail && !isValidEmail(cleanEmail)) {
-      notify('El correo electrónico del proveedor no es válido.', 'error');
-      return;
-    }
-    setSaving(true);
-    try {
-      const baseFields = stripUndefined({
-        name: cleanName,
-        category: sanitizePlainLine(category || 'Repuestos', 80) || 'Repuestos',
-        contact: sanitizePlainLine(contact, 120),
-        phone: sanitizePhone(phone, 60),
-        email: cleanEmail,
-        leadTime: sanitizePlainLine(leadTime, 60),
-        balance: parseSafePositiveNumber(balance, 0),
-      });
-      if (editSupplier) {
-        await updateRow('suppliers', editSupplier.id, baseFields);
-        notify('Proveedor actualizado.');
-      } else {
-        const supplierId = generateDocId('suppliers');
-        await upsertRow('suppliers', {
-          id: supplierId,
-          ...baseFields,
-          ownerId,
-        });
-        notify('Proveedor guardado.');
-      }
-      onClose();
-    } catch (err) {
-      notify(sanitizeDbErrorMessage(err, 'No se pudo guardar el proveedor.'), 'error');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <ModalShell
-      open={open}
-      onClose={onClose}
-      title={editSupplier ? 'Editar proveedor' : 'Nuevo proveedor'}
-      maxWidth="lg"
-    >
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Nombre *
-            </label>
-            <input
-              type="text"
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="TechParts SRL"
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Categoría
-            </label>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            >
-              <option value="Repuestos">Repuestos</option>
-              <option value="Accesorios">Accesorios</option>
-              <option value="Baterías">Baterías</option>
-              <option value="Servicio">Servicio</option>
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Contacto
-            </label>
-            <input
-              type="text"
-              value={contact}
-              onChange={(e) => setContact(e.target.value)}
-              placeholder="María Gómez"
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Teléfono
-            </label>
-            <input
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="11-5555-2200"
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Email
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="ventas@proveedor.com"
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Plazo de entrega
-            </label>
-            <input
-              type="text"
-              value={leadTime}
-              onChange={(e) => setLeadTime(e.target.value)}
-              placeholder="48h"
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            />
-          </div>
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Saldo pendiente
-          </label>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={balance}
-            onChange={(e) => setBalance(e.target.value)}
-            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-mono-num text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-          />
-        </div>
-        <div className="flex gap-3 pt-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-11 flex-1 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300"
-          >
-            Cancelar
-          </button>
-          <button
-            type="submit"
-            disabled={saving}
-            className="h-11 flex-1 rounded-xl bg-[#0072BB] text-sm font-semibold text-white hover:bg-[#005f9c]"
-          >
-            {saving ? 'Guardando...' : 'Guardar proveedor'}
-          </button>
-        </div>
-      </form>
-    </ModalShell>
-  );
-};
 
 interface NewSaleModalProps {
   open: boolean;
   onClose: () => void;
   ownerId: string;
   clients: ClientRecord[];
+  products?: ProductRecord[];
   preselectedProduct?: ProductRecord | null;
   profile?: WorkshopProfile | null;
   brandName?: string;
@@ -457,6 +70,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   onClose,
   ownerId,
   clients,
+  products = [],
   preselectedProduct,
   profile,
   brandName,
@@ -468,6 +82,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const baseCurrency: CurrencyCode = profile ? workshopMeta.currency : activeCurrency;
   const secondaryCurrencies = workshopMeta.secondaryCurrencies;
 
+  const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [selectedCurrency, setSelectedCurrency] = useState<CurrencyCode>(baseCurrency);
   const [clientName, setClientName] = useState('');
   const [invoice, setInvoice] = useState('');
@@ -482,6 +97,12 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const [transferCfg, setTransferCfg] = useState<TransferConfig>(() => loadTransferConfig(ownerId));
   const [editingTransferCfg, setEditingTransferCfg] = useState(false);
 
+  const selectedProduct = useMemo(() => {
+    if (preselectedProduct) return preselectedProduct;
+    if (!selectedProductId) return null;
+    return products.find((p) => p.id === selectedProductId) || null;
+  }, [preselectedProduct, selectedProductId, products]);
+
   const selectedCurrencyOption = getCurrencyOption(selectedCurrency);
   const baseCurrencyOption = getCurrencyOption(baseCurrency);
   const currencySymbol = selectedCurrencyOption.symbol;
@@ -493,6 +114,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     if (!open) return;
     const initialAmount = preselectedProduct ? String(preselectedProduct.price) : '';
     const loadedCfg = loadTransferConfig(ownerId);
+    setSelectedProductId(preselectedProduct?.id || '');
     setSelectedCurrency(baseCurrency);
     setClientName('');
     setInvoice(`FV-${Math.floor(1000 + Math.random() * 9000)}`);
@@ -576,14 +198,30 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     };
   }, [open, paymentMethod, transferCfg, effectiveBrandName, invoice, clientName, qrChargeAmount]);
 
+  const handleSelectProduct = (nextProdId: string) => {
+    setSelectedProductId(nextProdId);
+    const chosen = products.find((p) => p.id === nextProdId);
+    if (!chosen) return;
+    const cleanQty = Math.max(1, quantity);
+    const baseTotal = chosen.price * cleanQty;
+    const convertedTotal = isSecondaryCurrency
+      ? roundCurrencyValue(convertFromBaseCurrency(baseTotal, activeRate))
+      : roundCurrencyValue(baseTotal);
+    const nextAmtStr = String(convertedTotal);
+    setAmount(nextAmtStr);
+    if (status === 'cobrado') {
+      setDeposit(nextAmtStr);
+    }
+  };
+
   const handleCurrencyChange = (nextRaw: string) => {
     const nextCode = sanitizeCurrencyCode(nextRaw);
     if (nextCode === selectedCurrency) return;
     const nextRate =
       getCurrencyRateFromBase(nextCode, baseCurrency, secondaryCurrencies) ?? 1;
 
-    if (preselectedProduct) {
-      const baseTotal = preselectedProduct.price * Math.max(1, quantity);
+    if (selectedProduct) {
+      const baseTotal = selectedProduct.price * Math.max(1, quantity);
       const nextAmountNum =
         nextCode === baseCurrency
           ? roundCurrencyValue(baseTotal)
@@ -641,8 +279,8 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const handleQtyChange = (val: number) => {
     const clean = Math.max(1, Math.floor(val || 1));
     setQuantity(clean);
-    if (preselectedProduct) {
-      const baseTotal = preselectedProduct.price * clean;
+    if (selectedProduct) {
+      const baseTotal = selectedProduct.price * clean;
       const convertedTotal = isSecondaryCurrency
         ? roundCurrencyValue(convertFromBaseCurrency(baseTotal, activeRate))
         : roundCurrencyValue(baseTotal);
@@ -698,12 +336,12 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     const cleanQty = Math.max(1, parseSafeNonNegativeInt(quantity, 1, 10_000));
 
     if (
-      preselectedProduct &&
-      preselectedProduct.trackStock &&
-      !preselectedProduct.allowNoStock &&
-      cleanQty > preselectedProduct.stock
+      selectedProduct &&
+      selectedProduct.trackStock &&
+      !selectedProduct.allowNoStock &&
+      cleanQty > selectedProduct.stock
     ) {
-      notify(`Stock insuficiente (disponible: ${preselectedProduct.stock} u.).`, 'error');
+      notify(`Stock insuficiente (disponible: ${selectedProduct.stock} u.).`, 'error');
       return;
     }
 
@@ -779,9 +417,9 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         clientId: clampStr(resolvedClientId, 128),
         clientName: cleanClientName,
         invoice: finalInvoice,
-        productId: clampStr(preselectedProduct?.id, 128),
-        productName: sanitizePlainLine(preselectedProduct?.name || '', 200),
-        quantity: preselectedProduct ? cleanQty : undefined,
+        productId: clampStr(selectedProduct?.id, 128),
+        productName: sanitizePlainLine(selectedProduct?.name || '', 200),
+        quantity: selectedProduct ? cleanQty : undefined,
         amount: cleanAmount,
         status: serializedStatus,
         dueDate: finalDueDate,
@@ -789,9 +427,9 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
 
       await upsertRow('sales', salePayload);
 
-      if (preselectedProduct && preselectedProduct.trackStock) {
-        await updateRow('products', preselectedProduct.id, {
-          stock: Math.max(0, preselectedProduct.stock - cleanQty),
+      if (selectedProduct && selectedProduct.trackStock) {
+        await updateRow('products', selectedProduct.id, {
+          stock: Math.max(0, selectedProduct.stock - cleanQty),
         });
       }
 
@@ -801,9 +439,9 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         clientId: resolvedClientId,
         clientName: cleanClientName,
         invoice: finalInvoice,
-        productId: preselectedProduct?.id,
-        productName: preselectedProduct?.name,
-        quantity: preselectedProduct ? cleanQty : undefined,
+        productId: selectedProduct?.id,
+        productName: selectedProduct?.name,
+        quantity: selectedProduct ? cleanQty : undefined,
         amount: cleanAmount,
         status: serializedStatus,
         dueDate: finalDueDate,
@@ -896,36 +534,74 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   return (
     <ModalShell open={open} onClose={onClose} title="Nueva venta" maxWidth="lg">
       <form onSubmit={handleSubmit} className="space-y-4">
-        {preselectedProduct && (
+        {!preselectedProduct && products.length > 0 && (
+          <div>
+            <label
+              htmlFor="sale-product-select"
+              className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300"
+            >
+              Producto del inventario (opcional)
+            </label>
+            <select
+              id="sale-product-select"
+              value={selectedProductId}
+              onChange={(e) => handleSelectProduct(e.target.value)}
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            >
+              <option value="">Venta libre / concepto manual</option>
+              {products.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} · {formatCurrency(p.price, baseCurrency)}
+                  {p.trackStock ? ` (Stock: ${p.stock} u.)` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {selectedProduct && (
           <div className="flex items-center justify-between gap-3 rounded-2xl border border-sky-200 bg-sky-50/70 p-3.5 dark:border-sky-900/60 dark:bg-sky-950/30">
             <div className="flex min-w-0 items-center gap-2.5">
               <Package className="h-5 w-5 shrink-0 text-[#0072BB] dark:text-sky-400" />
               <div className="min-w-0">
                 <div className="truncate text-sm font-bold text-slate-900 dark:text-white">
-                  {preselectedProduct.name}
+                  {selectedProduct.name}
                 </div>
                 <div className="text-xs text-slate-500">
                   {formatCurrency(
                     isSecondaryCurrency
-                      ? roundCurrencyValue(convertFromBaseCurrency(preselectedProduct.price, activeRate))
-                      : preselectedProduct.price,
+                      ? roundCurrencyValue(convertFromBaseCurrency(selectedProduct.price, activeRate))
+                      : selectedProduct.price,
                     selectedCurrency
                   )}{' '}
-                  c/u · Stock: {preselectedProduct.stock}
+                  c/u{selectedProduct.trackStock ? ` · Stock: ${selectedProduct.stock}` : ''}
                 </div>
               </div>
             </div>
-            <div className="w-20 shrink-0">
-              <label className="mb-0.5 block text-[10px] font-semibold text-slate-500">
-                Cantidad
-              </label>
-              <input
-                type="number"
-                min={1}
-                value={quantity}
-                onChange={(e) => handleQtyChange(Number(e.target.value))}
-                className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-center font-mono-num text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-              />
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="w-20">
+                <label className="mb-0.5 block text-[10px] font-semibold text-slate-500">
+                  Cantidad
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={quantity}
+                  onChange={(e) => handleQtyChange(Number(e.target.value))}
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-center font-mono-num text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+              {!preselectedProduct && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedProductId('')}
+                  title="Quitar producto seleccionado"
+                  aria-label="Quitar producto"
+                  className="mt-3.5 flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-white hover:text-slate-700 dark:hover:bg-slate-800"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -1310,176 +986,6 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           >
             <Printer className="h-4 w-4 shrink-0" />
             <span>{saving ? 'Guardando...' : 'Guardar e imprimir'}</span>
-          </button>
-        </div>
-      </form>
-    </ModalShell>
-  );
-};
-
-interface NewPurchaseModalProps {
-  open: boolean;
-  onClose: () => void;
-  ownerId: string;
-  suppliers: SupplierRecord[];
-}
-
-export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
-  open,
-  onClose,
-  ownerId,
-  suppliers,
-}) => {
-  const { notify } = useToast();
-  const activeCurrency = useActiveCurrency();
-  const currencySymbol = getCurrencyOption(activeCurrency).symbol;
-  const [supplierName, setSupplierName] = useState('');
-  const [invoice, setInvoice] = useState('');
-  const [amount, setAmount] = useState('');
-  const [status, setStatus] = useState<'pendiente' | 'pagado'>('pendiente');
-  const [dueDate, setDueDate] = useState(todayISO());
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    setSupplierName('');
-    setInvoice(`FC-${Math.floor(100 + Math.random() * 900)}`);
-    setAmount('');
-    setStatus('pendiente');
-    setDueDate(todayISO());
-  }, [open]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanSupplier = sanitizePlainLine(supplierName, 160);
-    if (!cleanSupplier) {
-      notify('Ingresá el proveedor.', 'error');
-      return;
-    }
-    const cleanAmount = parseSafePositiveNumber(amount, 0);
-    if (cleanAmount <= 0) {
-      notify('Ingresá un monto mayor a 0.', 'error');
-      return;
-    }
-    setSaving(true);
-    const purchaseId = generateDocId('purchases');
-    try {
-      const matched = suppliers.find(
-        (s) => s.name.trim().toLowerCase() === cleanSupplier.toLowerCase()
-      );
-      await upsertRow(
-        'purchases',
-        stripUndefined({
-          id: purchaseId,
-          ownerId,
-          supplierId: clampStr(matched?.id, 128),
-          supplierName: cleanSupplier,
-          invoice: sanitizePlainLine(
-            invoice || `FC-${Date.now().toString().slice(-4)}`,
-            60
-          ),
-          amount: cleanAmount,
-          status,
-          dueDate: clampStr(dueDate, 40),
-        })
-      );
-      notify('Compra registrada.');
-      onClose();
-    } catch (err) {
-      notify(sanitizeDbErrorMessage(err, 'No se pudo guardar la compra.'), 'error');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <ModalShell open={open} onClose={onClose} title="Nueva compra" maxWidth="lg">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Proveedor *
-            </label>
-            <input
-              type="text"
-              required
-              list="purchase-suppliers-datalist"
-              value={supplierName}
-              onChange={(e) => setSupplierName(e.target.value)}
-              placeholder="Nombre del proveedor"
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            />
-            <datalist id="purchase-suppliers-datalist">
-              {suppliers.map((s) => (
-                <option key={s.id} value={s.name} />
-              ))}
-            </datalist>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Factura
-            </label>
-            <input
-              type="text"
-              value={invoice}
-              onChange={(e) => setInvoice(e.target.value)}
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-mono-num text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Monto ({currencySymbol}) *
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              required
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="18000"
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-mono-num text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Estado
-            </label>
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value as 'pendiente' | 'pagado')}
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            >
-              <option value="pendiente">Pendiente</option>
-              <option value="pagado">Pagado</option>
-            </select>
-          </div>
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Vencimiento
-          </label>
-          <input
-            type="date"
-            value={dueDate}
-            onChange={(e) => setDueDate(e.target.value)}
-            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-          />
-        </div>
-        <div className="flex gap-3 pt-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-11 flex-1 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300"
-          >
-            Cancelar
-          </button>
-          <button
-            type="submit"
-            disabled={saving}
-            className="h-11 flex-1 rounded-xl bg-[#0072BB] text-sm font-semibold text-white hover:bg-[#005f9c]"
-          >
-            {saving ? 'Guardando...' : 'Guardar compra'}
           </button>
         </div>
       </form>

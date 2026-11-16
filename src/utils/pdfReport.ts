@@ -9,7 +9,7 @@ import type {
   SaleRecord,
   WorkshopProfile,
 } from '../types/workshop';
-import type { CurrencyCode } from './currency';
+import { convertFromBaseCurrency, type CurrencyCode } from './currency';
 import { formatCurrency, formatDateShort, getStatusLabel, todayISO } from './formatters';
 import { parsePaymentInfo } from './payment';
 import { parseSalePaymentInfo } from './saleMeta';
@@ -438,9 +438,24 @@ export async function buildClientRepairReceiptPdf(params: {
   profile?: WorkshopProfile | null;
   trackingUrl: string;
   trackingQrDataUrl?: string;
+  currencyCode?: CurrencyCode;
+  exchangeRate?: number;
 }): Promise<{ doc: jsPDF; fileName: string; blob: Blob }> {
   const { repair, profile, trackingUrl } = params;
   const brand = resolveBrand(profile);
+  const paymentInfo = parsePaymentInfo(repair);
+  const displayCurrency: CurrencyCode = params.currencyCode || paymentInfo.currency || brand.currency;
+  const resolvedRate =
+    params.exchangeRate && params.exchangeRate > 0
+      ? params.exchangeRate
+      : paymentInfo.currency === displayCurrency && paymentInfo.rate
+        ? paymentInfo.rate
+        : 1;
+  const isConverted = displayCurrency !== brand.currency && resolvedRate !== 1;
+  const fmtAmount = (baseVal: number | undefined) => {
+    const n = Number(baseVal || 0);
+    return formatCurrency(isConverted ? convertFromBaseCurrency(n, resolvedRate) : n, displayCurrency);
+  };
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -688,20 +703,32 @@ export async function buildClientRepairReceiptPdf(params: {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(15, 23, 42);
-  doc.text(formatCurrency(repair.price, brand.currency), margin + third * 0.5, cursorY + 11.2, { align: 'center' });
+  doc.text(fmtAmount(repair.price), margin + third * 0.5, cursorY + 11.2, { align: 'center' });
   doc.setTextColor(4, 120, 87);
-  doc.text(formatCurrency(repair.deposit, brand.currency), margin + third * 1.5, cursorY + 11.2, {
+  doc.text(fmtAmount(repair.deposit), margin + third * 1.5, cursorY + 11.2, {
     align: 'center',
   });
   doc.setTextColor(15, 23, 42);
-  doc.text(formatCurrency(pendingBalance, brand.currency), margin + third * 2.5, cursorY + 11.2, {
+  doc.text(fmtAmount(pendingBalance), margin + third * 2.5, cursorY + 11.2, {
     align: 'center',
   });
 
   cursorY += 19;
 
+  if (isConverted) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.3);
+    doc.setTextColor(100, 116, 139);
+    doc.text(
+      `Moneda: ${displayCurrency} (1 ${displayCurrency} = ${formatCurrency(resolvedRate, brand.currency)}) · Equivalente base: ${formatCurrency(repair.price, brand.currency)}`,
+      pageWidth / 2,
+      cursorY - 0.5,
+      { align: 'center' }
+    );
+    cursorY += 3.8;
+  }
+
   // Paid stamp if fully paid
-  const paymentInfo = parsePaymentInfo(repair);
   if (paymentInfo.isPaid) {
     const stampW = 68;
     const stampH = 18;
@@ -725,7 +752,7 @@ export async function buildClientRepairReceiptPdf(params: {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.8);
     doc.setTextColor(6, 95, 70);
-    const paidDetail = `${paymentInfo.methodLabel ? `${paymentInfo.methodLabel} · ` : ''}${formatCurrency(repair.price, brand.currency)}`;
+    const paidDetail = `${paymentInfo.methodLabel ? `${paymentInfo.methodLabel} · ` : ''}${fmtAmount(repair.price)}`;
     doc.text(paidDetail, stampX + stampW / 2, cursorY + 15, { align: 'center' });
 
     cursorY += stampH + 4;
@@ -843,6 +870,8 @@ export async function downloadClientRepairReceiptPdf(params: {
   profile?: WorkshopProfile | null;
   trackingUrl: string;
   trackingQrDataUrl?: string;
+  currencyCode?: CurrencyCode;
+  exchangeRate?: number;
 }): Promise<{ fileName: string; blob: Blob }> {
   const { doc, fileName, blob } = await buildClientRepairReceiptPdf(params);
   doc.save(fileName);
@@ -853,10 +882,26 @@ export async function buildBatchRepairReceiptPdf(params: {
   repairs: RepairRecord[];
   batchRef: string;
   profile?: WorkshopProfile | null;
+  currencyCode?: CurrencyCode;
+  exchangeRate?: number;
 }): Promise<{ doc: jsPDF; fileName: string; blob: Blob }> {
   const { repairs, batchRef, profile } = params;
   const brand = resolveBrand(profile);
   const first = repairs[0];
+  const firstPaymentInfo = first ? parsePaymentInfo(first) : null;
+  const displayCurrency: CurrencyCode =
+    params.currencyCode || firstPaymentInfo?.currency || brand.currency;
+  const resolvedRate =
+    params.exchangeRate && params.exchangeRate > 0
+      ? params.exchangeRate
+      : firstPaymentInfo?.currency === displayCurrency && firstPaymentInfo?.rate
+        ? firstPaymentInfo.rate
+        : 1;
+  const isConverted = displayCurrency !== brand.currency && resolvedRate !== 1;
+  const fmtAmount = (baseVal: number | undefined) => {
+    const n = Number(baseVal || 0);
+    return formatCurrency(isConverted ? convertFromBaseCurrency(n, resolvedRate) : n, displayCurrency);
+  };
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -993,9 +1038,9 @@ export async function buildBatchRepairReceiptPdf(params: {
         `${r.code}\n${r.trackingCode}`,
         `${r.deviceType} · ${r.brand} ${r.model}${specs ? `\n${specs}` : ''}`,
         `${r.problem || 'Sin detalle'}${acc ? `\nAcc: ${acc}` : ''}`,
-        formatCurrency(r.price, brand.currency),
-        formatCurrency(r.deposit, brand.currency),
-        formatCurrency(pending, brand.currency),
+        fmtAmount(r.price),
+        fmtAmount(r.deposit),
+        fmtAmount(pending),
       ];
     }),
     columnStyles: {
@@ -1032,13 +1077,26 @@ export async function buildBatchRepairReceiptPdf(params: {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(15, 23, 42);
-  doc.text(formatCurrency(totalBudget, brand.currency), margin + third * 0.5, cursorY + 11.2, { align: 'center' });
+  doc.text(fmtAmount(totalBudget), margin + third * 0.5, cursorY + 11.2, { align: 'center' });
   doc.setTextColor(4, 120, 87);
-  doc.text(formatCurrency(totalDeposit, brand.currency), margin + third * 1.5, cursorY + 11.2, { align: 'center' });
+  doc.text(fmtAmount(totalDeposit), margin + third * 1.5, cursorY + 11.2, { align: 'center' });
   doc.setTextColor(15, 23, 42);
-  doc.text(formatCurrency(totalPending, brand.currency), margin + third * 2.5, cursorY + 11.2, { align: 'center' });
+  doc.text(fmtAmount(totalPending), margin + third * 2.5, cursorY + 11.2, { align: 'center' });
 
   cursorY += 20;
+
+  if (isConverted) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.3);
+    doc.setTextColor(100, 116, 139);
+    doc.text(
+      `Moneda: ${displayCurrency} (1 ${displayCurrency} = ${formatCurrency(resolvedRate, brand.currency)}) · Equivalente base: ${formatCurrency(totalBudget, brand.currency)}`,
+      pageWidth / 2,
+      cursorY - 1,
+      { align: 'center' }
+    );
+    cursorY += 4;
+  }
 
   const termsText = (profile?.receiptTerms ?? DEFAULT_RECEIPT_TERMS).trim();
   if (termsText) {
@@ -1105,6 +1163,8 @@ export async function downloadBatchRepairReceiptPdf(params: {
   repairs: RepairRecord[];
   batchRef: string;
   profile?: WorkshopProfile | null;
+  currencyCode?: CurrencyCode;
+  exchangeRate?: number;
 }): Promise<{ fileName: string; blob: Blob }> {
   const { doc, fileName, blob } = await buildBatchRepairReceiptPdf(params);
   doc.save(fileName);

@@ -9,7 +9,6 @@ import {
   LogOut,
   Moon,
   MoreHorizontal,
-  Package,
   Plus,
   Receipt,
   Settings,
@@ -43,28 +42,25 @@ import type {
   TaskRecord,
   WorkshopProfile,
 } from '../types/workshop';
+import { AgendaPage } from '../pages/AgendaPage';
+import { ClientsPage } from '../pages/ClientsPage';
+import { HomePage } from '../pages/HomePage';
+import { InventoryPage } from '../pages/InventoryPage';
+import { PurchasesPage } from '../pages/PurchasesPage';
+import { RepairsPage } from '../pages/RepairsPage';
+import { ReportsPage } from '../pages/ReportsPage';
+import { SalesPage } from '../pages/SalesPage';
+import { SuppliersPage } from '../pages/SuppliersPage';
 import { BrandMark } from './BrandMark';
 import { BatchReceiptModal } from './BatchReceiptModal';
 import { BrandSettingsModal } from './BrandSettingsModal';
 import { ClientDetailModal, NewClientModal } from './ClientModals';
 import { GlobalSearchBar } from './GlobalSearchBar';
-import {
-  NewPurchaseModal,
-  NewSaleModal,
-  NewSupplierModal,
-  NewTaskModal,
-} from './FinanceModals';
+import { NewPurchaseModal } from './NewPurchaseModal';
 import { NewRepairModal } from './NewRepairModal';
-import {
-  AgendaPage,
-  InventoryPage,
-  ProductsPage,
-  PurchasesPage,
-  ReportsPage,
-  SalesPage,
-  SuppliersPage,
-} from './OperationsPages';
-import { ClientsPage, HomePage, RepairsPage } from './OverviewAndRepairsPages';
+import { NewSaleModal } from './NewSaleModal';
+import { NewSupplierModal } from './NewSupplierModal';
+import { NewTaskModal } from './NewTaskModal';
 import { ProductDetailModal } from './ProductDetailModal';
 import { ProductImportModal } from './ProductImportModal';
 import { ProductModal } from './ProductModal';
@@ -80,18 +76,44 @@ interface WorkshopAppProps {
   onToggleDark: () => void;
 }
 
-const NAV_ITEMS: Array<{ id: PageId; label: string; icon: React.FC<{ className?: string }> }> = [
-  { id: 'home', label: 'Inicio', icon: Home },
-  { id: 'repairs', label: 'Reparaciones', icon: Wrench },
-  { id: 'clients', label: 'Clientes', icon: Users },
-  { id: 'repuestos', label: 'Productos', icon: Package },
-  { id: 'inventory', label: 'Inventario', icon: Boxes },
-  { id: 'agenda', label: 'Agenda', icon: CalendarDays },
-  { id: 'suppliers', label: 'Proveedores', icon: Factory },
-  { id: 'sales', label: 'Ventas', icon: ShoppingBag },
-  { id: 'purchases', label: 'Compras', icon: Receipt },
-  { id: 'reports', label: 'Reportes', icon: BarChart3 },
+interface NavItem {
+  id: PageId;
+  label: string;
+  icon: React.FC<{ className?: string }>;
+}
+
+const NAV_GROUPS: Array<{ title: string; items: NavItem[] }> = [
+  {
+    title: 'Taller',
+    items: [
+      { id: 'home', label: 'Inicio', icon: Home },
+      { id: 'repairs', label: 'Reparaciones', icon: Wrench },
+      { id: 'agenda', label: 'Agenda', icon: CalendarDays },
+      { id: 'clients', label: 'Clientes', icon: Users },
+    ],
+  },
+  {
+    title: 'Stock y Compras',
+    items: [
+      { id: 'inventory', label: 'Inventario y Productos', icon: Boxes },
+      { id: 'suppliers', label: 'Proveedores', icon: Factory },
+      { id: 'purchases', label: 'Compras', icon: Receipt },
+    ],
+  },
+  {
+    title: 'Ventas y Control',
+    items: [
+      { id: 'sales', label: 'Ventas', icon: ShoppingBag },
+      { id: 'reports', label: 'Reportes', icon: BarChart3 },
+    ],
+  },
 ];
+
+const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
+
+const MOBILE_MORE_ITEMS: NavItem[] = NAV_ITEMS.filter((item) =>
+  ['agenda', 'suppliers', 'purchases', 'sales', 'reports'].includes(item.id)
+);
 
 export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   userId,
@@ -106,9 +128,10 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   const [inventoryInitialFilter, setInventoryInitialFilter] = useState<
     'all' | 'repuestos' | 'accesorios' | 'bajo_stock'
   >('all');
+  const [inventoryFilterNonce, setInventoryFilterNonce] = useState(0);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
-  // Firestore real-time state scoped to the authenticated owner
+  // Supabase real-time state scoped to the authenticated owner
   const [clients, setClients] = useState<ClientRecord[]>([]);
   const [repairs, setRepairs] = useState<RepairRecord[]>([]);
   const [products, setProducts] = useState<ProductRecord[]>([]);
@@ -171,18 +194,18 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
       })
     );
 
-    const channel = supabase
-      .channel(`workshop_sync_${userId}`)
-      .on(
+    const channel = supabase.channel(`workshop_sync_${userId}`);
+    tables.forEach((tbl) => {
+      channel.on(
         'postgres_changes',
-        { event: '*', schema: 'public' },
-        (payload) => {
-          const tbl = payload.table as TableName;
+        { event: '*', schema: 'public', table: tbl, filter: `owner_id=eq.${userId}` },
+        () => {
           const fn = reloadByTable[tbl];
           if (fn) void fn();
         }
-      )
-      .subscribe();
+      );
+    });
+    channel.subscribe();
 
     return () => {
       active = false;
@@ -265,32 +288,40 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 py-4">
-          <div className="mb-2 px-3 text-[11px] font-semibold text-slate-400">Secciones</div>
-          <nav className="space-y-1" aria-label="Secciones principales">
-            {NAV_ITEMS.map((item) => {
-              const Icon = item.icon;
-              const active = page === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => navigateTo(item.id)}
-                  className={`flex h-10 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium transition ${
-                    active
-                      ? 'bg-sky-50 font-semibold text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-400'
-                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-white'
-                  }`}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  <span className="truncate">{item.label}</span>
-                  {item.id === 'inventory' && lowStockCount > 0 && (
-                    <span className="ml-auto font-mono-num text-xs font-bold text-red-600 dark:text-red-400">
-                      {lowStockCount}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+          <nav className="space-y-5" aria-label="Secciones principales">
+            {NAV_GROUPS.map((group) => (
+              <div key={group.title}>
+                <div className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  {group.title}
+                </div>
+                <div className="space-y-1">
+                  {group.items.map((item) => {
+                    const Icon = item.icon;
+                    const active = page === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => navigateTo(item.id)}
+                        className={`flex h-10 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium transition ${
+                          active
+                            ? 'bg-sky-50 font-semibold text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-400'
+                            : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-white'
+                        }`}
+                      >
+                        <Icon className="h-4 w-4 shrink-0" />
+                        <span className="truncate">{item.label}</span>
+                        {item.id === 'inventory' && lowStockCount > 0 && (
+                          <span className="ml-auto font-mono-num text-xs font-bold text-red-600 dark:text-red-400">
+                            {lowStockCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </nav>
 
           <div className="mt-6 border-t border-slate-100 pt-4 dark:border-slate-800">
@@ -376,7 +407,9 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               type="button"
               onClick={() => {
                 setInventoryInitialFilter('bajo_stock');
+                setInventoryFilterNonce((n) => n + 1);
                 setPage('inventory');
+                setMoreMenuOpen(false);
               }}
               aria-label="Alertas de stock bajo"
               title="Stock bajo"
@@ -477,6 +510,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               {page === 'repairs' && (
                 <RepairsPage
                   repairs={repairs}
+                  profile={profile}
                   onNewRepair={() => openNewRepairFlow()}
                   onSelectRepair={(r) => setSelectedRepairId(r.id)}
                 />
@@ -495,26 +529,16 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                 />
               )}
 
-              {page === 'repuestos' && (
-                <ProductsPage
+              {page === 'inventory' && (
+                <InventoryPage
                   products={products}
+                  initialFilter={inventoryInitialFilter}
+                  filterNonce={inventoryFilterNonce}
                   onNewProduct={() => {
                     setEditProduct(null);
                     setShowProductModal(true);
                   }}
                   onImportProducts={() => setShowProductImport(true)}
-                  onSelectProduct={(p) => setSelectedProductId(p.id)}
-                />
-              )}
-
-              {page === 'inventory' && (
-                <InventoryPage
-                  products={products}
-                  initialFilter={inventoryInitialFilter}
-                  onNewProduct={() => {
-                    setEditProduct(null);
-                    setShowProductModal(true);
-                  }}
                   onSelectProduct={(p) => setSelectedProductId(p.id)}
                 />
               )}
@@ -545,6 +569,8 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               {page === 'sales' && (
                 <SalesPage
                   sales={sales}
+                  products={products}
+                  profile={profile}
                   onNewSale={() => {
                     setSaleProduct(null);
                     setShowNewSale(true);
@@ -556,6 +582,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               {page === 'purchases' && (
                 <PurchasesPage
                   purchases={purchases}
+                  profile={profile}
                   onNewPurchase={() => setShowNewPurchase(true)}
                 />
               )}
@@ -585,7 +612,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
           { id: 'home' as PageId, label: 'Inicio', icon: Home },
           { id: 'repairs' as PageId, label: 'Equipos', icon: Wrench },
           { id: 'clients' as PageId, label: 'Clientes', icon: Users },
-          { id: 'repuestos' as PageId, label: 'Productos', icon: Package },
+          { id: 'inventory' as PageId, label: 'Inventario', icon: Boxes },
         ].map((item) => {
           const Icon = item.icon;
           const active = page === item.id;
@@ -594,7 +621,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               key={item.id}
               type="button"
               onClick={() => navigateTo(item.id)}
-              className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition ${
+              className={`relative flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition ${
                 active
                   ? 'text-[#0072BB] dark:text-sky-400'
                   : 'text-slate-500 dark:text-slate-400'
@@ -602,6 +629,11 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
             >
               <Icon className="h-5 w-5" />
               <span>{item.label}</span>
+              {item.id === 'inventory' && lowStockCount > 0 && (
+                <span className="absolute right-3 top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 font-mono-num text-[9px] font-bold text-white">
+                  {lowStockCount}
+                </span>
+              )}
             </button>
           );
         })}
@@ -611,7 +643,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
           onClick={() => setMoreMenuOpen((prev) => !prev)}
           className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition ${
             moreMenuOpen ||
-            ['inventory', 'agenda', 'suppliers', 'sales', 'purchases', 'reports'].includes(page)
+            ['agenda', 'suppliers', 'sales', 'purchases', 'reports'].includes(page)
               ? 'text-[#0072BB] dark:text-sky-400'
               : 'text-slate-500 dark:text-slate-400'
           }`}
@@ -644,7 +676,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               </button>
             </div>
             <div className="grid grid-cols-3 gap-2.5">
-              {NAV_ITEMS.slice(4).map((item) => {
+              {MOBILE_MORE_ITEMS.map((item) => {
                 const Icon = item.icon;
                 const active = page === item.id;
                 return (
@@ -811,6 +843,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         }}
         ownerId={userId}
         clients={clients}
+        products={products}
         preselectedProduct={saleProduct}
         profile={profile}
         brandName={profile.brandName}
@@ -833,6 +866,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         onClose={() => setShowNewPurchase(false)}
         ownerId={userId}
         suppliers={suppliers}
+        profile={profile}
       />
     </div>
   );

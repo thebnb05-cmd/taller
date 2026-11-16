@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   Check,
+  Coins,
   FileDown,
   FileText,
   Layers,
@@ -13,7 +14,15 @@ import {
 } from 'lucide-react';
 import { DEFAULT_RECEIPT_TERMS } from '../data/catalog';
 import type { RepairRecord, WorkshopProfile } from '../types/workshop';
+import {
+  convertFromBaseCurrency,
+  getCurrencyOption,
+  getCurrencyRateFromBase,
+  sanitizeCurrencyCode,
+  type CurrencyCode,
+} from '../utils/currency';
 import { formatCurrency, formatDateShort } from '../utils/formatters';
+import { parsePaymentInfo } from '../utils/payment';
 import {
   buildBatchRepairReceiptPdf,
   downloadBatchRepairReceiptPdf,
@@ -67,6 +76,72 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
 }) => {
   const { notify } = useToast();
   const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
+  const firstPaymentInfo = useMemo(
+    () => (repairs[0] ? parsePaymentInfo(repairs[0]) : null),
+    [repairs]
+  );
+  const availableCurrencies = useMemo(() => {
+    const list: CurrencyCode[] = [
+      workshopMeta.currency,
+      ...workshopMeta.secondaryCurrencies.map((c) => c.code),
+    ];
+    if (
+      firstPaymentInfo?.currency &&
+      !list.includes(firstPaymentInfo.currency) &&
+      firstPaymentInfo.rate
+    ) {
+      list.push(firstPaymentInfo.currency);
+    }
+    return list;
+  }, [
+    workshopMeta.currency,
+    workshopMeta.secondaryCurrencies,
+    firstPaymentInfo?.currency,
+    firstPaymentInfo?.rate,
+  ]);
+  const defaultCurrency: CurrencyCode =
+    firstPaymentInfo?.currency && availableCurrencies.includes(firstPaymentInfo.currency)
+      ? firstPaymentInfo.currency
+      : workshopMeta.currency;
+  const [selectedCurrency, setSelectedCurrency] = useState<CurrencyCode>(defaultCurrency);
+
+  React.useEffect(() => {
+    if (open) {
+      setSelectedCurrency(defaultCurrency);
+    }
+  }, [open, defaultCurrency]);
+
+  const activeRate = useMemo(() => {
+    if (selectedCurrency === workshopMeta.currency) return 1;
+    const configured = getCurrencyRateFromBase(
+      selectedCurrency,
+      workshopMeta.currency,
+      workshopMeta.secondaryCurrencies
+    );
+    if (configured) return configured;
+    if (firstPaymentInfo?.currency === selectedCurrency && firstPaymentInfo.rate) {
+      return firstPaymentInfo.rate;
+    }
+    return 1;
+  }, [
+    selectedCurrency,
+    workshopMeta.currency,
+    workshopMeta.secondaryCurrencies,
+    firstPaymentInfo?.currency,
+    firstPaymentInfo?.rate,
+  ]);
+  const isConverted = selectedCurrency !== workshopMeta.currency && activeRate !== 1;
+  const fmtDisplay = useMemo(
+    () => (baseAmount: number | string | undefined) => {
+      const n = Number(baseAmount || 0);
+      return formatCurrency(
+        isConverted ? convertFromBaseCurrency(n, activeRate) : n,
+        selectedCurrency
+      );
+    },
+    [isConverted, activeRate, selectedCurrency]
+  );
+
   const [printFormat, setPrintFormat] = useState<PrintFormat>('a4');
   const [includeClientReceipt, setIncludeClientReceipt] = useState(true);
   const [includeLabels, setIncludeLabels] = useState(true);
@@ -110,18 +185,18 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
     const orderLines = repairs
       .map(
         (r, i) =>
-          `${i + 1}. ${r.code} (${r.deviceType}: ${r.brand} ${r.model}) — ${formatCurrency(r.price, workshopMeta.currency)}`
+          `${i + 1}. ${r.code} (${r.deviceType}: ${r.brand} ${r.model}) — ${fmtDisplay(r.price)}`
       )
       .join('\n');
     return (
       `Hola ${first.clientName}, te enviamos la boleta múltiple de ${brand}.\n` +
       `Referencia: ${batchRef} · ${repairs.length} equipos:\n` +
       `${orderLines}\n` +
-      `Total: ${formatCurrency(totalBudget, workshopMeta.currency)}` +
-      `${totalDeposit > 0 ? ` · Seña: ${formatCurrency(totalDeposit, workshopMeta.currency)}` : ''}` +
-      ` · Saldo pendiente: ${formatCurrency(totalPending, workshopMeta.currency)}.`
+      `Total: ${fmtDisplay(totalBudget)}` +
+      `${totalDeposit > 0 ? ` · Seña: ${fmtDisplay(totalDeposit)}` : ''}` +
+      ` · Saldo pendiente: ${fmtDisplay(totalPending)}.`
     );
-  }, [batchRef, first, profile?.brandName, repairs, totalBudget, totalDeposit, totalPending, workshopMeta.currency]);
+  }, [batchRef, first, profile?.brandName, repairs, totalBudget, totalDeposit, totalPending, fmtDisplay]);
 
   const whatsappHref = cleanPhoneForWa
     ? `https://wa.me/${cleanPhoneForWa}?text=${encodeURIComponent(waMessage)}`
@@ -137,6 +212,8 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
         repairs,
         batchRef,
         profile,
+        currencyCode: selectedCurrency,
+        exchangeRate: activeRate,
       });
       notify(
         forWhatsApp
@@ -159,6 +236,8 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
         repairs,
         batchRef,
         profile,
+        currencyCode: selectedCurrency,
+        exchangeRate: activeRate,
       });
       const pdfFile = new File([blob], fileName, { type: 'application/pdf' });
       await navigator.share({
@@ -306,13 +385,13 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
                     )}
                   </td>
                   <td className="px-3 py-2.5 text-right font-mono-num font-semibold whitespace-nowrap">
-                    {formatCurrency(r.price)}
+                    {fmtDisplay(r.price)}
                   </td>
                   <td className="px-3 py-2.5 text-right font-mono-num font-semibold text-emerald-700 whitespace-nowrap">
-                    {formatCurrency(r.deposit)}
+                    {fmtDisplay(r.deposit)}
                   </td>
                   <td className="px-3 py-2.5 text-right font-mono-num font-bold text-slate-900 whitespace-nowrap">
-                    {formatCurrency(pending)}
+                    {fmtDisplay(pending)}
                   </td>
                 </tr>
               );
@@ -325,22 +404,28 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
         <div>
           <div className="text-slate-500">Total Presupuesto</div>
           <div className="font-mono-num text-sm font-bold text-slate-900">
-            {formatCurrency(totalBudget)}
+            {fmtDisplay(totalBudget)}
           </div>
         </div>
         <div>
           <div className="text-slate-500">Total Seña / Anticipo</div>
           <div className="font-mono-num text-sm font-bold text-emerald-700">
-            {formatCurrency(totalDeposit)}
+            {fmtDisplay(totalDeposit)}
           </div>
         </div>
         <div>
           <div className="text-slate-500">Saldo Pendiente Total</div>
           <div className="font-mono-num text-sm font-bold text-slate-900">
-            {formatCurrency(totalPending)}
+            {fmtDisplay(totalPending)}
           </div>
         </div>
       </div>
+
+      {isConverted && (
+        <div className="mt-1.5 text-center text-[10px] text-slate-500">
+          Moneda: {selectedCurrency} (1 {selectedCurrency} = {formatCurrency(activeRate, workshopMeta.currency)}) · Base: {formatCurrency(totalBudget, workshopMeta.currency)}
+        </div>
+      )}
 
       {(profile?.receiptTerms ?? DEFAULT_RECEIPT_TERMS).trim() && (
         <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 text-[10px] leading-relaxed text-slate-600">
@@ -426,7 +511,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
                 <span>
                   #{idx + 1} · {r.code}
                 </span>
-                <span>{formatCurrency(r.price)}</span>
+                <span>{fmtDisplay(r.price)}</span>
               </div>
               <div className="font-bold">
                 {r.deviceType} · {r.brand} {r.model}
@@ -435,7 +520,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
               <div>Falla: {r.problem}</div>
               <div className="flex justify-between text-[9.5px]">
                 <span>Seg: {r.trackingCode}</span>
-                <span>Saldo: {formatCurrency(pending)}</span>
+                <span>Saldo: {fmtDisplay(pending)}</span>
               </div>
             </div>
           );
@@ -445,16 +530,21 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
       <div className="border-b border-dashed border-black py-2 text-[10px]">
         <div className="flex justify-between">
           <span>Total Presupuesto:</span>
-          <strong>{formatCurrency(totalBudget)}</strong>
+          <strong>{fmtDisplay(totalBudget)}</strong>
         </div>
         <div className="flex justify-between">
           <span>Total Seña:</span>
-          <strong>{formatCurrency(totalDeposit)}</strong>
+          <strong>{fmtDisplay(totalDeposit)}</strong>
         </div>
         <div className="flex justify-between text-xs font-black">
           <span>SALDO PENDIENTE:</span>
-          <span>{formatCurrency(totalPending)}</span>
+          <span>{fmtDisplay(totalPending)}</span>
         </div>
+        {isConverted && (
+          <div className="mt-1 text-center text-[9px]">
+            1 {selectedCurrency} = {formatCurrency(activeRate, workshopMeta.currency)}
+          </div>
+        )}
       </div>
 
       <div className="pt-3 text-center text-[9.5px]">
@@ -518,7 +608,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
               <div className="flex justify-between gap-2 pt-0.5 text-[10px]">
                 <strong>{getSecurityLabel(r)}</strong>
                 <span className="font-mono-num font-bold">
-                  Saldo: {formatCurrency(pending)}
+                  Saldo: {fmtDisplay(pending)}
                 </span>
               </div>
             </div>
@@ -554,7 +644,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
                   Lote {batchRef} guardado · {repairs.length} órdenes generadas ({orderRangeLabel})
                 </div>
                 <div className="text-xs text-emerald-800 dark:text-emerald-300">
-                  Tenés una sola boleta consolidada con todas las órdenes y el total general ({formatCurrency(totalBudget)}).
+                  Tenés una sola boleta consolidada con todas las órdenes y el total general ({fmtDisplay(totalBudget)}).
                 </div>
               </div>
             </div>
@@ -614,6 +704,26 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
                     Térmico 80mm
                   </button>
                 </div>
+                {availableCurrencies.length > 1 && (
+                  <div className="flex items-center gap-1.5 pl-1">
+                    <Coins className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
+                    <select
+                      value={selectedCurrency}
+                      onChange={(e) => setSelectedCurrency(sanitizeCurrencyCode(e.target.value))}
+                      aria-label="Moneda del comprobante de lote"
+                      className="h-9 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-800 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                    >
+                      {availableCurrencies.map((code) => {
+                        const opt = getCurrencyOption(code);
+                        return (
+                          <option key={code} value={code}>
+                            {opt.code} ({opt.symbol})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
               </div>
 
               <div className="flex flex-wrap items-center gap-2">

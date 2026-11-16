@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
 import {
   Check,
+  Coins,
   FileDown,
   FileText,
   MessageCircle,
@@ -14,6 +15,13 @@ import {
 } from 'lucide-react';
 import { DEFAULT_RECEIPT_TERMS } from '../data/catalog';
 import type { RepairRecord, WorkshopProfile } from '../types/workshop';
+import {
+  convertFromBaseCurrency,
+  getCurrencyOption,
+  getCurrencyRateFromBase,
+  sanitizeCurrencyCode,
+  type CurrencyCode,
+} from '../utils/currency';
 import { formatCurrency, formatDateShort, getStatusMeta } from '../utils/formatters';
 import { parsePaymentInfo } from '../utils/payment';
 import {
@@ -101,6 +109,59 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
 }) => {
   const { notify } = useToast();
   const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
+  const paymentInfo = useMemo(() => parsePaymentInfo(repair), [repair]);
+  const availableCurrencies = useMemo(() => {
+    const list: CurrencyCode[] = [
+      workshopMeta.currency,
+      ...workshopMeta.secondaryCurrencies.map((c) => c.code),
+    ];
+    if (paymentInfo.currency && !list.includes(paymentInfo.currency) && paymentInfo.rate) {
+      list.push(paymentInfo.currency);
+    }
+    return list;
+  }, [workshopMeta.currency, workshopMeta.secondaryCurrencies, paymentInfo.currency, paymentInfo.rate]);
+
+  const defaultCurrency: CurrencyCode =
+    paymentInfo.currency && availableCurrencies.includes(paymentInfo.currency)
+      ? paymentInfo.currency
+      : workshopMeta.currency;
+  const [selectedCurrency, setSelectedCurrency] = useState<CurrencyCode>(defaultCurrency);
+
+  useEffect(() => {
+    setSelectedCurrency(defaultCurrency);
+  }, [repair.id, defaultCurrency]);
+
+  const activeRate = useMemo(() => {
+    if (selectedCurrency === workshopMeta.currency) return 1;
+    const configured = getCurrencyRateFromBase(
+      selectedCurrency,
+      workshopMeta.currency,
+      workshopMeta.secondaryCurrencies
+    );
+    if (configured) return configured;
+    if (paymentInfo.currency === selectedCurrency && paymentInfo.rate) {
+      return paymentInfo.rate;
+    }
+    return 1;
+  }, [
+    selectedCurrency,
+    workshopMeta.currency,
+    workshopMeta.secondaryCurrencies,
+    paymentInfo.currency,
+    paymentInfo.rate,
+  ]);
+  const isConverted = selectedCurrency !== workshopMeta.currency && activeRate !== 1;
+  const fmtDisplay = useMemo(
+    () => (baseAmount: number | string | undefined) => {
+      const n = Number(baseAmount || 0);
+      return formatCurrency(
+        isConverted ? convertFromBaseCurrency(n, activeRate) : n,
+        selectedCurrency
+      );
+    },
+    [isConverted, activeRate, selectedCurrency]
+  );
+
   const [printFormat, setPrintFormat] = useState<PrintFormat>('a4');
   const [trackingQrDataUrl, setTrackingQrDataUrl] = useState('');
   const [generatingPdf, setGeneratingPdf] = useState(false);
@@ -130,18 +191,17 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
   const waReceiptMessage = useMemo(() => {
     const brand = profile?.brandName || 'TH3 BNB Servicio Técnico';
     const pending = Math.max(0, Number(repair.price || 0) - Number(repair.deposit || 0));
-    const paidInfo = parsePaymentInfo(repair);
-    const amountLine = paidInfo.isPaid
-      ? `Total abonado: ${formatCurrency(repair.price, workshopMeta.currency)} (PAGO).`
-      : `Presupuesto: ${formatCurrency(repair.price, workshopMeta.currency)}${
-          Number(repair.deposit || 0) > 0 ? ` · Seña: ${formatCurrency(repair.deposit, workshopMeta.currency)}` : ''
-        } · Saldo pendiente: ${formatCurrency(pending, workshopMeta.currency)}.`;
+    const amountLine = paymentInfo.isPaid
+      ? `Total abonado: ${fmtDisplay(repair.price)} (PAGO).`
+      : `Presupuesto: ${fmtDisplay(repair.price)}${
+          Number(repair.deposit || 0) > 0 ? ` · Seña: ${fmtDisplay(repair.deposit)}` : ''
+        } · Saldo pendiente: ${fmtDisplay(pending)}.`;
     return (
       `Hola ${repair.clientName}, te enviamos la boleta PDF de ${brand} para tu ${repair.brand} ${repair.model} (Orden ${repair.code}).\n` +
       `${amountLine}\n` +
       `Seguimiento en línea (${repair.trackingCode}): ${trackingUrl}`
     );
-  }, [profile?.brandName, repair, trackingUrl, workshopMeta.currency]);
+  }, [profile?.brandName, repair, trackingUrl, paymentInfo.isPaid, fmtDisplay]);
 
   const whatsappPdfHref = cleanPhoneForWa
     ? `https://wa.me/${cleanPhoneForWa}?text=${encodeURIComponent(waReceiptMessage)}`
@@ -156,6 +216,8 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
         profile,
         trackingUrl,
         trackingQrDataUrl,
+        currencyCode: selectedCurrency,
+        exchangeRate: activeRate,
       });
       notify(
         forWhatsApp
@@ -179,6 +241,8 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
         profile,
         trackingUrl,
         trackingQrDataUrl,
+        currencyCode: selectedCurrency,
+        exchangeRate: activeRate,
       });
       const pdfFile = new File([blob], fileName, { type: 'application/pdf' });
       await navigator.share({
@@ -228,7 +292,6 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
 
   const pendingBalance = Math.max(0, Number(repair.price || 0) - Number(repair.deposit || 0));
   const statusMeta = getStatusMeta(repair.status);
-  const paymentInfo = useMemo(() => parsePaymentInfo(repair), [repair]);
 
   const selectedCount = useMemo(
     () => Object.values(selectedDocs).filter(Boolean).length,
@@ -420,22 +483,28 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
         <div>
           <div className="text-slate-500">Presupuesto</div>
           <div className="font-mono-num text-sm font-bold text-slate-900">
-            {formatCurrency(repair.price)}
+            {fmtDisplay(repair.price)}
           </div>
         </div>
         <div>
           <div className="text-slate-500">Seña / Anticipo</div>
           <div className="font-mono-num text-sm font-bold text-emerald-700">
-            {formatCurrency(repair.deposit)}
+            {fmtDisplay(repair.deposit)}
           </div>
         </div>
         <div>
           <div className="text-slate-500">Saldo pendiente</div>
           <div className="font-mono-num text-sm font-bold text-slate-900">
-            {formatCurrency(pendingBalance)}
+            {fmtDisplay(pendingBalance)}
           </div>
         </div>
       </div>
+
+      {isConverted && (
+        <div className="mt-1.5 text-center text-[10px] text-slate-500">
+          Moneda: {selectedCurrency} (1 {selectedCurrency} = {formatCurrency(activeRate, workshopMeta.currency)}) · Base: {formatCurrency(repair.price, workshopMeta.currency)}
+        </div>
+      )}
 
       {paymentInfo.isPaid && (
         <div className="mt-3 flex justify-end">
@@ -448,7 +517,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
             </div>
             <div className="mt-0.5 text-[10px] font-semibold text-emerald-800">
               {paymentInfo.methodLabel ? `${paymentInfo.methodLabel} · ` : ''}
-              {formatCurrency(repair.price)}
+              {fmtDisplay(repair.price)}
             </div>
           </div>
         </div>
@@ -599,11 +668,11 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
             </div>
             <div className="mt-2 border-t border-slate-200 pt-1.5 text-[11px]">
               <div>
-                Presupuesto: <strong className="font-mono-num">{formatCurrency(repair.price)}</strong>
+                Presupuesto: <strong className="font-mono-num">{fmtDisplay(repair.price)}</strong>
               </div>
               <div>
-                Seña: <strong className="font-mono-num">{formatCurrency(repair.deposit)}</strong> ·
-                Saldo: <strong className="font-mono-num">{formatCurrency(pendingBalance)}</strong>
+                Seña: <strong className="font-mono-num">{fmtDisplay(repair.deposit)}</strong> ·
+                Saldo: <strong className="font-mono-num">{fmtDisplay(pendingBalance)}</strong>
               </div>
             </div>
           </div>
@@ -821,16 +890,21 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
         <div className="border-b border-dashed border-black py-2 text-[11px]">
           <div className="flex justify-between">
             <span>Presupuesto:</span>
-            <strong>{formatCurrency(repair.price)}</strong>
+            <strong>{fmtDisplay(repair.price)}</strong>
           </div>
           <div className="flex justify-between">
             <span>Seña / Anticipo:</span>
-            <strong>{formatCurrency(repair.deposit)}</strong>
+            <strong>{fmtDisplay(repair.deposit)}</strong>
           </div>
           <div className="mt-0.5 flex justify-between border-t border-dotted border-black pt-1 text-xs font-black">
             <span>SALDO PENDIENTE:</span>
-            <span>{formatCurrency(pendingBalance)}</span>
+            <span>{fmtDisplay(pendingBalance)}</span>
           </div>
+          {isConverted && (
+            <div className="mt-1 text-center text-[9px]">
+              1 {selectedCurrency} = {formatCurrency(activeRate, workshopMeta.currency)}
+            </div>
+          )}
         </div>
 
         {paymentInfo.isPaid && (
@@ -839,7 +913,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
             <div className="text-[11px] font-extrabold uppercase">{repair.clientName}</div>
             <div className="text-[9.5px] font-bold">
               {paymentInfo.methodLabel ? `${paymentInfo.methodLabel} · ` : ''}
-              Total: {formatCurrency(repair.price)}
+              Total: {fmtDisplay(repair.price)}
             </div>
           </div>
         )}
@@ -979,12 +1053,12 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
 
         <div className="pt-2 text-[10.5px]">
           <div className="flex justify-between">
-            <span>Presup: {formatCurrency(repair.price)}</span>
-            <span>Seña: {formatCurrency(repair.deposit)}</span>
+            <span>Presup: {fmtDisplay(repair.price)}</span>
+            <span>Seña: {fmtDisplay(repair.deposit)}</span>
           </div>
           <div className="flex justify-between font-black">
             <span>SALDO:</span>
-            <span>{formatCurrency(pendingBalance)}</span>
+            <span>{fmtDisplay(pendingBalance)}</span>
           </div>
           <div className="mt-2 text-center text-[9px] tracking-widest">
             --------------------------------
@@ -1052,7 +1126,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
       <div className="mt-1.5 flex items-center justify-between border-t border-black pt-1 text-[9.5px]">
         <span>Ing: {formatDateShort(repair.dateIn)}</span>
         <span>Est: {repair.dateEst ? formatDateShort(repair.dateEst) : 'A conf.'}</span>
-        <strong>Saldo: {formatCurrency(pendingBalance)}</strong>
+        <strong>Saldo: {fmtDisplay(pendingBalance)}</strong>
       </div>
     </div>
   );
@@ -1116,7 +1190,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
                 <div className="text-xs text-emerald-800 dark:text-emerald-300">
                   Cliente: {repair.clientName}
                   {paymentInfo.methodLabel ? ` · Medio: ${paymentInfo.methodLabel}` : ''} · Total:{' '}
-                  {formatCurrency(repair.price)}
+                  {fmtDisplay(repair.price)}
                 </div>
               </div>
             </div>
@@ -1176,6 +1250,26 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
                   Térmico 80mm
                 </button>
               </div>
+              {availableCurrencies.length > 1 && (
+                <div className="flex items-center gap-1.5 pl-1">
+                  <Coins className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
+                  <select
+                    value={selectedCurrency}
+                    onChange={(e) => setSelectedCurrency(sanitizeCurrencyCode(e.target.value))}
+                    aria-label="Moneda del comprobante"
+                    className="h-9 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-800 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                  >
+                    {availableCurrencies.map((code) => {
+                      const opt = getCurrencyOption(code);
+                      return (
+                        <option key={code} value={code}>
+                          {opt.code} ({opt.symbol})
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-2">

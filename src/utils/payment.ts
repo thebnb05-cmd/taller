@@ -1,4 +1,5 @@
 import type { RepairRecord } from '../types/workshop';
+import { isValidCurrencyCode, type CurrencyCode } from './currency';
 import { decryptJsonValue, encryptJsonValue, isEncryptedValue } from './crypto';
 import { formatCurrency } from './formatters';
 import {
@@ -51,10 +52,12 @@ function getStorageKey(ownerId: string): string {
   return `th3bnb_transfer_cfg_${ownerId}`;
 }
 
-export function parsePaymentInfo(repair: RepairRecord): {
+export function parsePaymentInfo(repair: Pick<RepairRecord, 'paymentStatus' | 'price' | 'deposit'>): {
   isPaid: boolean;
   method: PaymentMethod | null;
   methodLabel: string | null;
+  currency: CurrencyCode | null;
+  rate: number | null;
 } {
   const raw = (repair.paymentStatus || '').toLowerCase().trim();
   const price = Number(repair.price || 0);
@@ -66,6 +69,24 @@ export function parsePaymentInfo(repair: RepairRecord): {
   else if (raw.includes('transferencia')) method = 'transferencia';
   else if (raw.includes('tarjeta')) method = 'tarjeta';
 
+  let currency: CurrencyCode | null = null;
+  const curMatch = raw.match(/cur=([a-z]{3})/);
+  if (curMatch) {
+    const upper = curMatch[1].toUpperCase();
+    if (isValidCurrencyCode(upper)) {
+      currency = upper;
+    }
+  }
+
+  let rate: number | null = null;
+  const rateMatch = raw.match(/rate=([0-9]+(?:\.[0-9]+)?)/);
+  if (rateMatch) {
+    const parsedRate = Number(rateMatch[1]);
+    if (Number.isFinite(parsedRate) && parsedRate > 0) {
+      rate = parsedRate;
+    }
+  }
+
   const isPaid =
     raw.startsWith('pagado') || (price > 0 && pending === 0);
 
@@ -73,7 +94,28 @@ export function parsePaymentInfo(repair: RepairRecord): {
     isPaid,
     method,
     methodLabel: method ? PAYMENT_METHOD_LABELS[method] : null,
+    currency,
+    rate,
   };
+}
+
+export function serializeRepairPaymentStatus(params: {
+  base: 'pendiente' | 'parcial' | 'pagado';
+  method?: PaymentMethod | null;
+  currency?: CurrencyCode | null;
+  rate?: number | null;
+}): string {
+  const parts: string[] = [params.base];
+  if (params.method) {
+    parts.push(params.method);
+  }
+  if (params.currency && isValidCurrencyCode(params.currency)) {
+    parts.push(`cur=${params.currency.toUpperCase()}`);
+  }
+  if (params.rate && Number.isFinite(params.rate) && params.rate > 0 && params.rate !== 1) {
+    parts.push(`rate=${Math.round(params.rate * 1_000_000) / 1_000_000}`);
+  }
+  return parts.join(':');
 }
 
 export function loadTransferConfig(ownerId: string): TransferConfig {

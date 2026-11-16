@@ -2,7 +2,6 @@ export type PageId =
   | 'home'
   | 'repairs'
   | 'clients'
-  | 'repuestos'
   | 'inventory'
   | 'agenda'
   | 'suppliers'

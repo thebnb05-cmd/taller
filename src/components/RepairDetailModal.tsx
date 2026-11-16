@@ -4,6 +4,7 @@ import {
   Banknote,
   Camera,
   CheckCircle2,
+  Coins,
   Copy,
   CreditCard,
   Edit3,
@@ -49,6 +50,7 @@ import {
   PAYMENT_METHOD_LABELS,
   parsePaymentInfo,
   saveTransferConfig,
+  serializeRepairPaymentStatus,
   type PaymentMethod,
   type TransferConfig,
 } from '../utils/payment';
@@ -63,7 +65,16 @@ import {
   type TechMediaItem,
 } from '../utils/techMedia';
 import { extractBatchRef } from '../utils/batchRef';
-import { getCurrencyOption, useActiveCurrency } from '../utils/currency';
+import {
+  convertBetweenCurrencies,
+  convertFromBaseCurrency,
+  convertToBaseCurrency,
+  getCurrencyOption,
+  getCurrencyRateFromBase,
+  sanitizeCurrencyCode,
+  useActiveCurrency,
+  type CurrencyCode,
+} from '../utils/currency';
 import { buildTrackingUrl } from '../utils/tracking';
 import { getFunctionalCheckFields, getPhysicalCheckFields } from '../utils/checkFields';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
@@ -108,8 +119,10 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
 }) => {
   const { notify } = useToast();
   const activeCurrency = useActiveCurrency();
-  const profileCurrency = profile ? parseWorkshopMeta(profile).currency : activeCurrency;
-  const currencySymbol = getCurrencyOption(profileCurrency).symbol;
+  const workshopMeta = parseWorkshopMeta(profile);
+  const baseCurrency: CurrencyCode = profile ? workshopMeta.currency : activeCurrency;
+  const secondaryCurrencies = workshopMeta.secondaryCurrencies;
+  const [editCurrency, setEditCurrency] = useState<CurrencyCode>(baseCurrency);
   const [tab, setTab] = useState<'detail' | 'edit' | 'receipt'>(initialTab);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -161,6 +174,20 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
 
   useEffect(() => {
     if (!repair) return;
+    const parsedInfo = parsePaymentInfo(repair);
+    const hasConfigured =
+      parsedInfo.currency &&
+      (parsedInfo.currency === baseCurrency ||
+        secondaryCurrencies.some((c) => c.code === parsedInfo.currency) ||
+        Boolean(parsedInfo.rate));
+    const initialCur: CurrencyCode =
+      hasConfigured && parsedInfo.currency ? parsedInfo.currency : baseCurrency;
+    const initialRate =
+      getCurrencyRateFromBase(initialCur, baseCurrency, secondaryCurrencies) ??
+      (parsedInfo.currency === initialCur && parsedInfo.rate ? parsedInfo.rate : 1);
+    const initialIsSecondary = initialCur !== baseCurrency && initialRate !== 1;
+
+    setEditCurrency(initialCur);
     setStatus((repair.status as RepairStatus) || 'recibido');
     setProgress(repair.progress ?? 15);
     setNotes(repair.notes || '');
@@ -169,8 +196,21 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     setClientDni(repair.clientDni || '');
     setClientEmail(repair.clientEmail || '');
     setClientAddress(repair.clientAddress || '');
-    setPrice(String(repair.price ?? 0));
-    setDeposit(String(repair.deposit ?? 0));
+    setPrice(
+      String(
+        initialIsSecondary
+          ? Math.round(convertFromBaseCurrency(Number(repair.price ?? 0), initialRate) * 100) / 100
+          : (repair.price ?? 0)
+      )
+    );
+    setDeposit(
+      String(
+        initialIsSecondary
+          ? Math.round(convertFromBaseCurrency(Number(repair.deposit ?? 0), initialRate) * 100) /
+              100
+          : (repair.deposit ?? 0)
+      )
+    );
     const parsedWork = parseWorkDetailAndMedia(repair.workDetail);
     setWorkDetail(parsedWork.text);
     setMediaItems(parsedWork.media);
@@ -186,7 +226,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [repair]);
+  }, [repair, baseCurrency, secondaryCurrencies]);
 
   const currentPendingBalance = repair
     ? Math.max(0, Number(repair.price || 0) - Number(repair.deposit || 0))
@@ -230,12 +270,77 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   const statusMeta = getStatusMeta(repair.status);
   const pendingBalance = currentPendingBalance;
   const paymentInfo = parsePaymentInfo(repair);
+  const savedCurrency = paymentInfo.currency;
+  const savedRate =
+    (savedCurrency
+      ? getCurrencyRateFromBase(savedCurrency, baseCurrency, secondaryCurrencies)
+      : null) ?? paymentInfo.rate;
+  const hasForeignDisplay = Boolean(
+    savedCurrency &&
+      savedCurrency !== baseCurrency &&
+      savedRate &&
+      Number.isFinite(savedRate) &&
+      savedRate > 0 &&
+      savedRate !== 1
+  );
+
+  const editRate =
+    getCurrencyRateFromBase(editCurrency, baseCurrency, secondaryCurrencies) ??
+    (paymentInfo.currency === editCurrency && paymentInfo.rate ? paymentInfo.rate : 1);
+  const isEditSecondary = editCurrency !== baseCurrency && editRate !== 1;
+  const editCurrencySymbol = getCurrencyOption(editCurrency).symbol;
+  const editSelectableCurrencies: CurrencyCode[] = Array.from(
+    new Set([
+      baseCurrency,
+      ...secondaryCurrencies.map((c) => c.code),
+      ...(paymentInfo.currency ? [paymentInfo.currency] : []),
+    ])
+  );
+
   const detailWork = parseWorkDetailAndMedia(repair.workDetail);
-  const editPendingBalance = Math.max(0, Number(price || 0) - Number(deposit || 0));
+  const editBudgetNum = parseSafePositiveNumber(price, 0);
+  const editDepositNum = parseSafePositiveNumber(deposit, 0);
+  const editPendingBalance = Math.max(0, Math.round((editBudgetNum - editDepositNum) * 100) / 100);
+  const editBaseBudgetPreview = isEditSecondary
+    ? Math.round(convertToBaseCurrency(editBudgetNum, editRate) * 100) / 100
+    : editBudgetNum;
+  const editBaseDepositPreview = isEditSecondary
+    ? Math.round(convertToBaseCurrency(editDepositNum, editRate) * 100) / 100
+    : editDepositNum;
+
+  const handleEditCurrencyChange = (nextRaw: string) => {
+    const nextCode = sanitizeCurrencyCode(nextRaw);
+    if (nextCode === editCurrency) return;
+    const nextRate =
+      getCurrencyRateFromBase(nextCode, baseCurrency, secondaryCurrencies) ??
+      (paymentInfo.currency === nextCode && paymentInfo.rate ? paymentInfo.rate : 1);
+    const convertAmount = (valStr: string) => {
+      const n = parseSafePositiveNumber(valStr, 0);
+      if (n <= 0) return valStr;
+      if (
+        getCurrencyRateFromBase(editCurrency, baseCurrency, secondaryCurrencies) &&
+        getCurrencyRateFromBase(nextCode, baseCurrency, secondaryCurrencies)
+      ) {
+        return String(
+          Math.round(
+            convertBetweenCurrencies(n, editCurrency, nextCode, baseCurrency, secondaryCurrencies) *
+              100
+          ) / 100
+        );
+      }
+      const inBase = editCurrency === baseCurrency ? n : convertToBaseCurrency(n, editRate);
+      const inNext = nextCode === baseCurrency ? inBase : convertFromBaseCurrency(inBase, nextRate);
+      return String(Math.round(inNext * 100) / 100);
+    };
+    if (price.trim()) setPrice(convertAmount(price));
+    if (deposit.trim()) setDeposit(convertAmount(deposit));
+    setEditCurrency(nextCode);
+  };
+
   const trackingUrl = buildTrackingUrl(
     repair.trackingCode,
     profile?.trackingBaseUrl,
-    profileCurrency
+    baseCurrency
   );
 
   const cleanPhoneForWa = (repair.clientPhone || '').replace(/[^\d]/g, '');
@@ -268,21 +373,29 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     }
     setSaving(true);
     try {
-      const budget = parseSafePositiveNumber(price, 0);
-      const advance = parseSafePositiveNumber(deposit, 0);
+      const budgetInput = parseSafePositiveNumber(price, 0);
+      const advanceInput = parseSafePositiveNumber(deposit, 0);
+      const budget = isEditSecondary
+        ? Math.round(convertToBaseCurrency(budgetInput, editRate) * 100) / 100
+        : budgetInput;
+      const advance = isEditSecondary
+        ? Math.round(convertToBaseCurrency(advanceInput, editRate) * 100) / 100
+        : advanceInput;
       const safeProgress = Math.min(100, Math.max(0, Math.round(Number(progress) || 0)));
-      const existingPaidStatus =
-        repair.paymentStatus && repair.paymentStatus.startsWith('pagado')
-          ? repair.paymentStatus
-          : 'pagado';
-      const paymentStatus =
+      const basePaymentStatus: 'pendiente' | 'parcial' | 'pagado' =
         budget === 0
           ? 'pendiente'
           : advance >= budget
-          ? existingPaidStatus
-          : advance > 0
-          ? 'parcial'
-          : 'pendiente';
+            ? 'pagado'
+            : advance > 0
+              ? 'parcial'
+              : 'pendiente';
+      const paymentStatus = serializeRepairPaymentStatus({
+        base: basePaymentStatus,
+        method: basePaymentStatus === 'pagado' ? paymentInfo.method || 'efectivo' : null,
+        currency: isEditSecondary ? editCurrency : undefined,
+        rate: isEditSecondary ? editRate : undefined,
+      });
       const cleanName = sanitizePlainLine(clientName || repair.clientName, 160) || repair.clientName;
       const cleanPhone = sanitizePhone(clientPhone, 60);
       const cleanDni = sanitizeDni(clientDni, 40);
@@ -550,9 +663,26 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       return;
     }
     setPaying(true);
-    setDeposit(String(budget));
+    setDeposit(
+      String(
+        isEditSecondary
+          ? Math.round(convertFromBaseCurrency(budget, editRate) * 100) / 100
+          : budget
+      )
+    );
     const nowIso = new Date().toISOString();
-    const nextPaymentStatus = `pagado:${paymentMethod}`;
+    const nextPaymentStatus = serializeRepairPaymentStatus({
+      base: 'pagado',
+      method: paymentMethod,
+      currency:
+        paymentInfo.currency && paymentInfo.currency !== baseCurrency
+          ? paymentInfo.currency
+          : undefined,
+      rate:
+        paymentInfo.currency && paymentInfo.currency !== baseCurrency
+          ? paymentInfo.rate
+          : undefined,
+    });
     try {
       await updateRow('repairs', repair.id, {
         deposit: budget,
@@ -764,20 +894,41 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   <div>
                     <div className="text-[11px] text-slate-500 dark:text-slate-400">Presupuesto</div>
                     <div className="font-mono-num text-sm font-bold text-slate-900 dark:text-white">
-                      {formatCurrency(repair.price)}
+                      {formatCurrency(repair.price, baseCurrency)}
                     </div>
+                    {hasForeignDisplay && savedCurrency && savedRate && (
+                      <div className="font-mono-num text-[10px] font-semibold text-[#0072BB] dark:text-sky-300">
+                        {formatCurrency(convertFromBaseCurrency(repair.price, savedRate), savedCurrency)}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <div className="text-[11px] text-slate-500 dark:text-slate-400">Seña</div>
                     <div className="font-mono-num text-sm font-bold text-emerald-600 dark:text-emerald-400">
-                      {formatCurrency(repair.deposit)}
+                      {formatCurrency(repair.deposit, baseCurrency)}
                     </div>
+                    {hasForeignDisplay && savedCurrency && savedRate && (
+                      <div className="font-mono-num text-[10px] font-semibold text-emerald-700/80 dark:text-emerald-300/80">
+                        {formatCurrency(
+                          convertFromBaseCurrency(repair.deposit, savedRate),
+                          savedCurrency
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <div className="text-[11px] text-slate-500 dark:text-slate-400">Pendiente</div>
                     <div className="font-mono-num text-sm font-bold text-[#0072BB] dark:text-sky-400">
-                      {formatCurrency(pendingBalance)}
+                      {formatCurrency(pendingBalance, baseCurrency)}
                     </div>
+                    {hasForeignDisplay && savedCurrency && savedRate && (
+                      <div className="font-mono-num text-[10px] font-semibold text-[#0072BB]/80 dark:text-sky-300/80">
+                        {formatCurrency(
+                          convertFromBaseCurrency(pendingBalance, savedRate),
+                          savedCurrency
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -830,6 +981,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                       code: repair.code,
                       clientName: repair.clientName,
                       amount: pendingBalance,
+                      currencyCode: baseCurrency,
                     });
                     const transferWaHref = cleanPhoneForWa
                       ? `https://wa.me/${cleanPhoneForWa}?text=${encodeURIComponent(transferWaText)}`
@@ -861,7 +1013,17 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                                 Cobro por transferencia
                               </span>
                               <span className="font-mono-num text-sm font-extrabold text-[#0072BB] dark:text-sky-400">
-                                {formatCurrency(pendingBalance)}
+                                {formatCurrency(pendingBalance, baseCurrency)}
+                                {hasForeignDisplay && savedCurrency && savedRate && (
+                                  <span className="ml-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                                    (
+                                    {formatCurrency(
+                                      convertFromBaseCurrency(pendingBalance, savedRate),
+                                      savedCurrency
+                                    )}
+                                    )
+                                  </span>
+                                )}
                               </span>
                             </div>
 
@@ -1784,13 +1946,38 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
             </div>
 
             <div className="space-y-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
-              <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                Presupuesto y pagos
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Presupuesto y pagos
+                </div>
+                {editSelectableCurrencies.length > 1 && (
+                  <div className="flex items-center gap-1.5">
+                    <Coins className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
+                    <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                      Moneda:
+                    </span>
+                    <select
+                      value={editCurrency}
+                      onChange={(e) => handleEditCurrencyChange(e.target.value)}
+                      aria-label="Moneda del presupuesto"
+                      className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-800 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    >
+                      {editSelectableCurrencies.map((code) => {
+                        const opt = getCurrencyOption(code);
+                        return (
+                          <option key={code} value={code}>
+                            {opt.code} ({opt.symbol})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
               </div>
               <div className="grid gap-3 sm:grid-cols-3">
                 <div>
                   <label className="mb-1 block text-xs text-slate-500">
-                    Presupuesto ({currencySymbol})
+                    Presupuesto ({editCurrencySymbol})
                   </label>
                   <input
                     type="number"
@@ -1803,7 +1990,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-slate-500">
-                    Anticipo / Pagado ({currencySymbol})
+                    Anticipo / Pagado ({editCurrencySymbol})
                   </label>
                   <input
                     type="number"
@@ -1819,11 +2006,23 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   <input
                     type="text"
                     readOnly
-                    value={formatCurrency(editPendingBalance)}
+                    value={formatCurrency(editPendingBalance, editCurrency)}
                     className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 font-mono-num text-sm font-bold text-slate-900 dark:border-slate-700 dark:bg-slate-800/60 dark:text-white"
                   />
                 </div>
               </div>
+              {isEditSecondary && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200/80 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                  <span>
+                    Tasa: 1 {editCurrency} = {formatCurrency(editRate, baseCurrency)}
+                  </span>
+                  <span className="font-mono-num font-bold">
+                    Equivalente en {baseCurrency}: Presup.{' '}
+                    {formatCurrency(editBaseBudgetPreview, baseCurrency)} · Pagado{' '}
+                    {formatCurrency(editBaseDepositPreview, baseCurrency)}
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="space-y-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">

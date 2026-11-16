@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, ChevronLeft, Layers, Plus, Trash2, UserCheck } from 'lucide-react';
+import { Check, ChevronLeft, Coins, Layers, Plus, Trash2, UserCheck } from 'lucide-react';
 import {
   clampStr,
   generateDocId,
@@ -22,13 +22,24 @@ import type {
   RepairStatus,
   WorkshopProfile,
 } from '../types/workshop';
-import { getCurrencyOption, useActiveCurrency } from '../utils/currency';
+import {
+  convertBetweenCurrencies,
+  convertFromBaseCurrency,
+  convertToBaseCurrency,
+  getCurrencyOption,
+  getCurrencyRateFromBase,
+  sanitizeCurrencyCode,
+  useActiveCurrency,
+  type CurrencyCode,
+} from '../utils/currency';
 import {
   formatCurrency,
   generateRepairCode,
   generateTrackingCode,
   todayISO,
 } from '../utils/formatters';
+import { serializeRepairPaymentStatus } from '../utils/payment';
+import { parseWorkshopMeta } from '../utils/workshopMeta';
 import { appendBatchRefToNotes, generateBatchRef } from '../utils/batchRef';
 import { getFunctionalCheckFields, getPhysicalCheckFields } from '../utils/checkFields';
 import {
@@ -81,6 +92,8 @@ interface DraftRepairItem {
   selectedPartIds: string[];
   budget: number;
   deposit: number;
+  currency: CurrencyCode;
+  rate: number;
   status: RepairStatus;
   accessories: string[];
   consoleAcc: Record<string, string>;
@@ -310,7 +323,18 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
 }) => {
   const { notify } = useToast();
   const activeCurrency = useActiveCurrency();
-  const currencySymbol = getCurrencyOption(activeCurrency).symbol;
+  const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
+  const baseCurrency: CurrencyCode = profile ? workshopMeta.currency : activeCurrency;
+  const secondaryCurrencies = workshopMeta.secondaryCurrencies;
+  const [selectedCurrency, setSelectedCurrency] = useState<CurrencyCode>(baseCurrency);
+
+  const activeRate = useMemo(
+    () => getCurrencyRateFromBase(selectedCurrency, baseCurrency, secondaryCurrencies) ?? 1,
+    [selectedCurrency, baseCurrency, secondaryCurrencies]
+  );
+  const isSecondaryCurrency = selectedCurrency !== baseCurrency && activeRate !== 1;
+  const currencySymbol = getCurrencyOption(selectedCurrency).symbol;
+
   const [step, setStep] = useState<'device' | 'details'>('device');
   const [deviceType, setDeviceType] = useState<DeviceType | ''>('');
   const [deviceIcon, setDeviceIcon] = useState('📱');
@@ -367,7 +391,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     [products]
   );
 
-  const selectedPartsTotal = useMemo(
+  const selectedPartsTotalBase = useMemo(
     () =>
       spareParts
         .filter((p) => selectedPartIds.includes(p.id))
@@ -375,8 +399,17 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     [spareParts, selectedPartIds]
   );
 
+  const selectedPartsTotalDisplay = useMemo(
+    () =>
+      isSecondaryCurrency
+        ? Math.round(convertFromBaseCurrency(selectedPartsTotalBase, activeRate) * 100) / 100
+        : selectedPartsTotalBase,
+    [isSecondaryCurrency, selectedPartsTotalBase, activeRate]
+  );
+
   useEffect(() => {
     if (!open) return;
+    setSelectedCurrency(baseCurrency);
     setStep('device');
     setDeviceType('');
     setDeviceIcon('📱');
@@ -451,6 +484,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     setSelectedPartIds([]);
     setPrice('');
     setDeposit('');
+    setSelectedCurrency(baseCurrency);
     setStatus('recibido');
     setAccessories([]);
     setConsoleAcc({
@@ -488,8 +522,58 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     deviceType === 'Celular' || deviceType === 'Tablet' || deviceType === 'Smartwatch';
 
   const manualBudget = parseSafePositiveNumber(price, 0);
-  const totalBudget = manualBudget + selectedPartsTotal;
-  const pendingBalance = Math.max(0, totalBudget - parseSafePositiveNumber(deposit, 0));
+  const totalBudgetDisplay = Math.round((manualBudget + selectedPartsTotalDisplay) * 100) / 100;
+  const depositDisplay = parseSafePositiveNumber(deposit, 0);
+  const pendingBalanceDisplay = Math.max(
+    0,
+    Math.round((totalBudgetDisplay - depositDisplay) * 100) / 100
+  );
+  const baseBudget = isSecondaryCurrency
+    ? Math.round(
+        (convertToBaseCurrency(manualBudget, activeRate) + selectedPartsTotalBase) * 100
+      ) / 100
+    : Math.round((manualBudget + selectedPartsTotalBase) * 100) / 100;
+  const baseDeposit = isSecondaryCurrency
+    ? Math.round(convertToBaseCurrency(depositDisplay, activeRate) * 100) / 100
+    : depositDisplay;
+
+  const handleCurrencyChange = (nextRaw: string) => {
+    const nextCode = sanitizeCurrencyCode(nextRaw);
+    if (nextCode === selectedCurrency) return;
+    if (price.trim()) {
+      const currentPrice = parseSafePositiveNumber(price, 0);
+      if (currentPrice > 0) {
+        const converted =
+          Math.round(
+            convertBetweenCurrencies(
+              currentPrice,
+              selectedCurrency,
+              nextCode,
+              baseCurrency,
+              secondaryCurrencies
+            ) * 100
+          ) / 100;
+        setPrice(String(converted));
+      }
+    }
+    if (deposit.trim()) {
+      const currentDeposit = parseSafePositiveNumber(deposit, 0);
+      if (currentDeposit > 0) {
+        const convertedDep =
+          Math.round(
+            convertBetweenCurrencies(
+              currentDeposit,
+              selectedCurrency,
+              nextCode,
+              baseCurrency,
+              secondaryCurrencies
+            ) * 100
+          ) / 100;
+        setDeposit(String(convertedDep));
+      }
+    }
+    setSelectedCurrency(nextCode);
+  };
 
   const physicalFields = useMemo(() => getPhysicalCheckFields(deviceType), [deviceType]);
 
@@ -574,8 +658,10 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
       dateIn: clampStr(dateIn || todayISO(), 40),
       dateEst: clampStr(dateEst, 40),
       selectedPartIds: [...selectedPartIds],
-      budget: totalBudget,
-      deposit: parseSafePositiveNumber(deposit, 0),
+      budget: baseBudget,
+      deposit: baseDeposit,
+      currency: selectedCurrency,
+      rate: activeRate,
       status,
       accessories: isConsole ? [] : accessories.slice(0, 30),
       consoleAcc: { ...consoleAcc },
@@ -686,7 +772,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
         const trackingCode = clampStr(generateTrackingCode(), 40);
         const selectedParts = products.filter((p) => item.selectedPartIds.includes(p.id)).slice(0, 30);
         const defaultProgress = STATUS_META[item.status]?.defaultProgress ?? 15;
-        const paymentStatus =
+        const basePaymentStatus: 'pendiente' | 'parcial' | 'pagado' =
           item.budget === 0
             ? 'pendiente'
             : item.deposit >= item.budget
@@ -694,6 +780,12 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               : item.deposit > 0
                 ? 'parcial'
                 : 'pendiente';
+        const useSecondaryForItem = item.currency !== baseCurrency && item.rate !== 1;
+        const paymentStatus = serializeRepairPaymentStatus({
+          base: basePaymentStatus,
+          currency: useSecondaryForItem ? item.currency : undefined,
+          rate: useSecondaryForItem ? item.rate : undefined,
+        });
         const finalNotes = isBatch
           ? clampStr(appendBatchRefToNotes(item.notes, batchRef, i + 1, itemsToSave.length), 2000)
           : clampStr(item.notes, 2000);
@@ -844,7 +936,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
             </span>
           </div>
           <span className="font-mono-num text-xs font-bold text-emerald-800 dark:text-emerald-300">
-            Subtotal lote: {formatCurrency(queuedTotalBudget)}
+            Subtotal lote: {formatCurrency(queuedTotalBudget, baseCurrency)}
           </span>
         </div>
         <div className="mt-2 space-y-1.5">
@@ -865,7 +957,12 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span className="font-mono-num font-bold text-slate-900 dark:text-white">
-                  {formatCurrency(item.budget)}
+                  {formatCurrency(item.budget, baseCurrency)}
+                  {item.currency !== baseCurrency && item.rate !== 1 && (
+                    <span className="ml-1 text-[10px] font-medium text-slate-500">
+                      ({formatCurrency(convertFromBaseCurrency(item.budget, item.rate), item.currency)})
+                    </span>
+                  )}
                 </span>
                 <button
                   type="button"
@@ -1449,9 +1546,34 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
           </section>
 
           <section className="space-y-3 border-t border-slate-100 pt-5 dark:border-slate-800">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white font-display">
-              Falla, prioridad y presupuesto
-            </h3>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white font-display">
+                Falla, prioridad y presupuesto
+              </h3>
+              {secondaryCurrencies.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <Coins className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
+                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Moneda:
+                  </span>
+                  <select
+                    value={selectedCurrency}
+                    onChange={(e) => handleCurrencyChange(e.target.value)}
+                    aria-label="Moneda de la reparación"
+                    className="h-9 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-800 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  >
+                    {[baseCurrency, ...secondaryCurrencies.map((c) => c.code)].map((code) => {
+                      const opt = getCurrencyOption(code);
+                      return (
+                        <option key={code} value={code}>
+                          {opt.code} ({opt.symbol})
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              )}
+            </div>
 
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
@@ -1514,13 +1636,17 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                     <span className="font-mono-num text-[#0072BB] dark:text-sky-300">
                       {selectedPartIds.length}{' '}
                       {selectedPartIds.length === 1 ? 'repuesto' : 'repuestos'} ·{' '}
-                      {formatCurrency(selectedPartsTotal)} sumado al total
+                      {formatCurrency(selectedPartsTotalDisplay, selectedCurrency)} sumado al total
                     </span>
                   )}
                 </div>
                 <div className="grid max-h-36 gap-2 overflow-y-auto rounded-xl border border-slate-200 p-2.5 sm:grid-cols-2 dark:border-slate-800">
                   {spareParts.map((part) => {
                     const checked = selectedPartIds.includes(part.id);
+                    const partDisplayPrice = isSecondaryCurrency
+                      ? Math.round(convertFromBaseCurrency(Number(part.price || 0), activeRate) * 100) /
+                        100
+                      : Number(part.price || 0);
                     return (
                       <button
                         key={part.id}
@@ -1534,7 +1660,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                       >
                         <span className="truncate font-medium">{part.name}</span>
                         <span className="ml-2 flex shrink-0 items-center gap-1.5 font-mono-num">
-                          <span>{formatCurrency(part.price)}</span>
+                          <span>{formatCurrency(partDisplayPrice, selectedCurrency)}</span>
                           {checked && <Check className="h-3.5 w-3.5" />}
                         </span>
                       </button>
@@ -1580,7 +1706,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                 <input
                   type="text"
                   readOnly
-                  value={formatCurrency(pendingBalance)}
+                  value={formatCurrency(pendingBalanceDisplay, selectedCurrency)}
                   className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 font-mono-num text-sm font-bold text-slate-900 dark:border-slate-700 dark:bg-slate-800/60 dark:text-white"
                 />
               </div>
@@ -1602,14 +1728,33 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               </div>
             </div>
 
+            {isSecondaryCurrency && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200/80 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                <span>
+                  Conversión (1 {selectedCurrency} = {formatCurrency(activeRate, baseCurrency)}):
+                </span>
+                <span className="font-mono-num font-bold">
+                  Presup. base {formatCurrency(baseBudget, baseCurrency)}
+                  {baseDeposit > 0 ? ` · Seña ${formatCurrency(baseDeposit, baseCurrency)}` : ''}
+                </span>
+              </div>
+            )}
+
             {selectedPartIds.length > 0 && (
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-200 bg-sky-50/70 px-3 py-2 text-xs text-slate-700 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-slate-200">
                 <span>
-                  Presupuesto (<strong className="font-mono-num">{formatCurrency(manualBudget)}</strong>) +
-                  Repuestos (<strong className="font-mono-num">{formatCurrency(selectedPartsTotal)}</strong>)
+                  Presupuesto (
+                  <strong className="font-mono-num">
+                    {formatCurrency(manualBudget, selectedCurrency)}
+                  </strong>
+                  ) + Repuestos (
+                  <strong className="font-mono-num">
+                    {formatCurrency(selectedPartsTotalDisplay, selectedCurrency)}
+                  </strong>
+                  )
                 </span>
                 <span className="font-mono-num font-bold text-[#0072BB] dark:text-sky-300">
-                  Total: {formatCurrency(totalBudget)}
+                  Total: {formatCurrency(totalBudgetDisplay, selectedCurrency)}
                 </span>
               </div>
             )}
