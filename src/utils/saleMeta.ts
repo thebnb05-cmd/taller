@@ -1,4 +1,5 @@
 import type { SaleRecord } from '../types/workshop';
+import { isValidCurrencyCode, type CurrencyCode } from './currency';
 import { PAYMENT_METHOD_LABELS, type PaymentMethod } from './payment';
 
 export interface ParsedSalePaymentInfo {
@@ -8,6 +9,8 @@ export interface ParsedSalePaymentInfo {
   methodLabel: string | null;
   deposit: number;
   pending: number;
+  currency: CurrencyCode | null;
+  rate: number | null;
 }
 
 export function parseSalePaymentInfo(sale: Pick<SaleRecord, 'status' | 'amount'>): ParsedSalePaymentInfo {
@@ -28,6 +31,24 @@ export function parseSalePaymentInfo(sale: Pick<SaleRecord, 'status' | 'amount'>
     }
   }
 
+  let currency: CurrencyCode | null = null;
+  const curMatch = raw.match(/cur=([a-z]{3})/);
+  if (curMatch) {
+    const upper = curMatch[1].toUpperCase();
+    if (isValidCurrencyCode(upper)) {
+      currency = upper;
+    }
+  }
+
+  let rate: number | null = null;
+  const rateMatch = raw.match(/rate=([0-9]+(?:\.[0-9]+)?)/);
+  if (rateMatch) {
+    const parsedRate = Number(rateMatch[1]);
+    if (Number.isFinite(parsedRate) && parsedRate > 0) {
+      rate = parsedRate;
+    }
+  }
+
   const isCobrado = raw.startsWith('cobrado') || (amount > 0 && parsedDeposit >= amount);
   const deposit = isCobrado ? amount : parsedDeposit;
   const pending = Math.max(0, amount - deposit);
@@ -39,6 +60,8 @@ export function parseSalePaymentInfo(sale: Pick<SaleRecord, 'status' | 'amount'>
     methodLabel: method ? PAYMENT_METHOD_LABELS[method] : null,
     deposit,
     pending,
+    currency,
+    rate,
   };
 }
 
@@ -47,18 +70,29 @@ export function serializeSaleStatus(params: {
   method: PaymentMethod;
   deposit?: number;
   amount: number;
+  currency?: CurrencyCode | null;
+  rate?: number | null;
 }): string {
   const cleanAmount = Math.max(0, Number(params.amount || 0));
   const cleanDeposit = Math.max(0, Number(params.deposit || 0));
 
+  let base: string;
   if (params.status === 'cobrado' || (cleanAmount > 0 && cleanDeposit >= cleanAmount)) {
-    return `cobrado:${params.method}`;
-  }
-
-  if (cleanDeposit > 0) {
+    base = `cobrado:${params.method}`;
+  } else if (cleanDeposit > 0) {
     const capped = cleanAmount > 0 ? Math.min(cleanAmount, cleanDeposit) : cleanDeposit;
-    return `pendiente:${params.method}:sena=${Number(capped.toFixed(2))}`;
+    base = `pendiente:${params.method}:sena=${Number(capped.toFixed(2))}`;
+  } else {
+    base = `pendiente:${params.method}`;
   }
 
-  return `pendiente:${params.method}`;
+  const extras: string[] = [];
+  if (params.currency && isValidCurrencyCode(params.currency)) {
+    extras.push(`cur=${params.currency.toUpperCase()}`);
+  }
+  if (params.rate && Number.isFinite(params.rate) && params.rate > 0 && params.rate !== 1) {
+    extras.push(`rate=${Math.round(params.rate * 1_000_000) / 1_000_000}`);
+  }
+
+  return extras.length > 0 ? `${base}:${extras.join(':')}` : base;
 }

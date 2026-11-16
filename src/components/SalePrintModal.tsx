@@ -1,8 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import QRCode from 'qrcode';
-import { Copy, FileText, MessageCircle, Printer, ReceiptText } from 'lucide-react';
+import { Coins, Copy, FileText, MessageCircle, Printer, ReceiptText } from 'lucide-react';
 import type { ClientRecord, SaleRecord, WorkshopProfile } from '../types/workshop';
+import {
+  convertFromBaseCurrency,
+  getCurrencyOption,
+  getCurrencyRateFromBase,
+  sanitizeCurrencyCode,
+  type CurrencyCode,
+} from '../utils/currency';
 import { formatCurrency, formatDateShort } from '../utils/formatters';
 import {
   buildTransferQrPayload,
@@ -33,6 +40,8 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
 }) => {
   const { notify } = useToast();
   const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
+  const baseCurrency = workshopMeta.currency;
+  const baseCurrencyOption = getCurrencyOption(baseCurrency);
   const [printFormat, setPrintFormat] = useState<PrintFormat>('a4');
   const [transferQrDataUrl, setTransferQrDataUrl] = useState('');
 
@@ -40,6 +49,69 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
     () => (sale ? parseSalePaymentInfo(sale) : null),
     [sale]
   );
+
+  const currencyChoices = useMemo(() => {
+    const list: Array<{ code: CurrencyCode; rate: number; isBase: boolean }> = [
+      { code: baseCurrency, rate: 1, isBase: true },
+    ];
+    for (const sec of workshopMeta.secondaryCurrencies) {
+      if (sec.code !== baseCurrency && !list.some((item) => item.code === sec.code)) {
+        list.push({ code: sec.code, rate: sec.rate, isBase: false });
+      }
+    }
+    if (
+      paymentInfo?.currency &&
+      paymentInfo.currency !== baseCurrency &&
+      !list.some((item) => item.code === paymentInfo.currency) &&
+      paymentInfo.rate &&
+      paymentInfo.rate > 0
+    ) {
+      list.push({
+        code: paymentInfo.currency,
+        rate: paymentInfo.rate,
+        isBase: false,
+      });
+    }
+    return list;
+  }, [baseCurrency, workshopMeta.secondaryCurrencies, paymentInfo?.currency, paymentInfo?.rate]);
+
+  const [selectedCurrency, setSelectedCurrency] = useState<CurrencyCode>(baseCurrency);
+
+  useEffect(() => {
+    if (!sale) {
+      setSelectedCurrency(baseCurrency);
+      return;
+    }
+    const savedCur = paymentInfo?.currency;
+    if (savedCur && currencyChoices.some((c) => c.code === savedCur)) {
+      setSelectedCurrency(savedCur);
+    } else {
+      setSelectedCurrency(baseCurrency);
+    }
+  }, [sale?.id, paymentInfo?.currency, baseCurrency, currencyChoices]);
+
+  const activeRate = useMemo(() => {
+    if (selectedCurrency === baseCurrency) return 1;
+    const configuredRate = getCurrencyRateFromBase(
+      selectedCurrency,
+      baseCurrency,
+      workshopMeta.secondaryCurrencies
+    );
+    if (configuredRate) return configuredRate;
+    if (paymentInfo?.currency === selectedCurrency && paymentInfo.rate && paymentInfo.rate > 0) {
+      return paymentInfo.rate;
+    }
+    return 1;
+  }, [
+    selectedCurrency,
+    baseCurrency,
+    workshopMeta.secondaryCurrencies,
+    paymentInfo?.currency,
+    paymentInfo?.rate,
+  ]);
+
+  const isConvertedCurrency = selectedCurrency !== baseCurrency && activeRate > 0 && activeRate !== 1;
+  const selectedCurrencyOption = getCurrencyOption(selectedCurrency);
 
   const [transferCfg, setTransferCfg] = useState<TransferConfig>(() =>
     sale ? loadTransferConfig(sale.ownerId) : loadTransferConfig('')
@@ -78,7 +150,10 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
       setTransferQrDataUrl(transferCfg.qrImageDataUrl);
       return;
     }
-    const chargeAmount = paymentInfo.pending > 0 ? paymentInfo.pending : sale.amount;
+    const baseChargeAmount = paymentInfo.pending > 0 ? paymentInfo.pending : sale.amount;
+    const chargeAmount = isConvertedCurrency
+      ? Math.round(convertFromBaseCurrency(baseChargeAmount, activeRate) * 100) / 100
+      : baseChargeAmount;
     const payload = buildTransferQrPayload(
       transferCfg,
       profile?.brandName || 'TH3 BNB Servicio Técnico',
@@ -105,12 +180,20 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [sale, paymentInfo, transferCfg, profile?.brandName]);
+  }, [sale, paymentInfo, transferCfg, profile?.brandName, isConvertedCurrency, activeRate]);
 
   if (!sale || !paymentInfo) return null;
 
   const qty = Math.max(1, Number(sale.quantity || 1));
-  const unitPrice = qty > 0 ? Number(sale.amount || 0) / qty : Number(sale.amount || 0);
+  const roundDisplay = (val: number) => Math.round(val * 100) / 100;
+  const displayAmount = isConvertedCurrency
+    ? roundDisplay(convertFromBaseCurrency(sale.amount, activeRate))
+    : Number(sale.amount || 0);
+  const displayDeposit = isConvertedCurrency
+    ? roundDisplay(convertFromBaseCurrency(paymentInfo.deposit, activeRate))
+    : paymentInfo.deposit;
+  const displayPending = Math.max(0, roundDisplay(displayAmount - displayDeposit));
+  const displayUnitPrice = qty > 0 ? displayAmount / qty : displayAmount;
   const statusLabel = paymentInfo.isPaid
     ? 'Cobrado'
     : paymentInfo.deposit > 0
@@ -118,7 +201,7 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
       : 'Pendiente';
 
   const isTransfer = paymentInfo.method === 'transferencia';
-  const transferAmount = paymentInfo.pending > 0 ? paymentInfo.pending : sale.amount;
+  const transferAmount = displayPending > 0 ? displayPending : displayAmount;
   const hasTransferDetails = Boolean(
     transferCfg.alias.trim() ||
       transferCfg.cbu.trim() ||
@@ -142,6 +225,7 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
     code: sale.invoice || 'Venta',
     clientName: sale.clientName,
     amount: transferAmount,
+    currencyCode: selectedCurrency,
   });
   const cleanPhone = (matchedClient?.phone || '').replace(/[^\d]/g, '');
   const transferWaHref = cleanPhone
@@ -220,6 +304,12 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
             Comprobante: <span className="font-mono-num font-semibold">{sale.invoice}</span>
           </div>
           <div className="text-slate-600">Estado de cobro: {statusLabel}</div>
+          {isConvertedCurrency && (
+            <div className="mt-0.5 text-[11px] font-medium text-slate-500">
+              Divisa: {selectedCurrencyOption.code} (1 {selectedCurrencyOption.symbol} ={' '}
+              {formatCurrency(activeRate, baseCurrency)})
+            </div>
+          )}
         </div>
       </div>
 
@@ -240,35 +330,43 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
               </td>
               <td className="px-3 py-2.5 text-center font-mono-num">{qty}</td>
               <td className="px-3 py-2.5 text-right font-mono-num">
-                {formatCurrency(unitPrice)}
+                {formatCurrency(displayUnitPrice, selectedCurrency)}
               </td>
               <td className="px-3 py-2.5 text-right font-mono-num font-bold">
-                {formatCurrency(sale.amount)}
+                {formatCurrency(displayAmount, selectedCurrency)}
               </td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      <div className="mt-4 grid grid-cols-3 gap-2 border-y border-slate-200 py-3 text-center text-xs">
-        <div>
-          <div className="text-slate-500">Total venta</div>
-          <div className="font-mono-num text-sm font-bold text-slate-900">
-            {formatCurrency(sale.amount)}
+      <div className="mt-4 border-y border-slate-200 py-3">
+        <div className="grid grid-cols-3 gap-2 text-center text-xs">
+          <div>
+            <div className="text-slate-500">Total venta</div>
+            <div className="font-mono-num text-sm font-bold text-slate-900">
+              {formatCurrency(displayAmount, selectedCurrency)}
+            </div>
+          </div>
+          <div>
+            <div className="text-slate-500">Anticipo / Seña</div>
+            <div className="font-mono-num text-sm font-bold text-emerald-700">
+              {formatCurrency(displayDeposit, selectedCurrency)}
+            </div>
+          </div>
+          <div>
+            <div className="text-slate-500">Saldo pendiente</div>
+            <div className="font-mono-num text-sm font-bold text-slate-900">
+              {formatCurrency(displayPending, selectedCurrency)}
+            </div>
           </div>
         </div>
-        <div>
-          <div className="text-slate-500">Anticipo / Seña</div>
-          <div className="font-mono-num text-sm font-bold text-emerald-700">
-            {formatCurrency(paymentInfo.deposit)}
+        {isConvertedCurrency && (
+          <div className="mt-2 text-center font-mono-num text-[11px] text-slate-500">
+            Equivalente en {baseCurrencyOption.code}: {formatCurrency(sale.amount, baseCurrency)} ·
+            Tasa aplicada: 1 {selectedCurrencyOption.symbol} = {formatCurrency(activeRate, baseCurrency)}
           </div>
-        </div>
-        <div>
-          <div className="text-slate-500">Saldo pendiente</div>
-          <div className="font-mono-num text-sm font-bold text-slate-900">
-            {formatCurrency(paymentInfo.pending)}
-          </div>
-        </div>
+        )}
       </div>
 
       {isTransfer && (hasTransferDetails || !isPrintMode) && (
@@ -293,8 +391,8 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
                   Datos para transferencia
                 </span>
                 <span className="font-mono-num text-sm font-extrabold text-slate-900">
-                  {paymentInfo.pending > 0 ? 'A transferir: ' : 'Monto: '}
-                  {formatCurrency(transferAmount)}
+                  {displayPending > 0 ? 'A transferir: ' : 'Monto: '}
+                  {formatCurrency(transferAmount, selectedCurrency)}
                 </span>
               </div>
 
@@ -411,7 +509,7 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
             </div>
             <div className="mt-0.5 text-[10px] font-semibold text-emerald-800">
               {paymentInfo.methodLabel ? `${paymentInfo.methodLabel} · ` : ''}
-              {formatCurrency(sale.amount)}
+              {formatCurrency(displayAmount, selectedCurrency)}
             </div>
           </div>
         </div>
@@ -481,6 +579,15 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
           <span>Estado:</span>
           <span className="font-bold uppercase">{statusLabel}</span>
         </div>
+        {isConvertedCurrency && (
+          <div className="flex justify-between text-[9.5px]">
+            <span>Divisa:</span>
+            <span>
+              {selectedCurrencyOption.code} (1 {selectedCurrencyOption.symbol} ={' '}
+              {formatCurrency(activeRate, baseCurrency)})
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="border-b border-dashed border-black py-2 text-[10.5px]">
@@ -497,25 +604,31 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
         </div>
         <div className="mt-0.5 flex justify-between text-[10px]">
           <span>
-            {qty} × {formatCurrency(unitPrice)}
+            {qty} × {formatCurrency(displayUnitPrice, selectedCurrency)}
           </span>
-          <strong>{formatCurrency(sale.amount)}</strong>
+          <strong>{formatCurrency(displayAmount, selectedCurrency)}</strong>
         </div>
       </div>
 
       <div className="border-b border-dashed border-black py-2 text-[11px]">
         <div className="flex justify-between">
           <span>Total venta:</span>
-          <strong>{formatCurrency(sale.amount)}</strong>
+          <strong>{formatCurrency(displayAmount, selectedCurrency)}</strong>
         </div>
         <div className="flex justify-between">
           <span>Anticipo / Seña:</span>
-          <strong>{formatCurrency(paymentInfo.deposit)}</strong>
+          <strong>{formatCurrency(displayDeposit, selectedCurrency)}</strong>
         </div>
         <div className="mt-0.5 flex justify-between border-t border-dotted border-black pt-1 text-xs font-black">
           <span>SALDO PENDIENTE:</span>
-          <span>{formatCurrency(paymentInfo.pending)}</span>
+          <span>{formatCurrency(displayPending, selectedCurrency)}</span>
         </div>
+        {isConvertedCurrency && (
+          <div className="mt-1 flex justify-between text-[9.5px]">
+            <span>Equiv. {baseCurrencyOption.code}:</span>
+            <span>{formatCurrency(sale.amount, baseCurrency)}</span>
+          </div>
+        )}
       </div>
 
       {isTransfer && (hasTransferDetails || !isPrintMode) && (
@@ -573,8 +686,8 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
             </div>
           )}
           <div className="mt-0.5 flex justify-between">
-            <span>{paymentInfo.pending > 0 ? 'A transferir:' : 'Monto:'}</span>
-            <strong>{formatCurrency(transferAmount)}</strong>
+            <span>{displayPending > 0 ? 'A transferir:' : 'Monto:'}</span>
+            <strong>{formatCurrency(transferAmount, selectedCurrency)}</strong>
           </div>
           {transferQrDataUrl && (
             <div className="mt-2 flex flex-col items-center">
@@ -623,7 +736,7 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
           <div className="text-[11px] font-extrabold uppercase">{sale.clientName}</div>
           <div className="text-[9.5px] font-bold">
             {paymentInfo.methodLabel ? `${paymentInfo.methodLabel} · ` : ''}
-            Total: {formatCurrency(sale.amount)}
+            Total: {formatCurrency(displayAmount, selectedCurrency)}
           </div>
         </div>
       )}
@@ -651,31 +764,58 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
       >
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800/50">
-            <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900">
-              <button
-                type="button"
-                onClick={() => setPrintFormat('a4')}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                  printFormat === 'a4'
-                    ? 'bg-[#0072BB] text-white'
-                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
-                }`}
-              >
-                <FileText className="h-3.5 w-3.5" />
-                Hoja A4
-              </button>
-              <button
-                type="button"
-                onClick={() => setPrintFormat('thermal80')}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                  printFormat === 'thermal80'
-                    ? 'bg-[#0072BB] text-white'
-                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
-                }`}
-              >
-                <ReceiptText className="h-3.5 w-3.5" />
-                Térmico 80mm
-              </button>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900">
+                <button
+                  type="button"
+                  onClick={() => setPrintFormat('a4')}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                    printFormat === 'a4'
+                      ? 'bg-[#0072BB] text-white'
+                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
+                  }`}
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  Hoja A4
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrintFormat('thermal80')}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                    printFormat === 'thermal80'
+                      ? 'bg-[#0072BB] text-white'
+                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
+                  }`}
+                >
+                  <ReceiptText className="h-3.5 w-3.5" />
+                  Térmico 80mm
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1 dark:border-slate-700 dark:bg-slate-900">
+                <Coins className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                <select
+                  aria-label="Divisa de la boleta"
+                  value={selectedCurrency}
+                  onChange={(e) => setSelectedCurrency(sanitizeCurrencyCode(e.target.value))}
+                  className="bg-transparent text-xs font-semibold text-slate-800 outline-none dark:text-slate-100"
+                >
+                  {currencyChoices.map((choice) => {
+                    const opt = getCurrencyOption(choice.code);
+                    return (
+                      <option
+                        key={choice.code}
+                        value={choice.code}
+                        className="bg-white text-slate-900 dark:bg-slate-900 dark:text-white"
+                      >
+                        {choice.isBase
+                          ? `${opt.code} (${opt.symbol}) · Base`
+                          : `${opt.code} (${opt.symbol}) · 1 ${opt.symbol} = ${formatCurrency(choice.rate, baseCurrency)}`}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
             </div>
 
             <button

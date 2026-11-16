@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
-import { Banknote, Copy, CreditCard, Landmark, Package, Printer, Settings2, Upload } from 'lucide-react';
+import { Banknote, Coins, Copy, CreditCard, Landmark, Package, Printer, Settings2, Upload } from 'lucide-react';
 import {
   clampStr,
   generateDocId,
@@ -13,8 +13,18 @@ import type {
   ProductRecord,
   SaleRecord,
   SupplierRecord,
+  WorkshopProfile,
 } from '../types/workshop';
-import { getCurrencyOption, useActiveCurrency } from '../utils/currency';
+import {
+  convertBetweenCurrencies,
+  convertFromBaseCurrency,
+  convertToBaseCurrency,
+  getCurrencyOption,
+  getCurrencyRateFromBase,
+  sanitizeCurrencyCode,
+  useActiveCurrency,
+  type CurrencyCode,
+} from '../utils/currency';
 import { compressImageToDataUrl, formatCurrency, todayISO } from '../utils/formatters';
 import {
   buildTransferQrPayload,
@@ -25,6 +35,7 @@ import {
   type TransferConfig,
 } from '../utils/payment';
 import { serializeSaleStatus } from '../utils/saleMeta';
+import { parseWorkshopMeta } from '../utils/workshopMeta';
 import {
   isValidEmail,
   parseSafeNonNegativeInt,
@@ -431,8 +442,14 @@ interface NewSaleModalProps {
   ownerId: string;
   clients: ClientRecord[];
   preselectedProduct?: ProductRecord | null;
+  profile?: WorkshopProfile | null;
   brandName?: string;
   onCreated?: (sale: SaleRecord) => void;
+}
+
+function roundCurrencyValue(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round(value * 100) / 100;
 }
 
 export const NewSaleModal: React.FC<NewSaleModalProps> = ({
@@ -441,12 +458,17 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   ownerId,
   clients,
   preselectedProduct,
+  profile,
   brandName,
   onCreated,
 }) => {
   const { notify } = useToast();
   const activeCurrency = useActiveCurrency();
-  const currencySymbol = getCurrencyOption(activeCurrency).symbol;
+  const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
+  const baseCurrency: CurrencyCode = profile ? workshopMeta.currency : activeCurrency;
+  const secondaryCurrencies = workshopMeta.secondaryCurrencies;
+
+  const [selectedCurrency, setSelectedCurrency] = useState<CurrencyCode>(baseCurrency);
   const [clientName, setClientName] = useState('');
   const [invoice, setInvoice] = useState('');
   const [quantity, setQuantity] = useState(1);
@@ -460,10 +482,18 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const [transferCfg, setTransferCfg] = useState<TransferConfig>(() => loadTransferConfig(ownerId));
   const [editingTransferCfg, setEditingTransferCfg] = useState(false);
 
+  const selectedCurrencyOption = getCurrencyOption(selectedCurrency);
+  const baseCurrencyOption = getCurrencyOption(baseCurrency);
+  const currencySymbol = selectedCurrencyOption.symbol;
+  const activeRate =
+    getCurrencyRateFromBase(selectedCurrency, baseCurrency, secondaryCurrencies) ?? 1;
+  const isSecondaryCurrency = selectedCurrency !== baseCurrency && activeRate !== 1;
+
   useEffect(() => {
     if (!open) return;
     const initialAmount = preselectedProduct ? String(preselectedProduct.price) : '';
     const loadedCfg = loadTransferConfig(ownerId);
+    setSelectedCurrency(baseCurrency);
     setClientName('');
     setInvoice(`FV-${Math.floor(1000 + Math.random() * 9000)}`);
     setQuantity(1);
@@ -494,7 +524,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [open, ownerId, preselectedProduct]);
+  }, [open, ownerId, preselectedProduct, baseCurrency]);
 
   const numericAmount = parseSafePositiveNumber(amount, 0);
   const rawDeposit = parseSafePositiveNumber(deposit, 0);
@@ -504,6 +534,10 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       : Math.min(numericAmount > 0 ? numericAmount : rawDeposit, rawDeposit);
   const pendingBalance = Math.max(0, numericAmount - numericDeposit);
   const qrChargeAmount = status === 'cobrado' ? numericAmount : numericDeposit > 0 ? numericDeposit : numericAmount;
+  const baseEquivalentAmount = isSecondaryCurrency
+    ? roundCurrencyValue(convertToBaseCurrency(numericAmount, activeRate))
+    : numericAmount;
+  const effectiveBrandName = profile?.brandName || brandName || 'TH3 BNB';
 
   useEffect(() => {
     if (!open || paymentMethod !== 'transferencia') {
@@ -516,7 +550,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     }
     const payload = buildTransferQrPayload(
       transferCfg,
-      brandName || 'TH3 BNB',
+      effectiveBrandName,
       invoice || 'VENTA',
       clientName.trim() || 'Cliente',
       qrChargeAmount
@@ -540,13 +574,79 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [open, paymentMethod, transferCfg, brandName, invoice, clientName, qrChargeAmount]);
+  }, [open, paymentMethod, transferCfg, effectiveBrandName, invoice, clientName, qrChargeAmount]);
+
+  const handleCurrencyChange = (nextRaw: string) => {
+    const nextCode = sanitizeCurrencyCode(nextRaw);
+    if (nextCode === selectedCurrency) return;
+    const nextRate =
+      getCurrencyRateFromBase(nextCode, baseCurrency, secondaryCurrencies) ?? 1;
+
+    if (preselectedProduct) {
+      const baseTotal = preselectedProduct.price * Math.max(1, quantity);
+      const nextAmountNum =
+        nextCode === baseCurrency
+          ? roundCurrencyValue(baseTotal)
+          : roundCurrencyValue(convertFromBaseCurrency(baseTotal, nextRate));
+      const nextAmtStr = String(nextAmountNum);
+      setAmount(nextAmtStr);
+      if (status === 'cobrado') {
+        setDeposit(nextAmtStr);
+      } else if (deposit.trim() && Number(deposit) > 0) {
+        const convertedDep = roundCurrencyValue(
+          convertBetweenCurrencies(
+            Number(deposit),
+            selectedCurrency,
+            nextCode,
+            baseCurrency,
+            secondaryCurrencies
+          )
+        );
+        setDeposit(String(convertedDep));
+      }
+    } else {
+      if (amount.trim() && Number(amount) > 0) {
+        const convertedAmt = roundCurrencyValue(
+          convertBetweenCurrencies(
+            Number(amount),
+            selectedCurrency,
+            nextCode,
+            baseCurrency,
+            secondaryCurrencies
+          )
+        );
+        const nextAmtStr = String(convertedAmt);
+        setAmount(nextAmtStr);
+        if (status === 'cobrado') {
+          setDeposit(nextAmtStr);
+        }
+      }
+      if (status !== 'cobrado' && deposit.trim() && Number(deposit) > 0) {
+        const convertedDep = roundCurrencyValue(
+          convertBetweenCurrencies(
+            Number(deposit),
+            selectedCurrency,
+            nextCode,
+            baseCurrency,
+            secondaryCurrencies
+          )
+        );
+        setDeposit(String(convertedDep));
+      }
+    }
+
+    setSelectedCurrency(nextCode);
+  };
 
   const handleQtyChange = (val: number) => {
     const clean = Math.max(1, Math.floor(val || 1));
     setQuantity(clean);
     if (preselectedProduct) {
-      const nextAmt = String(preselectedProduct.price * clean);
+      const baseTotal = preselectedProduct.price * clean;
+      const convertedTotal = isSecondaryCurrency
+        ? roundCurrencyValue(convertFromBaseCurrency(baseTotal, activeRate))
+        : roundCurrencyValue(baseTotal);
+      const nextAmt = String(convertedTotal);
       setAmount(nextAmt);
       if (status === 'cobrado') {
         setDeposit(nextAmt);
@@ -590,8 +690,8 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       notify('Ingresá el nombre del cliente.', 'error');
       return;
     }
-    const cleanAmount = parseSafePositiveNumber(amount, 0);
-    if (cleanAmount <= 0) {
+    const cleanTxAmount = parseSafePositiveNumber(amount, 0);
+    if (cleanTxAmount <= 0) {
       notify('Ingresá un monto mayor a 0.', 'error');
       return;
     }
@@ -614,16 +714,31 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       }
     }
 
+    const cleanTxDeposit =
+      status === 'cobrado'
+        ? cleanTxAmount
+        : Math.min(cleanTxAmount, parseSafePositiveNumber(deposit, 0));
+
+    const cleanAmount = isSecondaryCurrency
+      ? roundCurrencyValue(convertToBaseCurrency(cleanTxAmount, activeRate))
+      : cleanTxAmount;
     const cleanDeposit =
       status === 'cobrado'
         ? cleanAmount
-        : Math.min(cleanAmount, parseSafePositiveNumber(deposit, 0));
+        : Math.min(
+            cleanAmount,
+            isSecondaryCurrency
+              ? roundCurrencyValue(convertToBaseCurrency(cleanTxDeposit, activeRate))
+              : cleanTxDeposit
+          );
 
     const serializedStatus = serializeSaleStatus({
       status,
       method: paymentMethod,
       deposit: cleanDeposit,
       amount: cleanAmount,
+      currency: selectedCurrency,
+      rate: isSecondaryCurrency ? activeRate : undefined,
     });
 
     if (paymentMethod === 'transferencia') {
@@ -790,7 +905,13 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   {preselectedProduct.name}
                 </div>
                 <div className="text-xs text-slate-500">
-                  {formatCurrency(preselectedProduct.price)} c/u · Stock: {preselectedProduct.stock}
+                  {formatCurrency(
+                    isSecondaryCurrency
+                      ? roundCurrencyValue(convertFromBaseCurrency(preselectedProduct.price, activeRate))
+                      : preselectedProduct.price,
+                    selectedCurrency
+                  )}{' '}
+                  c/u · Stock: {preselectedProduct.stock}
                 </div>
               </div>
             </div>
@@ -834,6 +955,47 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           </p>
         </div>
 
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/40">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Coins className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              <label
+                htmlFor="new-sale-currency-select"
+                className="text-xs font-bold text-slate-800 dark:text-slate-100"
+              >
+                Divisa de la transacción
+              </label>
+            </div>
+            {isSecondaryCurrency ? (
+              <span className="rounded-lg bg-emerald-50 px-2 py-0.5 font-mono-num text-[11px] font-semibold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+                1 {currencySymbol} = {formatCurrency(activeRate, baseCurrency)}
+              </span>
+            ) : (
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                Moneda base del taller
+              </span>
+            )}
+          </div>
+          <select
+            id="new-sale-currency-select"
+            value={selectedCurrency}
+            onChange={(e) => handleCurrencyChange(e.target.value)}
+            className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+          >
+            <option value={baseCurrency}>
+              {baseCurrencyOption.label} · Base
+            </option>
+            {secondaryCurrencies.map((sec) => {
+              const secOpt = getCurrencyOption(sec.code);
+              return (
+                <option key={sec.code} value={sec.code}>
+                  {secOpt.label} · 1 {secOpt.symbol} = {formatCurrency(sec.rate, baseCurrency)}
+                </option>
+              );
+            })}
+          </select>
+        </div>
+
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
@@ -871,6 +1033,11 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
               placeholder="25000"
               className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-mono-num text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
+            {isSecondaryCurrency && numericAmount > 0 && (
+              <div className="mt-1 font-mono-num text-[11px] text-slate-500 dark:text-slate-400">
+                Equivale a {formatCurrency(baseEquivalentAmount, baseCurrency)} ({baseCurrencyOption.code})
+              </div>
+            )}
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
@@ -894,7 +1061,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                     : 'text-emerald-600 dark:text-emerald-400'
                 }`}
               >
-                {formatCurrency(pendingBalance)}
+                {formatCurrency(pendingBalance, selectedCurrency)}
               </span>
             </div>
           </div>
@@ -961,7 +1128,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
               <div className="min-w-0 flex-1 space-y-1.5 text-xs">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-bold text-slate-900 dark:text-white">
-                    Datos de transferencia · {formatCurrency(qrChargeAmount)}
+                    Datos de transferencia · {formatCurrency(qrChargeAmount, selectedCurrency)}
                   </span>
                   <button
                     type="button"

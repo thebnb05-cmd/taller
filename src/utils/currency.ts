@@ -161,6 +161,38 @@ export function convertFromBaseCurrency(amountInBase: number, rate: number): num
   return amountInBase / rate;
 }
 
+export function convertToBaseCurrency(amountInSecondary: number, rate: number): number {
+  if (!Number.isFinite(amountInSecondary) || !Number.isFinite(rate) || rate <= 0) {
+    return 0;
+  }
+  return amountInSecondary * rate;
+}
+
+export function getCurrencyRateFromBase(
+  currencyCode: CurrencyCode,
+  baseCurrency: CurrencyCode,
+  secondaryCurrencies: readonly SecondaryCurrencyConfig[]
+): number | null {
+  if (currencyCode === baseCurrency) return 1;
+  const match = secondaryCurrencies.find((item) => item.code === currencyCode);
+  return match && Number.isFinite(match.rate) && match.rate > 0 ? match.rate : null;
+}
+
+export function convertBetweenCurrencies(
+  amount: number,
+  fromCode: CurrencyCode,
+  toCode: CurrencyCode,
+  baseCurrency: CurrencyCode,
+  secondaryCurrencies: readonly SecondaryCurrencyConfig[]
+): number {
+  if (!Number.isFinite(amount)) return 0;
+  if (fromCode === toCode) return amount;
+  const fromRate = getCurrencyRateFromBase(fromCode, baseCurrency, secondaryCurrencies);
+  const toRate = getCurrencyRateFromBase(toCode, baseCurrency, secondaryCurrencies);
+  if (!fromRate || !toRate) return amount;
+  return (amount * fromRate) / toRate;
+}
+
 function readInitialCurrency(): CurrencyCode {
   if (typeof window === 'undefined') return DEFAULT_CURRENCY;
   const fromCookie = getPreferenceCookie(CURRENCY_COOKIE_KEY);

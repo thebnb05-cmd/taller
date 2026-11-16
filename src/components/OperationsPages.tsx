@@ -1227,6 +1227,8 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       method: info.method || 'efectivo',
       deposit: info.isPaid ? 0 : Number(s.amount || 0),
       amount: Number(s.amount || 0),
+      currency: info.currency,
+      rate: info.rate,
     });
     try {
       await updateRow('sales', s.id, { status: next });

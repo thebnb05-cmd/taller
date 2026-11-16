@@ -179,12 +179,13 @@ export function buildTransferWhatsAppText(
     code: string;
     clientName: string;
     amount: number;
+    currencyCode?: string | null;
   }
 ): string {
   const safeAmount = Number.isFinite(params.amount) ? Math.max(0, params.amount) : 0;
   const lines = [
     `Hola ${sanitizePlainLine(params.clientName, 120)}, te pasamos los datos de ${sanitizePlainLine(params.brandName || 'TH3 BNB', 80)} para abonar por transferencia (${sanitizePlainLine(params.code, 40)}):`,
-    `• Monto: ${formatCurrency(safeAmount)}`,
+    `• Monto: ${formatCurrency(safeAmount, params.currencyCode)}`,
   ];
   if (cfg.alias.trim()) lines.push(`• Alias: ${cfg.alias.trim()}`);
   if (cfg.cbu.trim()) lines.push(`• CBU/CVU: ${cfg.cbu.trim()}`);

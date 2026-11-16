@@ -812,6 +812,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         ownerId={userId}
         clients={clients}
         preselectedProduct={saleProduct}
+        profile={profile}
         brandName={profile.brandName}
         onCreated={(createdSale) => setSelectedPrintSale(createdSale)}
       />
