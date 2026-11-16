@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Coins, Image as ImageIcon, Plus, Store, Trash2, UploadCloud } from 'lucide-react';
+import { Coins, Image as ImageIcon, Plus, Store, Trash2, UploadCloud, Users, X } from 'lucide-react';
 import { clampStr, handleDbError, OperationType, stripUndefined, updateRow } from '../lib/db';
 import { DEFAULT_RECEIPT_TERMS } from '../data/catalog';
 import {
@@ -18,7 +18,11 @@ import {
   normalizeTrackingBaseUrl,
   resolveTrackingBaseUrl,
 } from '../utils/tracking';
-import { parseWorkshopMeta, serializeWorkshopSubtitle } from '../utils/workshopMeta';
+import {
+  parseWorkshopMeta,
+  sanitizeTechnicianList,
+  serializeWorkshopSubtitle,
+} from '../utils/workshopMeta';
 import {
   isValidEmail,
   sanitizeDbErrorMessage,
@@ -80,6 +84,9 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
   const [trackingBaseUrl, setTrackingBaseUrl] = useState(
     resolveTrackingBaseUrl(profile.trackingBaseUrl)
   );
+  const [techniciansEnabled, setTechniciansEnabled] = useState(initialMeta.techniciansEnabled);
+  const [technicians, setTechnicians] = useState<string[]>(initialMeta.technicians);
+  const [newTechnicianName, setNewTechnicianName] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -108,7 +115,36 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
     setLogoTransparent(profile.logoTransparent ?? true);
     setReceiptTerms(profile.receiptTerms ?? DEFAULT_RECEIPT_TERMS);
     setTrackingBaseUrl(resolveTrackingBaseUrl(profile.trackingBaseUrl));
+    setTechniciansEnabled(meta.techniciansEnabled);
+    setTechnicians(meta.technicians);
+    setNewTechnicianName('');
   }, [open, profile]);
+
+  const ownerDisplayName = [profile.firstName, profile.lastName]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+
+  const handleAddTechnician = (rawName?: string) => {
+    const candidate = sanitizePlainLine(rawName ?? newTechnicianName, 50)
+      .replace(/:/g, ' ')
+      .trim();
+    if (!candidate) return;
+    if (technicians.some((t) => t.toLowerCase() === candidate.toLowerCase())) {
+      notify('Ese técnico ya está en la lista.', 'error');
+      return;
+    }
+    if (technicians.length >= 25) {
+      notify('Podés cargar hasta 25 técnicos.', 'error');
+      return;
+    }
+    setTechnicians((prev) => sanitizeTechnicianList([...prev, candidate]));
+    if (!rawName) setNewTechnicianName('');
+  };
+
+  const handleRemoveTechnician = (name: string) => {
+    setTechnicians((prev) => prev.filter((t) => t !== name));
+  };
 
   const baseCurrencyOption = getCurrencyOption(currency);
   const unusedSecondaryOptions = CURRENCY_OPTIONS.filter(
@@ -224,6 +260,8 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
         footerNote: sanitizePlainLine(footerNote, 180),
         currency: safeCurrency,
         secondaryCurrencies: safeSecondaryCurrencies,
+        techniciansEnabled,
+        technicians: sanitizeTechnicianList(technicians),
       });
       const safeColors = wordColors
         .slice(0, 12)
@@ -564,6 +602,101 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
               />
             </div>
           </div>
+        </div>
+
+        <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-800/40">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300">
+                <Users className="h-4 w-4" />
+              </span>
+              <div>
+                <div className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                  Asignación de técnicos (opcional)
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Si trabajás solo como dueño del taller podés dejarlo desactivado. Activándolo elegís qué técnico toma cada orden.
+                </p>
+              </div>
+            </div>
+            <label className="relative inline-flex shrink-0 cursor-pointer items-center gap-2 pt-0.5">
+              <input
+                type="checkbox"
+                checked={techniciansEnabled}
+                onChange={(e) => setTechniciansEnabled(e.target.checked)}
+                className="h-4 w-4 rounded accent-[#0072BB]"
+              />
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                {techniciansEnabled ? 'Activo' : 'Opcional'}
+              </span>
+            </label>
+          </div>
+
+          {techniciansEnabled && (
+            <div className="space-y-2.5 border-t border-slate-200/80 pt-3 dark:border-slate-700/80">
+              <div className="flex flex-wrap gap-2">
+                <input
+                  type="text"
+                  maxLength={50}
+                  value={newTechnicianName}
+                  onChange={(e) => setNewTechnicianName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddTechnician();
+                    }
+                  }}
+                  placeholder="Nombre del técnico (ej: Marcos, Sofía...)"
+                  className="h-10 min-w-[180px] flex-1 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleAddTechnician()}
+                  disabled={!newTechnicianName.trim()}
+                  className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0072BB] px-3.5 text-xs font-semibold text-white transition hover:bg-[#005f9c] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Agregar
+                </button>
+                {ownerDisplayName &&
+                  !technicians.some((t) => t.toLowerCase() === ownerDisplayName.toLowerCase()) && (
+                    <button
+                      type="button"
+                      onClick={() => handleAddTechnician(ownerDisplayName)}
+                      className="inline-flex h-10 items-center gap-1 rounded-xl border border-[#0072BB]/30 bg-white px-3 text-xs font-semibold text-[#0072BB] hover:bg-sky-50 dark:border-sky-700/50 dark:bg-slate-900 dark:text-sky-300 dark:hover:bg-sky-950/40"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Agregarme ({ownerDisplayName})
+                    </button>
+                  )}
+              </div>
+
+              {technicians.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-slate-200 bg-white/70 px-3 py-2 text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-400">
+                  Agregá al menos un técnico para habilitar el selector en nuevas órdenes y filtros.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {technicians.map((tech) => (
+                    <span
+                      key={tech}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                    >
+                      <span>{tech}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveTechnician(tech)}
+                        aria-label={`Quitar técnico ${tech}`}
+                        className="rounded p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/40">

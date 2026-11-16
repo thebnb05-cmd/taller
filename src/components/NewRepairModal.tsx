@@ -95,6 +95,7 @@ interface DraftRepairItem {
   currency: CurrencyCode;
   rate: number;
   status: RepairStatus;
+  technician: string;
   accessories: string[];
   consoleAcc: Record<string, string>;
   physicalCheck: Record<string, string>;
@@ -367,6 +368,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   const [price, setPrice] = useState('');
   const [deposit, setDeposit] = useState('');
   const [status, setStatus] = useState<RepairStatus>('recibido');
+  const [technician, setTechnician] = useState('');
 
   const [accessories, setAccessories] = useState<string[]>([]);
   const [consoleAcc, setConsoleAcc] = useState<Record<string, string>>({
@@ -453,6 +455,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     setPrice('');
     setDeposit('');
     setStatus('recibido');
+    setTechnician('');
     setAccessories([]);
     setConsoleAcc({
       'Joystick 1': 'No',
@@ -486,6 +489,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     setDeposit('');
     setSelectedCurrency(baseCurrency);
     setStatus('recibido');
+    setTechnician('');
     setAccessories([]);
     setConsoleAcc({
       'Joystick 1': 'No',
@@ -663,6 +667,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
       currency: selectedCurrency,
       rate: activeRate,
       status,
+      technician: sanitizePlainLine(technician, 60),
       accessories: isConsole ? [] : accessories.slice(0, 30),
       consoleAcc: { ...consoleAcc },
       physicalCheck: { ...physicalCheck },
@@ -785,6 +790,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
           base: basePaymentStatus,
           currency: useSecondaryForItem ? item.currency : undefined,
           rate: useSecondaryForItem ? item.rate : undefined,
+          technician: item.technician || undefined,
         });
         const finalNotes = isBatch
           ? clampStr(appendBatchRefToNotes(item.notes, batchRef, i + 1, itemsToSave.length), 2000)
@@ -1627,6 +1633,26 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                 />
               </div>
             </div>
+
+            {workshopMeta.techniciansEnabled && workshopMeta.technicians.length > 0 && (
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  Técnico asignado (opcional)
+                </label>
+                <select
+                  value={technician}
+                  onChange={(e) => setTechnician(e.target.value)}
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                >
+                  <option value="">Sin asignar / Dueño del taller</option>
+                  {workshopMeta.technicians.map((techName) => (
+                    <option key={techName} value={techName}>
+                      {techName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {spareParts.length > 0 && (
               <div>

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Search, Wrench } from 'lucide-react';
+import { Plus, Search, User, Wrench } from 'lucide-react';
 import type { RepairRecord, WorkshopProfile } from '../types/workshop';
 import { extractBatchRef } from '../utils/batchRef';
 import { convertFromBaseCurrency } from '../utils/currency';
@@ -27,7 +27,21 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
 }) => {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'activas' | 'listas' | 'entregadas'>('all');
-  const baseCurrency = useMemo(() => parseWorkshopMeta(profile).currency, [profile]);
+  const [techFilter, setTechFilter] = useState<string>('all');
+  const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
+  const baseCurrency = workshopMeta.currency;
+
+  const availableTechnicians = useMemo(() => {
+    const set = new Set<string>();
+    if (workshopMeta.techniciansEnabled) {
+      workshopMeta.technicians.forEach((t) => set.add(t));
+    }
+    repairs.forEach((r) => {
+      const t = parsePaymentInfo(r).technician;
+      if (t) set.add(t);
+    });
+    return Array.from(set);
+  }, [workshopMeta.techniciansEnabled, workshopMeta.technicians, repairs]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -37,6 +51,15 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
         if (filter === 'activas' && !isActiveRepairStatus(r.status)) return false;
         if (filter === 'listas' && r.status !== 'listo') return false;
         if (filter === 'entregadas' && r.status !== 'entregado') return false;
+        const tech = parsePaymentInfo(r).technician || '';
+        if (techFilter === '__unassigned__' && tech) return false;
+        if (
+          techFilter !== 'all' &&
+          techFilter !== '__unassigned__' &&
+          tech.toLowerCase() !== techFilter.toLowerCase()
+        ) {
+          return false;
+        }
         if (!q) return true;
         return (
           r.code.toLowerCase().includes(q) ||
@@ -45,10 +68,11 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
           r.model.toLowerCase().includes(q) ||
           (r.imei || '').toLowerCase().includes(q) ||
           (r.notes || '').toLowerCase().includes(q) ||
+          tech.toLowerCase().includes(q) ||
           r.problem.toLowerCase().includes(q)
         );
       });
-  }, [filter, repairs, search]);
+  }, [filter, techFilter, repairs, search]);
 
   return (
     <div className="space-y-4">
@@ -71,8 +95,8 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
         </button>
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="relative min-w-[220px] flex-1">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             type="search"
@@ -82,6 +106,23 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
             className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-800 dark:bg-slate-900 dark:text-white"
           />
         </div>
+
+        {availableTechnicians.length > 0 && (
+          <select
+            value={techFilter}
+            onChange={(e) => setTechFilter(e.target.value)}
+            aria-label="Filtrar por técnico"
+            className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-[#0072BB] dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
+          >
+            <option value="all">Todos los técnicos</option>
+            <option value="__unassigned__">Sin asignar</option>
+            {availableTechnicians.map((techName) => (
+              <option key={techName} value={techName}>
+                Técnico: {techName}
+              </option>
+            ))}
+          </select>
+        )}
 
         <div className="flex items-center gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-900">
           {[
@@ -150,6 +191,12 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
                       {batchRef && (
                         <span className="rounded bg-sky-50 px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300">
                           {batchRef}
+                        </span>
+                      )}
+                      {paymentInfo.technician && (
+                        <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                          <User className="h-2.5 w-2.5 text-[#0072BB] dark:text-sky-400" />
+                          {paymentInfo.technician}
                         </span>
                       )}
                       <span>·</span>

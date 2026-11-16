@@ -16,9 +16,32 @@ export interface WorkshopReceiptMeta {
   footerNote: string;
   currency: CurrencyCode;
   secondaryCurrencies: SecondaryCurrencyConfig[];
+  techniciansEnabled: boolean;
+  technicians: string[];
 }
 
 const DEFAULT_SUBTITLE = 'Servicio técnico';
+
+export function sanitizeTechnicianList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'string') continue;
+    const clean = entry
+      .replace(/[:\r\n\t]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 50);
+    if (!clean) continue;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(clean);
+    if (out.length >= 25) break;
+  }
+  return out;
+}
 
 export function parseWorkshopMeta(
   profile?: Partial<WorkshopProfile> | null
@@ -37,6 +60,8 @@ export function parseWorkshopMeta(
         f: string;
         c: string;
         sc: unknown;
+        te: boolean;
+        ts: unknown;
       }>;
       const currency = sanitizeCurrencyCode(parsed.c);
       return {
@@ -49,6 +74,8 @@ export function parseWorkshopMeta(
         footerNote: typeof parsed.f === 'string' ? parsed.f : '',
         currency,
         secondaryCurrencies: sanitizeSecondaryCurrencies(parsed.sc, currency),
+        techniciansEnabled: Boolean(parsed.te),
+        technicians: sanitizeTechnicianList(parsed.ts),
       };
     } catch {
       // Fallback to treating raw as plain subtitle
@@ -64,6 +91,8 @@ export function parseWorkshopMeta(
     footerNote: '',
     currency: DEFAULT_CURRENCY,
     secondaryCurrencies: [],
+    techniciansEnabled: false,
+    technicians: [],
   };
 }
 
@@ -76,6 +105,8 @@ export function serializeWorkshopSubtitle(meta: {
   footerNote: string;
   currency?: CurrencyCode;
   secondaryCurrencies?: SecondaryCurrencyConfig[];
+  techniciansEnabled?: boolean;
+  technicians?: string[];
 }): string {
   const s = meta.subtitle.trim().slice(0, 120);
   const h = meta.hours.trim().slice(0, 120);
@@ -88,8 +119,20 @@ export function serializeWorkshopSubtitle(meta: {
     c: item.code,
     r: item.rate,
   }));
+  const te = Boolean(meta.techniciansEnabled);
+  const ts = sanitizeTechnicianList(meta.technicians);
 
-  if (!h && !r && !t && !e && !f && c === DEFAULT_CURRENCY && sc.length === 0) {
+  if (
+    !h &&
+    !r &&
+    !t &&
+    !e &&
+    !f &&
+    c === DEFAULT_CURRENCY &&
+    sc.length === 0 &&
+    !te &&
+    ts.length === 0
+  ) {
     return s || DEFAULT_SUBTITLE;
   }
 
@@ -102,5 +145,7 @@ export function serializeWorkshopSubtitle(meta: {
     ...(f ? { f } : {}),
     ...(c !== DEFAULT_CURRENCY ? { c } : {}),
     ...(sc.length > 0 ? { sc } : {}),
+    ...(te ? { te: true } : {}),
+    ...(ts.length > 0 ? { ts } : {}),
   });
 }

@@ -10,6 +10,7 @@ import type {
   WorkshopProfile,
 } from '../types/workshop';
 import { formatCompactCurrency, formatCurrency, isActiveRepairStatus } from '../utils/formatters';
+import { parsePaymentInfo } from '../utils/payment';
 import { downloadInventorySummaryPdf, downloadSalesSummaryPdf } from '../utils/pdfReport';
 import { parseSalePaymentInfo } from '../utils/saleMeta';
 
@@ -103,6 +104,22 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
 
     const lowStock = products.filter((p) => p.trackStock && p.stock <= p.minStock);
 
+    const techMap = new Map<
+      string,
+      { name: string; count: number; delivered: number; total: number }
+    >();
+    rFiltered.forEach((r) => {
+      const tech = parsePaymentInfo(r).technician;
+      if (!tech) return;
+      const key = tech.toLowerCase();
+      const prev = techMap.get(key) || { name: tech, count: 0, delivered: 0, total: 0 };
+      prev.count += 1;
+      if (r.status === 'entregado') prev.delivered += 1;
+      prev.total += Number(r.price || 0);
+      techMap.set(key, prev);
+    });
+    const byTechnician = Array.from(techMap.values()).sort((a, b) => b.total - a.total);
+
     return {
       rFiltered,
       sFiltered,
@@ -118,6 +135,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
       netResult,
       topClients,
       lowStock,
+      byTechnician,
     };
   }, [products, purchases, range, repairs, sales]);
 
@@ -313,6 +331,30 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           )}
         </div>
       </div>
+
+      {report.byTechnician.length > 0 && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+          <h2 className="mb-3 text-sm font-bold text-slate-900 dark:text-white font-display">
+            Órdenes por técnico asignado
+          </h2>
+          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            {report.byTechnician.map((tech) => (
+              <div key={tech.name} className="flex items-center justify-between py-2.5 text-xs">
+                <div>
+                  <div className="font-semibold text-slate-900 dark:text-white">{tech.name}</div>
+                  <div className="text-slate-500">
+                    {tech.count} {tech.count === 1 ? 'orden' : 'órdenes'} · {tech.delivered}{' '}
+                    {tech.delivered === 1 ? 'entregada' : 'entregadas'}
+                  </div>
+                </div>
+                <div className="font-mono-num font-bold text-slate-900 dark:text-white">
+                  {formatCurrency(tech.total)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

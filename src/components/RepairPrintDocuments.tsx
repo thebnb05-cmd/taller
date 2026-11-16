@@ -608,6 +608,11 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
             <div className="text-[11px] font-bold uppercase text-slate-700">
               Prioridad: {repair.priority} · {statusMeta.label}
             </div>
+            {paymentInfo.technician && (
+              <div className="text-[11px] font-semibold text-slate-800">
+                Técnico: {paymentInfo.technician}
+              </div>
+            )}
             <div className="text-xs text-slate-500">
               Ingreso: {formatDateShort(repair.dateIn)}
               {repair.dateEst ? ` · Est.: ${formatDateShort(repair.dateEst)}` : ''}
@@ -976,6 +981,9 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
           <div className="text-[10px] font-bold uppercase">
             Prioridad: {repair.priority} · {statusMeta.label}
           </div>
+          {paymentInfo.technician && (
+            <div className="text-[10px] font-bold">Técnico: {paymentInfo.technician}</div>
+          )}
           <div className="text-[9.5px]">
             Ing: {formatDateShort(repair.dateIn)}
             {repair.dateEst ? ` · Est: ${formatDateShort(repair.dateEst)}` : ''}

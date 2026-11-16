@@ -732,6 +732,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
       <RepairDetailModal
         repair={selectedRepair}
         clients={clients}
+        products={products}
         profile={profile}
         initialTab={repairModalInitialTab}
         justCreated={Boolean(justCreatedRepair && justCreatedRepair.id === selectedRepairId)}

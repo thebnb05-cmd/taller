@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
 import {
   Banknote,
   Camera,
+  Check,
   CheckCircle2,
   Coins,
   Copy,
@@ -12,12 +13,15 @@ import {
   Image as ImageIcon,
   Link2,
   MessageCircle,
+  Package,
   Printer,
   QrCode,
+  Search,
   Send,
   Settings2,
   Trash2,
   Upload,
+  User,
   Video,
   X,
 } from 'lucide-react';
@@ -32,6 +36,7 @@ import {
 import { STATUS_META } from '../data/catalog';
 import type {
   ClientRecord,
+  ProductRecord,
   RepairRecord,
   RepairStatus,
   WorkshopProfile,
@@ -101,6 +106,7 @@ import { useToast } from './ToastProvider';
 interface RepairDetailModalProps {
   repair: RepairRecord | null;
   clients?: ClientRecord[];
+  products?: ProductRecord[];
   profile?: WorkshopProfile | null;
   initialTab?: 'detail' | 'edit' | 'receipt';
   justCreated?: boolean;
@@ -111,6 +117,7 @@ interface RepairDetailModalProps {
 export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   repair,
   clients = [],
+  products = [],
   profile,
   initialTab = 'detail',
   justCreated = false,
@@ -119,7 +126,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
 }) => {
   const { notify } = useToast();
   const activeCurrency = useActiveCurrency();
-  const workshopMeta = parseWorkshopMeta(profile);
+  const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
   const baseCurrency: CurrencyCode = profile ? workshopMeta.currency : activeCurrency;
   const secondaryCurrencies = workshopMeta.secondaryCurrencies;
   const [editCurrency, setEditCurrency] = useState<CurrencyCode>(baseCurrency);
@@ -129,6 +136,10 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   // Edit state
   const [status, setStatus] = useState<RepairStatus>('recibido');
   const [progress, setProgress] = useState(15);
+  const [technician, setTechnician] = useState('');
+  const [selectedPartIds, setSelectedPartIds] = useState<string[]>([]);
+  const [partSearch, setPartSearch] = useState('');
+  const [syncPartPrice, setSyncPartPrice] = useState(true);
   const [notes, setNotes] = useState('');
   const [clientName, setClientName] = useState('');
   const [clientPhone, setClientPhone] = useState('');
@@ -170,6 +181,8 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     setShowLinkInput(false);
     setMediaLinkUrl('');
     setLightboxImage(null);
+    setPartSearch('');
+    setSyncPartPrice(true);
   }, [repair?.id, initialTab]);
 
   useEffect(() => {
@@ -190,6 +203,8 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     setEditCurrency(initialCur);
     setStatus((repair.status as RepairStatus) || 'recibido');
     setProgress(repair.progress ?? 15);
+    setTechnician(parsedInfo.technician || '');
+    setSelectedPartIds([...(repair.partIds || [])]);
     setNotes(repair.notes || '');
     setClientName(repair.clientName || '');
     setClientPhone(repair.clientPhone || '');
@@ -298,6 +313,69 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   );
 
   const detailWork = parseWorkDetailAndMedia(repair.workDetail);
+  const initialPartIds = repair.partIds || [];
+  const initialPartNames = repair.partNames || [];
+  const spareParts = products.filter((p) => p.category === 'Repuesto');
+  const missingAssignedParts = initialPartIds
+    .map((id, idx) => ({
+      id,
+      name: initialPartNames[idx] || 'Repuesto asignado',
+    }))
+    .filter((item) => !spareParts.some((p) => p.id === item.id));
+  const partSearchTerm = partSearch.trim().toLowerCase();
+  const filteredSpareParts = partSearchTerm
+    ? spareParts.filter(
+        (p) =>
+          p.name.toLowerCase().includes(partSearchTerm) ||
+          (p.sku || '').toLowerCase().includes(partSearchTerm) ||
+          (p.brand || '').toLowerCase().includes(partSearchTerm)
+      )
+    : spareParts;
+  const addedPartIds = selectedPartIds.filter((id) => !initialPartIds.includes(id));
+  const removedPartIds = initialPartIds.filter((id) => !selectedPartIds.includes(id));
+
+  const canAssignTechnician =
+    (workshopMeta.techniciansEnabled && workshopMeta.technicians.length > 0) ||
+    Boolean(paymentInfo.technician) ||
+    Boolean(technician);
+  const technicianOptions = Array.from(
+    new Set([
+      ...(workshopMeta.technicians || []),
+      ...(paymentInfo.technician ? [paymentInfo.technician] : []),
+      ...(technician ? [technician] : []),
+    ])
+  );
+
+  const toggleEditPart = (part: ProductRecord) => {
+    const isCurrentlySelected = selectedPartIds.includes(part.id);
+    if (!isCurrentlySelected && selectedPartIds.length >= 30) {
+      notify('Podés asignar hasta 30 repuestos por orden.', 'error');
+      return;
+    }
+    setSelectedPartIds((prev) =>
+      isCurrentlySelected ? prev.filter((idVal) => idVal !== part.id) : [...prev, part.id]
+    );
+    const basePartPrice = Math.max(0, Number(part.price || 0));
+    if (syncPartPrice && basePartPrice > 0) {
+      const partDeltaDisplay = isEditSecondary
+        ? Math.round(convertFromBaseCurrency(basePartPrice, editRate) * 100) / 100
+        : basePartPrice;
+      setPrice((prev) => {
+        const curr = parseSafePositiveNumber(prev, 0);
+        const next = isCurrentlySelected
+          ? Math.max(0, curr - partDeltaDisplay)
+          : curr + partDeltaDisplay;
+        return String(Math.round(next * 100) / 100);
+      });
+    }
+  };
+
+  const toggleMissingPart = (partId: string) => {
+    setSelectedPartIds((prev) =>
+      prev.includes(partId) ? prev.filter((idVal) => idVal !== partId) : [...prev, partId]
+    );
+  };
+
   const editBudgetNum = parseSafePositiveNumber(price, 0);
   const editDepositNum = parseSafePositiveNumber(deposit, 0);
   const editPendingBalance = Math.max(0, Math.round((editBudgetNum - editDepositNum) * 100) / 100);
@@ -395,6 +473,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
         method: basePaymentStatus === 'pagado' ? paymentInfo.method || 'efectivo' : null,
         currency: isEditSecondary ? editCurrency : undefined,
         rate: isEditSecondary ? editRate : undefined,
+        technician: technician || undefined,
       });
       const cleanName = sanitizePlainLine(clientName || repair.clientName, 160) || repair.clientName;
       const cleanPhone = sanitizePhone(clientPhone, 60);
@@ -402,6 +481,34 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       const cleanAddress = sanitizePlainLine(clientAddress, 240);
       const combinedWorkDetail = serializeWorkDetailAndMedia(workDetail, mediaItems);
       const nowIso = new Date().toISOString();
+
+      const nextPartIds = selectedPartIds.slice(0, 30);
+      const nextPartNames = nextPartIds
+        .map((id) => {
+          const found = products.find((p) => p.id === id);
+          if (found) return found.name;
+          const origIdx = initialPartIds.indexOf(id);
+          return (origIdx >= 0 && initialPartNames[origIdx]) || 'Repuesto';
+        })
+        .slice(0, 30);
+
+      for (const addedId of addedPartIds) {
+        const part = products.find((p) => p.id === addedId);
+        if (part && part.trackStock && Number(part.stock || 0) > 0) {
+          await updateRow('products', part.id, {
+            stock: Math.max(0, Number(part.stock || 0) - 1),
+          });
+        }
+      }
+
+      for (const removedId of removedPartIds) {
+        const part = products.find((p) => p.id === removedId);
+        if (part && part.trackStock) {
+          await updateRow('products', part.id, {
+            stock: Number(part.stock || 0) + 1,
+          });
+        }
+      }
 
       await updateRow(
         'repairs',
@@ -419,6 +526,8 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
           deposit: advance,
           paidAmount: advance,
           paymentStatus,
+          partIds: nextPartIds,
+          partNames: nextPartNames,
           workDetail: combinedWorkDetail,
           checkoutState: sanitizePlainLine(checkoutState, 500),
           physicalCheck,
@@ -682,6 +791,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
         paymentInfo.currency && paymentInfo.currency !== baseCurrency
           ? paymentInfo.rate
           : undefined,
+      technician: paymentInfo.technician || undefined,
     });
     try {
       await updateRow('repairs', repair.id, {
@@ -878,7 +988,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   <div className="text-xs text-slate-500 dark:text-slate-400">
                     Estado actual · Prioridad {repair.priority}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span
                       className={`inline-flex items-center rounded-lg px-2.5 py-1 text-xs font-semibold ${statusMeta.badgeClass}`}
                     >
@@ -887,6 +997,12 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                     <span className="font-mono-num text-sm font-bold text-slate-900 dark:text-white">
                       {repair.progress}%
                     </span>
+                    {paymentInfo.technician && (
+                      <span className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                        <User className="h-3 w-3 text-[#0072BB] dark:text-sky-400" />
+                        {paymentInfo.technician}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -1636,6 +1752,25 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   className="mt-2 w-full accent-[#0072BB]"
                 />
               </div>
+              {canAssignTechnician && (
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Técnico asignado (opcional)
+                  </label>
+                  <select
+                    value={technician}
+                    onChange={(e) => setTechnician(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  >
+                    <option value="">Sin asignar / Dueño del taller</option>
+                    {technicianOptions.map((techName) => (
+                      <option key={techName} value={techName}>
+                        {techName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
             <div>
@@ -1944,6 +2079,141 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                 ))}
               </div>
             </div>
+
+            {(spareParts.length > 0 || missingAssignedParts.length > 0) && (
+              <div className="space-y-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Package className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
+                    <div>
+                      <div className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                        Repuestos del inventario ({selectedPartIds.length})
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Agregá o quitá repuestos de la orden; el stock se ajusta automáticamente al guardar.
+                      </p>
+                    </div>
+                  </div>
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={syncPartPrice}
+                      onChange={(e) => setSyncPartPrice(e.target.checked)}
+                      className="h-3.5 w-3.5 rounded accent-[#0072BB]"
+                    />
+                    Ajustar presupuesto al marcar
+                  </label>
+                </div>
+
+                {spareParts.length > 6 && (
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="search"
+                      value={partSearch}
+                      onChange={(e) => setPartSearch(e.target.value)}
+                      placeholder="Buscar repuesto por nombre, marca o SKU..."
+                      className="h-9 w-full rounded-xl border border-slate-200 bg-slate-50 pl-8 pr-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                  </div>
+                )}
+
+                {missingAssignedParts.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+                      Repuestos ya asignados (no figuran en inventario actual)
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {missingAssignedParts.map((item) => {
+                        const checked = selectedPartIds.includes(item.id);
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => toggleMissingPart(item.id)}
+                            className={`flex items-center justify-between rounded-lg border px-3 py-2 text-left text-xs transition ${
+                              checked
+                                ? 'border-amber-300 bg-amber-50/70 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200'
+                                : 'border-slate-200 text-slate-500 line-through dark:border-slate-700 dark:text-slate-400'
+                            }`}
+                          >
+                            <span className="truncate font-medium">{item.name}</span>
+                            {checked && <Check className="ml-2 h-3.5 w-3.5 shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {filteredSpareParts.length > 0 ? (
+                  <div className="grid max-h-44 gap-2 overflow-y-auto rounded-xl border border-slate-200 p-2 sm:grid-cols-2 dark:border-slate-700">
+                    {filteredSpareParts.map((part) => {
+                      const checked = selectedPartIds.includes(part.id);
+                      const partDisplayPrice = isEditSecondary
+                        ? Math.round(
+                            convertFromBaseCurrency(Number(part.price || 0), editRate) * 100
+                          ) / 100
+                        : Number(part.price || 0);
+                      const outOfStock = part.trackStock && Number(part.stock || 0) <= 0;
+                      return (
+                        <button
+                          key={part.id}
+                          type="button"
+                          onClick={() => toggleEditPart(part)}
+                          className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-xs transition ${
+                            checked
+                              ? 'border-[#0072BB] bg-sky-50 text-[#0072BB] dark:border-sky-400 dark:bg-sky-950/40 dark:text-sky-300'
+                              : 'border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate font-medium">{part.name}</div>
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                              {part.trackStock
+                                ? outOfStock
+                                  ? 'Sin stock (no descontará)'
+                                  : `Stock: ${part.stock} u.`
+                                : 'Sin control de stock'}
+                            </div>
+                          </div>
+                          <span className="flex shrink-0 items-center gap-1.5 font-mono-num font-semibold">
+                            <span>{formatCurrency(partDisplayPrice, editCurrency)}</span>
+                            {checked && <Check className="h-3.5 w-3.5" />}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  spareParts.length > 0 && (
+                    <p className="text-xs text-slate-500">
+                      No hay repuestos que coincidan con "{partSearch}".
+                    </p>
+                  )
+                )}
+
+                {(addedPartIds.length > 0 || removedPartIds.length > 0) && (
+                  <div className="flex flex-wrap items-center gap-2 rounded-xl border border-sky-200 bg-sky-50/70 px-3 py-2 text-[11px] font-semibold text-[#0072BB] dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-300">
+                    <span>Cambios pendientes al guardar:</span>
+                    {addedPartIds.length > 0 && (
+                      <span>
+                        +{addedPartIds.length}{' '}
+                        {addedPartIds.length === 1 ? 'repuesto a descontar' : 'repuestos a descontar'}
+                      </span>
+                    )}
+                    {removedPartIds.length > 0 && (
+                      <span>
+                        -{removedPartIds.length}{' '}
+                        {removedPartIds.length === 1
+                          ? 'repuesto a devolver al stock'
+                          : 'repuestos a devolver al stock'}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="space-y-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
               <div className="flex flex-wrap items-center justify-between gap-2">

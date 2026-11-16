@@ -58,8 +58,10 @@ export function parsePaymentInfo(repair: Pick<RepairRecord, 'paymentStatus' | 'p
   methodLabel: string | null;
   currency: CurrencyCode | null;
   rate: number | null;
+  technician: string | null;
 } {
-  const raw = (repair.paymentStatus || '').toLowerCase().trim();
+  const originalRaw = (repair.paymentStatus || '').trim();
+  const raw = originalRaw.toLowerCase();
   const price = Number(repair.price || 0);
   const deposit = Number(repair.deposit || 0);
   const pending = Math.max(0, price - deposit);
@@ -87,6 +89,21 @@ export function parsePaymentInfo(repair: Pick<RepairRecord, 'paymentStatus' | 'p
     }
   }
 
+  let technician: string | null = null;
+  const techMatch = originalRaw.match(/(?:^|:)tech=([^:]+)/i);
+  if (techMatch) {
+    let decoded = techMatch[1];
+    try {
+      decoded = decodeURIComponent(decoded);
+    } catch {
+      // Keep raw token if malformed percent-encoding
+    }
+    const cleanTech = sanitizePlainLine(decoded, 60).replace(/:/g, ' ').trim();
+    if (cleanTech) {
+      technician = cleanTech;
+    }
+  }
+
   const isPaid =
     raw.startsWith('pagado') || (price > 0 && pending === 0);
 
@@ -96,6 +113,7 @@ export function parsePaymentInfo(repair: Pick<RepairRecord, 'paymentStatus' | 'p
     methodLabel: method ? PAYMENT_METHOD_LABELS[method] : null,
     currency,
     rate,
+    technician,
   };
 }
 
@@ -104,6 +122,7 @@ export function serializeRepairPaymentStatus(params: {
   method?: PaymentMethod | null;
   currency?: CurrencyCode | null;
   rate?: number | null;
+  technician?: string | null;
 }): string {
   const parts: string[] = [params.base];
   if (params.method) {
@@ -114,6 +133,12 @@ export function serializeRepairPaymentStatus(params: {
   }
   if (params.rate && Number.isFinite(params.rate) && params.rate > 0 && params.rate !== 1) {
     parts.push(`rate=${Math.round(params.rate * 1_000_000) / 1_000_000}`);
+  }
+  const cleanTech = sanitizePlainLine(params.technician || '', 60)
+    .replace(/:/g, ' ')
+    .trim();
+  if (cleanTech) {
+    parts.push(`tech=${encodeURIComponent(cleanTech)}`);
   }
   return parts.join(':');
 }
