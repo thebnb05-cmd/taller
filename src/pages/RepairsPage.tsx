@@ -1,6 +1,19 @@
-import React, { useMemo, useState } from 'react';
-import { Plus, Search, User, Wrench } from 'lucide-react';
-import type { RepairRecord, WorkshopProfile } from '../types/workshop';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Columns3,
+  GripVertical,
+  LayoutGrid,
+  Plus,
+  Search,
+  User,
+  Wrench,
+} from 'lucide-react';
+import { useToast } from '../components/ToastProvider';
+import { STATUS_META } from '../data/catalog';
+import { fetchPublicTicketByCode, stripUndefined, updateRow } from '../lib/db';
+import type { RepairRecord, RepairStatus, WorkshopProfile } from '../types/workshop';
 import { extractBatchRef } from '../utils/batchRef';
 import { convertFromBaseCurrency } from '../utils/currency';
 import {
@@ -10,6 +23,7 @@ import {
   isActiveRepairStatus,
 } from '../utils/formatters';
 import { parsePaymentInfo } from '../utils/payment';
+import { sanitizeDbErrorMessage } from '../utils/validation';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
 
 interface RepairsPageProps {
@@ -19,38 +33,150 @@ interface RepairsPageProps {
   onSelectRepair: (repair: RepairRecord) => void;
 }
 
+interface KanbanColumnDef {
+  status: RepairStatus;
+  title: string;
+  accentBorder: string;
+  headerBg: string;
+  dropRing: string;
+  dotClass: string;
+}
+
+const KANBAN_COLUMNS: KanbanColumnDef[] = [
+  {
+    status: 'recibido',
+    title: 'Recibido',
+    accentBorder: 'border-t-slate-400',
+    headerBg: 'bg-slate-50 dark:bg-slate-800/70',
+    dropRing: 'ring-2 ring-slate-400/60 bg-slate-50/80 dark:bg-slate-800/50',
+    dotClass: 'bg-slate-400',
+  },
+  {
+    status: 'diagnostico',
+    title: 'Diagnóstico',
+    accentBorder: 'border-t-sky-500',
+    headerBg: 'bg-sky-50/70 dark:bg-sky-950/40',
+    dropRing: 'ring-2 ring-sky-500/60 bg-sky-50/70 dark:bg-sky-950/40',
+    dotClass: 'bg-sky-500',
+  },
+  {
+    status: 'espera_repuesto',
+    title: 'Esperando repuestos',
+    accentBorder: 'border-t-amber-500',
+    headerBg: 'bg-amber-50/70 dark:bg-amber-950/40',
+    dropRing: 'ring-2 ring-amber-500/60 bg-amber-50/70 dark:bg-amber-950/40',
+    dotClass: 'bg-amber-500',
+  },
+  {
+    status: 'en_progreso',
+    title: 'En reparación',
+    accentBorder: 'border-t-[#0072BB]',
+    headerBg: 'bg-blue-50/70 dark:bg-blue-950/40',
+    dropRing: 'ring-2 ring-[#0072BB]/60 bg-blue-50/70 dark:bg-blue-950/40',
+    dotClass: 'bg-[#0072BB] dark:bg-sky-400',
+  },
+  {
+    status: 'listo',
+    title: 'Terminado',
+    accentBorder: 'border-t-emerald-500',
+    headerBg: 'bg-emerald-50/70 dark:bg-emerald-950/40',
+    dropRing: 'ring-2 ring-emerald-500/60 bg-emerald-50/70 dark:bg-emerald-950/40',
+    dotClass: 'bg-emerald-500',
+  },
+  {
+    status: 'entregado',
+    title: 'Entregado',
+    accentBorder: 'border-t-teal-500',
+    headerBg: 'bg-teal-50/70 dark:bg-teal-950/40',
+    dropRing: 'ring-2 ring-teal-500/60 bg-teal-50/70 dark:bg-teal-950/40',
+    dotClass: 'bg-teal-500',
+  },
+];
+
+const PRIORITY_BADGE: Record<string, { label: string; className: string }> = {
+  alta: {
+    label: 'Alta',
+    className: 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300',
+  },
+  media: {
+    label: 'Media',
+    className: 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300',
+  },
+  baja: {
+    label: 'Baja',
+    className: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
+  },
+};
+
 export const RepairsPage: React.FC<RepairsPageProps> = ({
   repairs,
   profile,
   onNewRepair,
   onSelectRepair,
 }) => {
+  const { notify } = useToast();
+  const [viewMode, setViewMode] = useState<'grid' | 'kanban'>('grid');
+  const [showDeliveredInKanban, setShowDeliveredInKanban] = useState(false);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'activas' | 'listas' | 'entregadas'>('all');
   const [techFilter, setTechFilter] = useState<string>('all');
+
+  const [draggedRepairId, setDraggedRepairId] = useState<string | null>(null);
+  const [dragOverStatus, setDragOverStatus] = useState<RepairStatus | null>(null);
+  const [optimisticStatuses, setOptimisticStatuses] = useState<Record<string, RepairStatus>>({});
+  const [savingIds, setSavingIds] = useState<Record<string, boolean>>({});
+  const justDraggedRef = useRef(false);
+
   const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
   const baseCurrency = workshopMeta.currency;
+
+  // Clear optimistic overrides once backend snapshot catches up
+  useEffect(() => {
+    setOptimisticStatuses((prev) => {
+      const entries = Object.entries(prev);
+      if (entries.length === 0) return prev;
+      let changed = false;
+      const next: Record<string, RepairStatus> = {};
+      for (const [id, st] of entries) {
+        const live = repairs.find((r) => r.id === id);
+        if (live && live.status !== st) {
+          next[id] = st;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [repairs]);
+
+  const effectiveRepairs = useMemo(
+    () =>
+      repairs.map((r) => {
+        const override = optimisticStatuses[r.id];
+        if (!override || override === r.status) return r;
+        const defaultProg = STATUS_META[override]?.defaultProgress ?? r.progress;
+        return { ...r, status: override, progress: defaultProg };
+      }),
+    [repairs, optimisticStatuses]
+  );
 
   const availableTechnicians = useMemo(() => {
     const set = new Set<string>();
     if (workshopMeta.techniciansEnabled) {
       workshopMeta.technicians.forEach((t) => set.add(t));
     }
-    repairs.forEach((r) => {
+    effectiveRepairs.forEach((r) => {
       const t = parsePaymentInfo(r).technician;
       if (t) set.add(t);
     });
     return Array.from(set);
-  }, [workshopMeta.techniciansEnabled, workshopMeta.technicians, repairs]);
+  }, [workshopMeta.techniciansEnabled, workshopMeta.technicians, effectiveRepairs]);
 
-  const filtered = useMemo(() => {
+  const baseFiltered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return [...repairs]
+    return [...effectiveRepairs]
       .sort((a, b) => b.createdAt - a.createdAt)
       .filter((r) => {
-        if (filter === 'activas' && !isActiveRepairStatus(r.status)) return false;
-        if (filter === 'listas' && r.status !== 'listo') return false;
-        if (filter === 'entregadas' && r.status !== 'entregado') return false;
         const tech = parsePaymentInfo(r).technician || '';
         if (techFilter === '__unassigned__' && tech) return false;
         if (
@@ -72,7 +198,129 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
           r.problem.toLowerCase().includes(q)
         );
       });
-  }, [filter, techFilter, repairs, search]);
+  }, [techFilter, effectiveRepairs, search]);
+
+  const filtered = useMemo(() => {
+    return baseFiltered.filter((r) => {
+      if (filter === 'activas' && !isActiveRepairStatus(r.status)) return false;
+      if (filter === 'listas' && r.status !== 'listo') return false;
+      if (filter === 'entregadas' && r.status !== 'entregado') return false;
+      return true;
+    });
+  }, [baseFiltered, filter]);
+
+  const visibleKanbanColumns = useMemo(
+    () =>
+      showDeliveredInKanban
+        ? KANBAN_COLUMNS
+        : KANBAN_COLUMNS.filter((c) => c.status !== 'entregado'),
+    [showDeliveredInKanban]
+  );
+
+  const deliveredCount = useMemo(
+    () => baseFiltered.filter((r) => r.status === 'entregado').length,
+    [baseFiltered]
+  );
+
+  const moveRepairToStatus = async (repair: RepairRecord, nextStatus: RepairStatus) => {
+    if (repair.status === nextStatus) return;
+    const prevStatus = (repair.status as RepairStatus) || 'recibido';
+    const nextProgress = STATUS_META[nextStatus]?.defaultProgress ?? repair.progress;
+    const nowIso = new Date().toISOString();
+
+    setOptimisticStatuses((prev) => ({ ...prev, [repair.id]: nextStatus }));
+    setSavingIds((prev) => ({ ...prev, [repair.id]: true }));
+
+    try {
+      await updateRow(
+        'repairs',
+        repair.id,
+        stripUndefined({
+          status: nextStatus,
+          progress: nextProgress,
+          updatedAt: nowIso,
+        })
+      );
+
+      if (repair.trackingCode) {
+        const ticket = await fetchPublicTicketByCode<{ id: string }>(repair.trackingCode);
+        if (ticket) {
+          await updateRow(
+            'public_tickets',
+            repair.trackingCode,
+            stripUndefined({
+              status: nextStatus,
+              progress: nextProgress,
+              updatedAt: nowIso,
+            })
+          );
+        }
+      }
+
+      const colTitle =
+        KANBAN_COLUMNS.find((c) => c.status === nextStatus)?.title ||
+        getStatusMeta(nextStatus).label;
+      notify(`${repair.code} movida a "${colTitle}".`);
+    } catch (err) {
+      setOptimisticStatuses((prev) => {
+        const copy = { ...prev };
+        if (copy[repair.id] === nextStatus) {
+          if (prevStatus) delete copy[repair.id];
+        }
+        return copy;
+      });
+      notify(
+        sanitizeDbErrorMessage(err, 'No se pudo actualizar el estado de la reparación.'),
+        'error'
+      );
+    } finally {
+      setSavingIds((prev) => {
+        const copy = { ...prev };
+        delete copy[repair.id];
+        return copy;
+      });
+    }
+  };
+
+  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, repairId: string) => {
+    setDraggedRepairId(repairId);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', repairId);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedRepairId(null);
+    setDragOverStatus(null);
+    justDraggedRef.current = true;
+    setTimeout(() => {
+      justDraggedRef.current = false;
+    }, 120);
+  };
+
+  const handleColumnDragOver = (
+    e: React.DragEvent<HTMLDivElement>,
+    colStatus: RepairStatus
+  ) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverStatus !== colStatus) {
+      setDragOverStatus(colStatus);
+    }
+  };
+
+  const handleColumnDrop = (
+    e: React.DragEvent<HTMLDivElement>,
+    targetStatus: RepairStatus
+  ) => {
+    e.preventDefault();
+    const repairId = draggedRepairId || e.dataTransfer.getData('text/plain');
+    setDragOverStatus(null);
+    setDraggedRepairId(null);
+    if (!repairId) return;
+    const repair = effectiveRepairs.find((r) => r.id === repairId);
+    if (!repair || repair.status === targetStatus) return;
+    void moveRepairToStatus(repair, targetStatus);
+  };
 
   return (
     <div className="space-y-4">
@@ -85,14 +333,44 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
             {repairs.length} órdenes registradas en el taller
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onNewRepair}
-          className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-xs font-semibold text-white hover:bg-[#005f9c] whitespace-nowrap shrink-0"
-        >
-          <Plus className="h-4 w-4" />
-          Nueva reparación
-        </button>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-900">
+            <button
+              type="button"
+              onClick={() => setViewMode('grid')}
+              className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition ${
+                viewMode === 'grid'
+                  ? 'bg-white text-[#0072BB] shadow-xs dark:bg-slate-800 dark:text-sky-400'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+              }`}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              Tarjetas
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('kanban')}
+              className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition ${
+                viewMode === 'kanban'
+                  ? 'bg-white text-[#0072BB] shadow-xs dark:bg-slate-800 dark:text-sky-400'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+              }`}
+            >
+              <Columns3 className="h-3.5 w-3.5" />
+              Kanban
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={onNewRepair}
+            className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-xs font-semibold text-white hover:bg-[#005f9c] whitespace-nowrap shrink-0"
+          >
+            <Plus className="h-4 w-4" />
+            Nueva reparación
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
@@ -124,30 +402,258 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
           </select>
         )}
 
-        <div className="flex items-center gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-900">
-          {[
-            { id: 'all', label: 'Todas' },
-            { id: 'activas', label: 'Activas' },
-            { id: 'listas', label: 'Listas' },
-            { id: 'entregadas', label: 'Entregadas' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setFilter(tab.id as typeof filter)}
-              className={`h-9 rounded-lg px-3 text-xs font-semibold transition whitespace-nowrap shrink-0 ${
-                filter === tab.id
-                  ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-800 dark:text-white'
-                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        {viewMode === 'grid' ? (
+          <div className="flex items-center gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-900">
+            {[
+              { id: 'all', label: 'Todas' },
+              { id: 'activas', label: 'Activas' },
+              { id: 'listas', label: 'Listas' },
+              { id: 'entregadas', label: 'Entregadas' },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setFilter(tab.id as typeof filter)}
+                className={`h-9 rounded-lg px-3 text-xs font-semibold transition whitespace-nowrap shrink-0 ${
+                  filter === tab.id
+                    ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-800 dark:text-white'
+                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowDeliveredInKanban((prev) => !prev)}
+            className={`inline-flex h-11 items-center gap-2 rounded-xl border px-3.5 text-xs font-semibold transition whitespace-nowrap shrink-0 ${
+              showDeliveredInKanban
+                ? 'border-teal-500 bg-teal-50 text-teal-800 dark:border-teal-700 dark:bg-teal-950/40 dark:text-teal-300'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
+            }`}
+          >
+            <span>Entregados ({deliveredCount})</span>
+            <span className="text-[10px] opacity-75">
+              {showDeliveredInKanban ? 'Ocultar' : 'Mostrar'}
+            </span>
+          </button>
+        )}
       </div>
 
-      {filtered.length === 0 ? (
+      {viewMode === 'kanban' ? (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-slate-500 dark:text-slate-400">
+            <span>
+              Arrastrá cualquier tarjeta entre columnas para cambiar su estado o usá las flechas rápidas en cada tarjeta.
+            </span>
+          </div>
+
+          <div className="flex gap-3 overflow-x-auto pb-3">
+            {visibleKanbanColumns.map((col, colIdx) => {
+              const colRepairs = baseFiltered.filter((r) => r.status === col.status);
+              const isDropActive = dragOverStatus === col.status;
+              const prevCol = colIdx > 0 ? visibleKanbanColumns[colIdx - 1] : null;
+              const nextCol =
+                colIdx < visibleKanbanColumns.length - 1
+                  ? visibleKanbanColumns[colIdx + 1]
+                  : null;
+
+              return (
+                <div
+                  key={col.status}
+                  onDragOver={(e) => handleColumnDragOver(e, col.status)}
+                  onDragLeave={(e) => {
+                    if (
+                      e.currentTarget === e.target ||
+                      !e.currentTarget.contains(e.relatedTarget as Node)
+                    ) {
+                      setDragOverStatus((prev) => (prev === col.status ? null : prev));
+                    }
+                  }}
+                  onDrop={(e) => handleColumnDrop(e, col.status)}
+                  className={`flex min-h-[420px] w-[272px] shrink-0 flex-col rounded-2xl border border-t-4 border-slate-200 bg-slate-50/70 transition lg:min-w-[235px] lg:flex-1 dark:border-slate-800 dark:bg-slate-900/50 ${
+                    col.accentBorder
+                  } ${isDropActive ? col.dropRing : ''}`}
+                >
+                  <div
+                    className={`flex items-center justify-between gap-2 rounded-t-xl border-b border-slate-200/80 px-3.5 py-2.5 dark:border-slate-800 ${col.headerBg}`}
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${col.dotClass}`} />
+                      <h2 className="truncate text-xs font-bold uppercase tracking-wide text-slate-800 dark:text-slate-100">
+                        {col.title}
+                      </h2>
+                    </div>
+                    <span className="rounded-lg bg-white/90 px-2 py-0.5 font-mono-num text-[11px] font-bold text-slate-700 shadow-2xs dark:bg-slate-900 dark:text-slate-200">
+                      {colRepairs.length}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-1 flex-col gap-2.5 p-2.5">
+                    {colRepairs.length === 0 ? (
+                      <div
+                        className={`flex flex-1 flex-col items-center justify-center rounded-xl border border-dashed px-3 py-8 text-center text-xs transition ${
+                          isDropActive
+                            ? 'border-[#0072BB] bg-sky-50/50 font-semibold text-[#0072BB] dark:border-sky-400 dark:bg-sky-950/30 dark:text-sky-300'
+                            : 'border-slate-200 text-slate-400 dark:border-slate-800 dark:text-slate-500'
+                        }`}
+                      >
+                        {isDropActive ? 'Soltar aquí' : 'Sin equipos en esta etapa'}
+                      </div>
+                    ) : (
+                      colRepairs.map((r) => {
+                        const meta = getStatusMeta(r.status);
+                        const balance = Math.max(
+                          0,
+                          Number(r.price || 0) - Number(r.deposit || 0)
+                        );
+                        const paymentInfo = parsePaymentInfo(r);
+                        const batchRef = extractBatchRef(r.notes);
+                        const priorityBadge =
+                          PRIORITY_BADGE[r.priority] || PRIORITY_BADGE.media;
+                        const isDragging = draggedRepairId === r.id;
+                        const isSaving = Boolean(savingIds[r.id]);
+
+                        return (
+                          <div
+                            key={r.id}
+                            draggable={!isSaving}
+                            onDragStart={(e) => handleDragStart(e, r.id)}
+                            onDragEnd={handleDragEnd}
+                            onClick={() => {
+                              if (justDraggedRef.current) return;
+                              onSelectRepair(r);
+                            }}
+                            className={`group cursor-pointer rounded-xl border border-slate-200 bg-white p-3 text-left shadow-2xs transition hover:border-[#0072BB]/50 hover:shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:hover:border-sky-500/40 ${
+                              isDragging ? 'scale-[0.98] opacity-50 ring-2 ring-[#0072BB]' : ''
+                            } ${isSaving ? 'opacity-70' : ''}`}
+                          >
+                            <div className="flex items-center justify-between gap-1.5">
+                              <div className="flex min-w-0 items-center gap-1.5">
+                                <GripVertical className="h-3.5 w-3.5 shrink-0 cursor-grab text-slate-300 group-hover:text-slate-500 dark:text-slate-600 dark:group-hover:text-slate-400" />
+                                <span className="font-mono-num text-[11px] font-bold text-slate-700 dark:text-slate-200">
+                                  {r.code}
+                                </span>
+                                {batchRef && (
+                                  <span className="rounded bg-sky-50 px-1 py-0.5 font-mono-num text-[9px] font-bold text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300">
+                                    {batchRef}
+                                  </span>
+                                )}
+                              </div>
+                              <span
+                                className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${priorityBadge.className}`}
+                              >
+                                {priorityBadge.label}
+                              </span>
+                            </div>
+
+                            <div className="mt-1.5 truncate text-xs font-bold text-slate-900 dark:text-white">
+                              {r.deviceIcon || '📱'} {r.brand} {r.model}
+                            </div>
+                            <div className="truncate text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                              {r.clientName}
+                            </div>
+
+                            <p className="mt-1 line-clamp-2 text-[11px] text-slate-500 dark:text-slate-400">
+                              {r.problem}
+                            </p>
+
+                            {paymentInfo.technician && (
+                              <div className="mt-1.5 inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                                <User className="h-2.5 w-2.5 text-[#0072BB] dark:text-sky-400" />
+                                {paymentInfo.technician}
+                              </div>
+                            )}
+
+                            <div className="mt-2.5 space-y-1.5 border-t border-slate-100 pt-2 dark:border-slate-800">
+                              <div className="flex items-center justify-between gap-2 text-[11px]">
+                                <span className="font-mono-num font-bold text-slate-900 dark:text-white">
+                                  {formatCurrency(r.price)}
+                                  {balance > 0 && (
+                                    <span className="ml-1 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                                      (Resta {formatCurrency(balance)})
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="font-mono-num text-[10px] font-semibold text-slate-400">
+                                  {r.progress}%
+                                </span>
+                              </div>
+
+                              <div className="h-1 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                                <div
+                                  className={`h-full rounded-full transition-all ${meta.barClass}`}
+                                  style={{
+                                    width: `${Math.min(100, Math.max(0, r.progress))}%`,
+                                  }}
+                                />
+                              </div>
+
+                              {/* Touch / Keyboard quick stage mover */}
+                              <div
+                                className="flex items-center justify-between gap-1 pt-1"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <button
+                                  type="button"
+                                  disabled={!prevCol || isSaving}
+                                  onClick={() =>
+                                    prevCol && void moveRepairToStatus(r, prevCol.status)
+                                  }
+                                  title={prevCol ? `Mover a ${prevCol.title}` : undefined}
+                                  aria-label={
+                                    prevCol ? `Mover a ${prevCol.title}` : 'Sin etapa anterior'
+                                  }
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition hover:bg-slate-100 disabled:opacity-30 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                                >
+                                  <ChevronLeft className="h-3.5 w-3.5" />
+                                </button>
+
+                                <select
+                                  value={r.status}
+                                  disabled={isSaving}
+                                  onChange={(e) =>
+                                    void moveRepairToStatus(r, e.target.value as RepairStatus)
+                                  }
+                                  aria-label={`Cambiar estado de ${r.code}`}
+                                  className="h-7 min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-1.5 text-[10px] font-semibold text-slate-700 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                                >
+                                  {KANBAN_COLUMNS.map((opt) => (
+                                    <option key={opt.status} value={opt.status}>
+                                      {opt.title}
+                                    </option>
+                                  ))}
+                                </select>
+
+                                <button
+                                  type="button"
+                                  disabled={!nextCol || isSaving}
+                                  onClick={() =>
+                                    nextCol && void moveRepairToStatus(r, nextCol.status)
+                                  }
+                                  title={nextCol ? `Mover a ${nextCol.title}` : undefined}
+                                  aria-label={
+                                    nextCol ? `Mover a ${nextCol.title}` : 'Sin etapa siguiente'
+                                  }
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition hover:bg-slate-100 disabled:opacity-30 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                                >
+                                  <ChevronRight className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-10 text-center dark:border-slate-800 dark:bg-slate-900">
           <Wrench className="mx-auto h-7 w-7 text-slate-400" />
           <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">
