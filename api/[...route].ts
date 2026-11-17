@@ -1,7 +1,3 @@
-import express from 'express';
-import { registerApiRoutes } from './_handler';
+import handler from './index.js';
 
-const app = express();
-registerApiRoutes(app);
-
-export default app;
+export default handler;

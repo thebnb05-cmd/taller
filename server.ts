@@ -3,13 +3,20 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import express, { type Request, type Response } from 'express';
-import { registerApiRoutes } from './api/_handler';
+import { handleApiRequest } from './api/index';
 
 const PORT = Number(process.env.PORT || 3000);
 
 async function startServer() {
   const app = express();
-  registerApiRoutes(app);
+
+  app.use('/api', (req: Request, res: Response, next) => {
+    void handleApiRequest(req, res)
+      .then((handled) => {
+        if (!handled) next();
+      })
+      .catch(next);
+  });
 
   const httpServer = http.createServer(app);
 
