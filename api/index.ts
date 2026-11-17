@@ -211,7 +211,24 @@ async function verifySupabaseSessionUser(
 }
 
 function resolvePlatformMpToken(): string {
-  return (process.env.PLATFORM_MERCADOPAGO_ACCESS_TOKEN || '').trim();
+  let raw = process.env.PLATFORM_MERCADOPAGO_ACCESS_TOKEN;
+  if (!raw) {
+    for (const [k, v] of Object.entries(process.env)) {
+      const normalizedKey = k.trim().toUpperCase();
+      if (
+        (normalizedKey === 'PLATFORM_MERCADOPAGO_ACCESS_TOKEN' ||
+          normalizedKey === 'PLATFORM_MERCADO_PAGO_ACCESS_TOKEN') &&
+        v
+      ) {
+        raw = v;
+        break;
+      }
+    }
+  }
+  return String(raw || '')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '')
+    .trim();
 }
 
 function resolveUserSubscriptionState(
@@ -437,7 +454,10 @@ export async function handleApiRequest(
   const method = (req.method || 'GET').toUpperCase();
 
   if (apiPath === '/api/health' && method === 'GET') {
-    sendJson(res, 200, { ok: true });
+    sendJson(res, 200, {
+      ok: true,
+      mpConfigured: Boolean(resolvePlatformMpToken()),
+    });
     return true;
   }
 
@@ -1375,6 +1395,96 @@ export async function handleApiRequest(
           err instanceof Error
             ? err.message
             : 'Error de red al probar PLATFORM_MERCADOPAGO_ACCESS_TOKEN contra Mercado Pago.',
+      });
+      return true;
+    }
+  }
+
+  if (apiPath === '/api/subscriptions/test-checkout') {
+    const user = await verifySupabaseSessionUser(req);
+    if (!user) {
+      sendJson(res, 401, { ok: false, error: 'Sesión inválida o expirada.' });
+      return true;
+    }
+
+    if (!EXEMPT_ANNUAL_EMAILS.has(user.email.toLowerCase())) {
+      sendJson(res, 403, {
+        ok: false,
+        error: 'Solo la cuenta administradora de la plataforma puede generar links de prueba.',
+      });
+      return true;
+    }
+
+    const platformToken = resolvePlatformMpToken();
+    if (!platformToken) {
+      sendJson(res, 503, {
+        ok: false,
+        error:
+          'No se encontró PLATFORM_MERCADOPAGO_ACCESS_TOKEN configurado en las variables de entorno del servidor.',
+      });
+      return true;
+    }
+
+    const rawBackUrl = String(body.backUrl || '').trim();
+    const safeBackUrl =
+      rawBackUrl.startsWith('https://') || rawBackUrl.startsWith('http://')
+        ? rawBackUrl
+        : `${resolveRequestOrigin(req)}/?mp_test=return`;
+
+    try {
+      const prefRes = await mpFetch('/checkout/preferences', platformToken, {
+        method: 'POST',
+        body: {
+          external_reference: `TH3TEST|${user.userId}|${Date.now()}`,
+          items: [
+            {
+              id: 'th3bnb-test-payment',
+              title: 'Prueba de cobro TH3 BNB Suscripciones',
+              description: 'Verificación de integración Checkout Mercado Pago',
+              quantity: 1,
+              currency_id: 'ARS',
+              unit_price: 100,
+            },
+          ],
+          back_urls: {
+            success: safeBackUrl,
+            pending: safeBackUrl,
+            failure: safeBackUrl,
+          },
+          ...(safeBackUrl.startsWith('https://') ? { auto_return: 'approved' } : {}),
+        },
+      });
+
+      const checkoutUrl = String(
+        prefRes.data.init_point || prefRes.data.sandbox_init_point || ''
+      ).trim();
+
+      if (!prefRes.ok || !checkoutUrl) {
+        sendJson(res, prefRes.status >= 400 ? prefRes.status : 400, {
+          ok: false,
+          error: extractMpErrorMessage(
+            prefRes.data,
+            'Mercado Pago no permitió generar el link de pago de prueba.'
+          ),
+        });
+        return true;
+      }
+
+      sendJson(res, 200, {
+        ok: true,
+        checkoutUrl,
+        preferenceId: String(prefRes.data.id || ''),
+        mode: platformToken.startsWith('TEST-') ? 'test' : 'production',
+        amount: 100,
+      });
+      return true;
+    } catch (err) {
+      sendJson(res, 502, {
+        ok: false,
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Error de red al crear la prueba de pago en Mercado Pago.',
       });
       return true;
     }

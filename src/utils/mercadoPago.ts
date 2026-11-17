@@ -284,3 +284,44 @@ export async function verifyPlatformMercadoPagoToken(): Promise<MpPlatformTokenV
     };
   }
 }
+
+export interface MpTestCheckoutResult {
+  ok: boolean;
+  checkoutUrl?: string;
+  preferenceId?: string;
+  mode?: 'production' | 'test';
+  amount?: number;
+  error?: string;
+}
+
+export async function testPlatformSubscriptionCheckout(
+  backUrl?: string
+): Promise<MpTestCheckoutResult> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const jwt = data?.session?.access_token;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (jwt) {
+      headers.Authorization = `Bearer ${jwt}`;
+    }
+
+    const res = await fetch('/api/subscriptions/test-checkout', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ backUrl: backUrl || window.location.href }),
+    });
+    const parsed = (await res.json().catch(() => null)) as MpTestCheckoutResult | null;
+    if (!parsed || typeof parsed !== 'object') {
+      return {
+        ok: false,
+        error: `Respuesta inválida del servidor (HTTP ${res.status}) al generar la prueba de pago.`,
+      };
+    }
+    return parsed;
+  } catch {
+    return {
+      ok: false,
+      error: 'Error de red al generar la prueba de pago en Mercado Pago.',
+    };
+  }
+}

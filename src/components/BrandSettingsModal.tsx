@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Coins,
   Crown,
+  ExternalLink,
   Image as ImageIcon,
   Loader2,
   Plus,
@@ -51,8 +52,10 @@ import {
 } from '../utils/validation';
 import type { WorkshopProfile } from '../types/workshop';
 import {
+  testPlatformSubscriptionCheckout,
   verifyPlatformMercadoPagoToken,
   type MpPlatformTokenVerificationResult,
+  type MpTestCheckoutResult,
 } from '../utils/mercadoPago';
 import {
   getPlanDisplayName,
@@ -124,6 +127,8 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
   const [latestMpConfig, setLatestMpConfig] = useState(initialMeta.mercadoPago);
   const [platformCheck, setPlatformCheck] = useState<MpPlatformTokenVerificationResult | null>(null);
   const [checkingPlatformToken, setCheckingPlatformToken] = useState(false);
+  const [testCheckout, setTestCheckout] = useState<MpTestCheckoutResult | null>(null);
+  const [creatingTestCheckout, setCreatingTestCheckout] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -141,6 +146,24 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
       }
     } finally {
       setCheckingPlatformToken(false);
+    }
+  }, [notify]);
+
+  const handleCreateTestCheckout = useCallback(async () => {
+    setCreatingTestCheckout(true);
+    setTestCheckout(null);
+    try {
+      const res = await testPlatformSubscriptionCheckout(
+        `${window.location.origin}/?mp_test=return`
+      );
+      setTestCheckout(res);
+      if (res.ok && res.checkoutUrl) {
+        notify('Link de prueba ($100) generado en Mercado Pago.');
+      } else {
+        notify(res.error || 'No se pudo generar el link de prueba.', 'error');
+      }
+    } finally {
+      setCreatingTestCheckout(false);
     }
   }, [notify]);
 
@@ -173,6 +196,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
     setTechnicians(meta.technicians);
     setNewTechnicianName('');
     setLatestMpConfig(meta.mercadoPago);
+    setTestCheckout(null);
     void runPlatformTokenCheck(false);
   }, [open, profile, runPlatformTokenCheck]);
 
@@ -908,22 +932,74 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
           </div>
 
           {platformCheck?.valid ? (
-            <div className="rounded-xl border border-emerald-200/80 bg-white/85 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-800/60 dark:bg-slate-900/70 dark:text-emerald-200">
-              <div className="font-semibold">
-                Conexión Exitosa
-                {platformCheck.account
-                  ? ` · ${
-                      platformCheck.account.nickname ||
-                      platformCheck.account.email ||
-                      platformCheck.account.sellerId
-                    }${platformCheck.account.siteId ? ` (${platformCheck.account.siteId})` : ''}`
-                  : ''}
+            <div className="space-y-2.5 rounded-xl border border-emerald-200/80 bg-white/85 px-3 py-2.5 text-xs text-emerald-900 dark:border-emerald-800/60 dark:bg-slate-900/70 dark:text-emerald-200">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="font-semibold">
+                    Conexión Exitosa
+                    {platformCheck.account
+                      ? ` · ${
+                          platformCheck.account.nickname ||
+                          platformCheck.account.email ||
+                          platformCheck.account.sellerId
+                        }${platformCheck.account.siteId ? ` (${platformCheck.account.siteId})` : ''}`
+                      : ''}
+                  </div>
+                  <div className="mt-0.5 text-[11px] opacity-85">
+                    {platformCheck.subscriptionsReady
+                      ? 'Credenciales verificadas y API de Suscripciones operativa.'
+                      : 'Credenciales verificadas correctamente con Mercado Pago.'}
+                  </div>
+                </div>
+
+                {platformCheck.account && (
+                  <button
+                    type="button"
+                    disabled={creatingTestCheckout}
+                    onClick={() => void handleCreateTestCheckout()}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 text-[11px] font-semibold text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-60 dark:border-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-200"
+                  >
+                    {creatingTestCheckout ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <ExternalLink className="h-3 w-3" />
+                    )}
+                    {creatingTestCheckout ? 'Generando...' : 'Probar link de pago ($100)'}
+                  </button>
+                )}
               </div>
-              <div className="mt-0.5 text-[11px] opacity-85">
-                {platformCheck.subscriptionsReady
-                  ? 'Credenciales verificadas y API de Suscripciones operativa.'
-                  : 'Credenciales verificadas correctamente con Mercado Pago.'}
-              </div>
+
+              {testCheckout && (
+                <div
+                  className={`rounded-lg border px-2.5 py-2 text-[11px] ${
+                    testCheckout.ok && testCheckout.checkoutUrl
+                      ? 'border-emerald-200 bg-emerald-50/70 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100'
+                      : 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300'
+                  }`}
+                >
+                  {testCheckout.ok && testCheckout.checkoutUrl ? (
+                    <div className="space-y-1">
+                      <div className="font-semibold">
+                        Link de prueba generado correctamente ({testCheckout.mode === 'test' ? 'Modo Prueba' : 'Modo Producción'}).
+                      </div>
+                      <a
+                        href={testCheckout.checkoutUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 font-semibold text-[#0072BB] underline dark:text-sky-300"
+                      >
+                        Abrir checkout de Mercado Pago ($100)
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                      <div className="text-[10px] opacity-80">
+                        Nota: Mercado Pago no permite pagar con la misma cuenta receptora; para probar un pago real usá otra cuenta o modo incógnito.
+                      </div>
+                    </div>
+                  ) : (
+                    <div>{testCheckout.error || 'No se pudo generar el link de prueba.'}</div>
+                  )}
+                </div>
+              )}
             </div>
           ) : platformCheck ? (
             <div className="rounded-xl border border-red-200/80 bg-white/85 px-3 py-2 text-xs text-red-700 dark:border-red-900/60 dark:bg-slate-900/70 dark:text-red-300">
