@@ -262,13 +262,16 @@ export async function verifyPlatformMercadoPagoToken(): Promise<MpPlatformTokenV
       body: JSON.stringify({}),
     });
 
+    const contentType = res.headers.get('content-type') || '';
     const parsed = (await res.json().catch(() => null)) as MpPlatformTokenVerificationResult | null;
     if (!parsed || typeof parsed !== 'object') {
       return {
         ok: false,
         configured: false,
         valid: false,
-        error: 'Respuesta inválida al verificar el token de la plataforma.',
+        error: contentType.includes('text/html')
+          ? 'El servidor /api no está desplegado o actualizado en este dominio (devolvió HTML en vez de JSON).'
+          : `Respuesta inválida del servidor (HTTP ${res.status}) al verificar el token de la plataforma.`,
       };
     }
     return parsed;
