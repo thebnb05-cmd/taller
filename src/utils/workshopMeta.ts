@@ -12,6 +12,7 @@ import {
   sanitizeMercadoPagoConfig,
   type MercadoPagoConfig,
 } from './mercadoPago';
+import type { SignedSubscriptionRecord } from './subscription';
 
 export interface WorkshopReceiptMeta {
   subtitle: string;
@@ -25,6 +26,7 @@ export interface WorkshopReceiptMeta {
   techniciansEnabled: boolean;
   technicians: string[];
   mercadoPago?: MercadoPagoConfig;
+  subscription?: SignedSubscriptionRecord;
 }
 
 const DEFAULT_SUBTITLE = 'Servicio técnico';
@@ -89,6 +91,7 @@ export function parseWorkshopMeta(
           sn: string;
           se: string;
         }>;
+        sub: SignedSubscriptionRecord;
       }>;
       const currency = sanitizeCurrencyCode(parsed.c);
       const mp =
@@ -101,6 +104,13 @@ export function parseWorkshopMeta(
               sellerNickname: parsed.mp.sn,
               sellerEmail: parsed.mp.se,
             })
+          : undefined;
+      const sub =
+        parsed.sub &&
+        typeof parsed.sub === 'object' &&
+        parsed.sub.payload &&
+        typeof parsed.sub.sig === 'string'
+          ? parsed.sub
           : undefined;
 
       return {
@@ -116,6 +126,7 @@ export function parseWorkshopMeta(
         techniciansEnabled: Boolean(parsed.te),
         technicians: sanitizeTechnicianList(parsed.ts),
         ...(hasMercadoPagoFields(mp) ? { mercadoPago: mp } : {}),
+        ...(sub ? { subscription: sub } : {}),
       };
     } catch {
       // Fallback to treating raw as plain subtitle
@@ -148,6 +159,7 @@ export function serializeWorkshopSubtitle(meta: {
   techniciansEnabled?: boolean;
   technicians?: string[];
   mercadoPago?: MercadoPagoConfig;
+  subscription?: SignedSubscriptionRecord;
 }): string {
   const s = meta.subtitle.trim().slice(0, 120);
   const h = meta.hours.trim().slice(0, 120);
@@ -164,6 +176,10 @@ export function serializeWorkshopSubtitle(meta: {
   const ts = sanitizeTechnicianList(meta.technicians);
   const cleanMp = meta.mercadoPago ? sanitizeMercadoPagoConfig(meta.mercadoPago) : undefined;
   const includeMp = hasMercadoPagoFields(cleanMp);
+  const sub =
+    meta.subscription && meta.subscription.payload && typeof meta.subscription.sig === 'string'
+      ? meta.subscription
+      : undefined;
 
   if (
     !h &&
@@ -175,7 +191,8 @@ export function serializeWorkshopSubtitle(meta: {
     sc.length === 0 &&
     !te &&
     ts.length === 0 &&
-    !includeMp
+    !includeMp &&
+    !sub
   ) {
     return s || DEFAULT_SUBTITLE;
   }
@@ -203,6 +220,7 @@ export function serializeWorkshopSubtitle(meta: {
           },
         }
       : {}),
+    ...(sub ? { sub } : {}),
   });
 }
 
@@ -232,10 +250,30 @@ export async function saveMercadoPagoConfigToProfile(
     'workshop_profiles',
     profile.id,
     stripUndefined({
-      subtitle: clampStr(encodedSubtitle, 4000),
+      subtitle: clampStr(encodedSubtitle, 8000),
       updatedAt: new Date().toISOString(),
     })
   );
 
   return savedLocal;
+}
+
+export async function saveSubscriptionToProfile(
+  profile: WorkshopProfile,
+  subscription: SignedSubscriptionRecord
+): Promise<void> {
+  const currentMeta = parseWorkshopMeta(profile);
+  const encodedSubtitle = serializeWorkshopSubtitle({
+    ...currentMeta,
+    subscription,
+  });
+
+  await updateRow(
+    'workshop_profiles',
+    profile.id,
+    stripUndefined({
+      subtitle: clampStr(encodedSubtitle, 8000),
+      updatedAt: new Date().toISOString(),
+    })
+  );
 }

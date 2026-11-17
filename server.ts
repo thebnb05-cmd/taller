@@ -1,11 +1,229 @@
 import 'dotenv/config';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import express, { type Request, type Response } from 'express';
 
 const PORT = Number(process.env.PORT || 3000);
 const MP_API_BASE = 'https://api.mercadopago.com';
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://fjkxnvqqmhxfycqbkmqy.supabase.co';
+const SUPABASE_ANON_KEY =
+  process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_ZDUlk1JOyzUt-VpYIcnM2Q_5Vdqyyrz';
+const TRIAL_DAYS = 15;
+const TRIAL_LAUNCH_EPOCH = Date.parse('2026-11-17T00:00:00Z');
+const SUBSCRIPTION_SIGNING_SECRET =
+  process.env.SUBSCRIPTION_SIGNING_SECRET ||
+  crypto
+    .createHash('sha256')
+    .update(`${SUPABASE_URL}::th3bnb-sub-hmac-v1-c7e8b751`)
+    .digest('hex');
+
+const EXEMPT_ANNUAL_EMAILS = new Set(
+  [
+    'thebnb05@gmail.com',
+    ...String(process.env.PLATFORM_EXEMPT_EMAILS || '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  ].map((email) => email.toLowerCase())
+);
+
+type ServerSubscriptionPlanId = 'mensual' | 'semestral' | 'anual';
+
+const SERVER_PLANS: Record<
+  ServerSubscriptionPlanId,
+  { name: string; months: number; originalPrice: number; price: number }
+> = {
+  mensual: {
+    name: 'Plan Mensual (1 mes)',
+    months: 1,
+    originalPrice: 7000,
+    price: 3655,
+  },
+  semestral: {
+    name: 'Plan 6 Meses',
+    months: 6,
+    originalPrice: 42000,
+    price: 21930,
+  },
+  anual: {
+    name: 'Plan Anual (12 meses)',
+    months: 12,
+    originalPrice: 84000,
+    price: 43860,
+  },
+};
+
+interface ServerSubscriptionPayload {
+  userId: string;
+  email: string;
+  planId: 'trial' | ServerSubscriptionPlanId;
+  status: 'active' | 'expired';
+  startedAt: number;
+  expiresAt: number;
+  isExemptAnnual: boolean;
+  autoRenewFree: boolean;
+  provider: 'trial' | 'mercadopago' | 'exempt';
+  providerSubscriptionId?: string;
+  externalReference?: string;
+  updatedAt: number;
+}
+
+interface ServerSignedSubscription {
+  payload: ServerSubscriptionPayload;
+  sig: string;
+}
+
+function addMonthsMs(baseMs: number, months: number): number {
+  const date = new Date(baseMs);
+  const targetDay = date.getDate();
+  date.setMonth(date.getMonth() + months);
+  if (date.getDate() < targetDay) {
+    date.setDate(0);
+  }
+  return date.getTime();
+}
+
+function signSubscriptionPayload(payload: ServerSubscriptionPayload): ServerSignedSubscription {
+  const canonical = JSON.stringify(payload);
+  const sig = crypto
+    .createHmac('sha256', SUBSCRIPTION_SIGNING_SECRET)
+    .update(canonical)
+    .digest('hex');
+  return { payload, sig };
+}
+
+function verifySignedSubscription(
+  raw: unknown,
+  expectedUserId: string
+): ServerSignedSubscription | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const candidate = raw as { payload?: ServerSubscriptionPayload; sig?: unknown };
+  if (!candidate.payload || typeof candidate.payload !== 'object' || typeof candidate.sig !== 'string') {
+    return null;
+  }
+  if (candidate.payload.userId !== expectedUserId) {
+    return null;
+  }
+  const canonical = JSON.stringify(candidate.payload);
+  const expectedSig = crypto
+    .createHmac('sha256', SUBSCRIPTION_SIGNING_SECRET)
+    .update(canonical)
+    .digest('hex');
+  const sigBuf = Buffer.from(candidate.sig, 'utf8');
+  const expBuf = Buffer.from(expectedSig, 'utf8');
+  if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+    return null;
+  }
+  return { payload: candidate.payload, sig: candidate.sig };
+}
+
+async function verifySupabaseSessionUser(
+  req: Request
+): Promise<{ userId: string; email: string; createdAt: number } | null> {
+  const authHeader = req.headers.authorization || '';
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  const jwt = match?.[1]?.trim() || '';
+  if (!jwt) return null;
+
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        apikey: SUPABASE_ANON_KEY,
+      },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { id?: string; email?: string; created_at?: string };
+    const userId = String(data.id || '').trim();
+    const email = String(data.email || '').trim().toLowerCase();
+    if (!userId || !email) return null;
+    const createdAt = Date.parse(String(data.created_at || '')) || Date.now();
+    return { userId, email, createdAt };
+  } catch {
+    return null;
+  }
+}
+
+function resolvePlatformMpToken(): string {
+  return (process.env.PLATFORM_MERCADOPAGO_ACCESS_TOKEN || '').trim();
+}
+
+function resolveUserSubscriptionState(
+  user: { userId: string; email: string; createdAt: number },
+  existingRaw: unknown
+): ServerSignedSubscription {
+  const now = Date.now();
+  const verifiedExisting = verifySignedSubscription(existingRaw, user.userId);
+  const isExempt = EXEMPT_ANNUAL_EMAILS.has(user.email.toLowerCase());
+
+  if (isExempt) {
+    if (
+      verifiedExisting &&
+      verifiedExisting.payload.isExemptAnnual &&
+      verifiedExisting.payload.expiresAt > now
+    ) {
+      const refreshed: ServerSubscriptionPayload = {
+        ...verifiedExisting.payload,
+        email: user.email,
+        status: 'active',
+        updatedAt: now,
+      };
+      return signSubscriptionPayload(refreshed);
+    }
+
+    // First time or expired: automatically activate / renew 1 full year without cost
+    const startedAt = now;
+    const expiresAt = addMonthsMs(startedAt, 12);
+    return signSubscriptionPayload({
+      userId: user.userId,
+      email: user.email,
+      planId: 'anual',
+      status: 'active',
+      startedAt,
+      expiresAt,
+      isExemptAnnual: true,
+      autoRenewFree: true,
+      provider: 'exempt',
+      updatedAt: now,
+    });
+  }
+
+  if (verifiedExisting && !verifiedExisting.payload.isExemptAnnual) {
+    const resolvedExpiresAt =
+      verifiedExisting.payload.planId === 'trial'
+        ? Math.max(
+            verifiedExisting.payload.expiresAt,
+            verifiedExisting.payload.startedAt + TRIAL_DAYS * 24 * 60 * 60 * 1000
+          )
+        : verifiedExisting.payload.expiresAt;
+    const isActive = resolvedExpiresAt > now;
+    return signSubscriptionPayload({
+      ...verifiedExisting.payload,
+      expiresAt: resolvedExpiresAt,
+      email: user.email,
+      status: isActive ? 'active' : 'expired',
+      updatedAt: now,
+    });
+  }
+
+  // Initial 15-day trial anchored to account creation (or platform subscription launch)
+  const trialStart = Math.max(user.createdAt, TRIAL_LAUNCH_EPOCH);
+  const trialExpires = trialStart + TRIAL_DAYS * 24 * 60 * 60 * 1000;
+  return signSubscriptionPayload({
+    userId: user.userId,
+    email: user.email,
+    planId: 'trial',
+    status: trialExpires > now ? 'active' : 'expired',
+    startedAt: trialStart,
+    expiresAt: trialExpires,
+    isExemptAnnual: false,
+    autoRenewFree: false,
+    provider: 'trial',
+    updatedAt: now,
+  });
+}
 
 interface MpErrorPayload {
   message?: string;
@@ -666,10 +884,321 @@ async function startServer() {
     }
   });
 
+  app.post('/api/subscriptions/status', async (req: Request, res: Response) => {
+    const user = await verifySupabaseSessionUser(req);
+    if (!user) {
+      res.status(401).json({ ok: false, error: 'Sesión inválida o expirada.' });
+      return;
+    }
+    const subscription = resolveUserSubscriptionState(user, req.body?.subscriptionToken);
+    res.json({
+      ok: true,
+      subscription,
+      mpConfigured: Boolean(resolvePlatformMpToken()),
+    });
+  });
+
+  app.post('/api/subscriptions/checkout', async (req: Request, res: Response) => {
+    const user = await verifySupabaseSessionUser(req);
+    if (!user) {
+      res.status(401).json({ ok: false, error: 'Sesión inválida o expirada.' });
+      return;
+    }
+
+    if (EXEMPT_ANNUAL_EMAILS.has(user.email.toLowerCase())) {
+      const subscription = resolveUserSubscriptionState(user, null);
+      res.json({
+        ok: true,
+        exemptRenewed: true,
+        subscription,
+      });
+      return;
+    }
+
+    const planId = String(req.body?.planId || '') as ServerSubscriptionPlanId;
+    const plan = SERVER_PLANS[planId];
+    if (!plan) {
+      res.status(400).json({ ok: false, error: 'Plan de suscripción inválido.' });
+      return;
+    }
+
+    const platformToken = resolvePlatformMpToken();
+    if (!platformToken) {
+      res.status(503).json({
+        ok: false,
+        error:
+          'El administrador de la plataforma aún no configuró el Access Token central de suscripciones en Mercado Pago (PLATFORM_MERCADOPAGO_ACCESS_TOKEN).',
+      });
+      return;
+    }
+
+    const rawBackUrl = String(req.body?.backUrl || '').trim();
+    const safeBackUrl =
+      rawBackUrl.startsWith('https://') || rawBackUrl.startsWith('http://')
+        ? rawBackUrl
+        : `${process.env.APP_URL || 'http://localhost:3000'}/?mp_sub=return`;
+    const externalReference = `TH3SUB|${user.userId}|${planId}|${Date.now()}`;
+
+    try {
+      // 1) Primary flow: Mercado Pago Subscriptions (Preapproval)
+      const preapprovalRes = await mpFetch('/preapproval', platformToken, {
+        method: 'POST',
+        body: {
+          reason: `TH3 BNB Taller - ${plan.name}`,
+          external_reference: externalReference,
+          payer_email: user.email,
+          auto_recurring: {
+            frequency: plan.months,
+            frequency_type: 'months',
+            transaction_amount: plan.price,
+            currency_id: 'ARS',
+          },
+          back_url: safeBackUrl,
+          status: 'pending',
+        },
+      });
+
+      const preapprovalUrl = String(
+        preapprovalRes.data.init_point || preapprovalRes.data.sandbox_init_point || ''
+      ).trim();
+
+      if (preapprovalRes.ok && preapprovalUrl) {
+        res.json({
+          ok: true,
+          checkoutUrl: preapprovalUrl,
+          providerId: String(preapprovalRes.data.id || ''),
+          kind: 'preapproval',
+          externalReference,
+          planId,
+        });
+        return;
+      }
+
+      // 2) Fallback: Mercado Pago Checkout Pro preference for test/non-https environments
+      const prefRes = await mpFetch('/checkout/preferences', platformToken, {
+        method: 'POST',
+        body: {
+          external_reference: externalReference,
+          items: [
+            {
+              id: `sub-${planId}`,
+              title: `TH3 BNB Taller - ${plan.name}`,
+              description: `Suscripción ${plan.name} con descuento promocional`,
+              quantity: 1,
+              currency_id: 'ARS',
+              unit_price: plan.price,
+            },
+          ],
+          payer: {
+            email: user.email,
+          },
+          back_urls: {
+            success: safeBackUrl,
+            pending: safeBackUrl,
+            failure: safeBackUrl,
+          },
+          ...(safeBackUrl.startsWith('https://') ? { auto_return: 'approved' } : {}),
+        },
+      });
+
+      const prefUrl = String(
+        prefRes.data.init_point || prefRes.data.sandbox_init_point || ''
+      ).trim();
+
+      if (!prefRes.ok || !prefUrl) {
+        res.status(prefRes.status >= 400 ? prefRes.status : 400).json({
+          ok: false,
+          error: extractMpErrorMessage(
+            preapprovalRes.data || prefRes.data,
+            'Mercado Pago no permitió generar el link de suscripción.'
+          ),
+        });
+        return;
+      }
+
+      res.json({
+        ok: true,
+        checkoutUrl: prefUrl,
+        providerId: String(prefRes.data.id || ''),
+        kind: 'preference',
+        externalReference,
+        planId,
+      });
+    } catch (err) {
+      res.status(502).json({
+        ok: false,
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Error de red al crear la suscripción en Mercado Pago.',
+      });
+    }
+  });
+
+  app.post('/api/subscriptions/verify', async (req: Request, res: Response) => {
+    const user = await verifySupabaseSessionUser(req);
+    if (!user) {
+      res.status(401).json({ ok: false, error: 'Sesión inválida o expirada.' });
+      return;
+    }
+
+    if (EXEMPT_ANNUAL_EMAILS.has(user.email.toLowerCase())) {
+      const subscription = resolveUserSubscriptionState(user, req.body?.subscriptionToken);
+      res.json({ ok: true, paid: true, subscription });
+      return;
+    }
+
+    const platformToken = resolvePlatformMpToken();
+    if (!platformToken) {
+      res.status(503).json({
+        ok: false,
+        error: 'Falta configurar PLATFORM_MERCADOPAGO_ACCESS_TOKEN en el servidor.',
+      });
+      return;
+    }
+
+    const requestedPlanId = String(req.body?.planId || '') as ServerSubscriptionPlanId;
+    const providerId = String(req.body?.providerId || '').trim();
+    const kind = String(req.body?.kind || '').trim();
+    const externalReference = String(req.body?.externalReference || '').trim();
+
+    if (!providerId && !externalReference) {
+      res.status(400).json({ ok: false, error: 'Faltan referencias para verificar el pago.' });
+      return;
+    }
+
+    try {
+      let paid = false;
+      let mpStatus = 'pending';
+      let confirmedPlanId: ServerSubscriptionPlanId | null = SERVER_PLANS[requestedPlanId]
+        ? requestedPlanId
+        : null;
+      let confirmedProviderId = providerId;
+      let confirmedRef = externalReference;
+
+      const parsePlanFromRef = (ref: string): ServerSubscriptionPlanId | null => {
+        const parts = ref.split('|');
+        if (parts.length >= 3 && parts[0] === 'TH3SUB' && parts[1] === user.userId) {
+          const maybePlan = parts[2] as ServerSubscriptionPlanId;
+          if (SERVER_PLANS[maybePlan]) return maybePlan;
+        }
+        return null;
+      };
+
+      if (providerId && (kind === 'preapproval' || !kind)) {
+        const preRes = await mpFetch(`/preapproval/${encodeURIComponent(providerId)}`, platformToken);
+        if (preRes.ok) {
+          const ref = String(preRes.data.external_reference || '');
+          const refBelongsToUser = !ref || ref.startsWith(`TH3SUB|${user.userId}|`);
+          if (refBelongsToUser) {
+            mpStatus = String(preRes.data.status || 'pending');
+            if (mpStatus === 'authorized' || mpStatus === 'active') {
+              paid = true;
+              confirmedProviderId = String(preRes.data.id || providerId);
+              confirmedRef = ref || confirmedRef;
+              confirmedPlanId = parsePlanFromRef(ref) || confirmedPlanId;
+            }
+          }
+        }
+      }
+
+      if (!paid && externalReference) {
+        const paySearch = await mpFetch(
+          `/v1/payments/search?external_reference=${encodeURIComponent(externalReference)}&sort=date_created&criteria=desc`,
+          platformToken
+        );
+        if (paySearch.ok && Array.isArray(paySearch.data.results)) {
+          for (const item of paySearch.data.results) {
+            if (!item || typeof item !== 'object') continue;
+            const row = item as Record<string, unknown>;
+            const rowRef = String(row.external_reference || externalReference);
+            if (!rowRef.startsWith(`TH3SUB|${user.userId}|`)) continue;
+            mpStatus = String(row.status || mpStatus);
+            if (mpStatus === 'approved') {
+              paid = true;
+              confirmedProviderId = String(row.id || confirmedProviderId);
+              confirmedRef = rowRef;
+              confirmedPlanId = parsePlanFromRef(rowRef) || confirmedPlanId;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!paid && providerId && /^\d+$/.test(providerId)) {
+        const payRes = await mpFetch(`/v1/payments/${encodeURIComponent(providerId)}`, platformToken);
+        if (payRes.ok) {
+          const ref = String(payRes.data.external_reference || '');
+          if (ref.startsWith(`TH3SUB|${user.userId}|`)) {
+            mpStatus = String(payRes.data.status || mpStatus);
+            if (mpStatus === 'approved') {
+              paid = true;
+              confirmedProviderId = String(payRes.data.id || providerId);
+              confirmedRef = ref;
+              confirmedPlanId = parsePlanFromRef(ref) || confirmedPlanId;
+            }
+          }
+        }
+      }
+
+      if (!paid) {
+        res.json({ ok: true, paid: false, mpStatus });
+        return;
+      }
+
+      const finalPlanId: ServerSubscriptionPlanId = confirmedPlanId || 'mensual';
+      const plan = SERVER_PLANS[finalPlanId];
+      const now = Date.now();
+      const existing = verifySignedSubscription(req.body?.subscriptionToken, user.userId);
+      const anchorStart =
+        existing && !existing.payload.isExemptAnnual && existing.payload.expiresAt > now
+          ? existing.payload.expiresAt
+          : now;
+      const expiresAt = addMonthsMs(anchorStart, plan.months);
+
+      const signed = signSubscriptionPayload({
+        userId: user.userId,
+        email: user.email,
+        planId: finalPlanId,
+        status: 'active',
+        startedAt: now,
+        expiresAt,
+        isExemptAnnual: false,
+        autoRenewFree: false,
+        provider: 'mercadopago',
+        providerSubscriptionId: confirmedProviderId,
+        externalReference: confirmedRef,
+        updatedAt: now,
+      });
+
+      res.json({
+        ok: true,
+        paid: true,
+        mpStatus,
+        subscription: signed,
+      });
+    } catch (err) {
+      res.status(502).json({
+        ok: false,
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Error de red al verificar la suscripción en Mercado Pago.',
+      });
+    }
+  });
+
+  const httpServer = http.createServer(app);
+
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        allowedHosts: true,
+        hmr: false,
+        ws: { server: httpServer },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -690,7 +1219,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Server listening on http://0.0.0.0:${PORT}`);
   });
 }

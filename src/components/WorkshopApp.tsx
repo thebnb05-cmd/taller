@@ -31,8 +31,22 @@ import {
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useActiveCurrency } from '../utils/currency';
 import { clearTransferConfigCache, hydrateTransferConfig } from '../utils/payment';
-import { clearMercadoPagoConfigCache, hydrateMercadoPagoConfig } from '../utils/mercadoPago';
-import { syncMercadoPagoConfigFromProfile } from '../utils/workshopMeta';
+import {
+  clearMercadoPagoConfigCache,
+  hydrateMercadoPagoConfig,
+} from '../utils/mercadoPago';
+import {
+  fetchSubscriptionStatus,
+  getPlanDisplayName,
+  getSubscriptionRemaining,
+  verifySubscriptionPayment,
+  type SignedSubscriptionRecord,
+} from '../utils/subscription';
+import {
+  parseWorkshopMeta,
+  saveSubscriptionToProfile,
+  syncMercadoPagoConfigFromProfile,
+} from '../utils/workshopMeta';
 import {
   ACTION_GUIDES,
   getPendingContextualGuide,
@@ -83,6 +97,11 @@ import { ProductModal } from './ProductModal';
 import { PWAInstallButton } from './PWAInstallButton';
 import { RepairDetailModal } from './RepairDetailModal';
 import { SalePrintModal } from './SalePrintModal';
+import {
+  PENDING_SUB_STORAGE_KEY,
+  SubscriptionModal,
+  type PendingCheckoutState,
+} from './SubscriptionModal';
 
 interface WorkshopAppProps {
   userId: string;
@@ -268,6 +287,119 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   const [selectedPrintSale, setSelectedPrintSale] = useState<SaleRecord | null>(null);
   const [showNewPurchase, setShowNewPurchase] = useState(false);
 
+  // Platform subscription state & live countdown
+  const [subscriptionRecord, setSubscriptionRecord] = useState<SignedSubscriptionRecord | null>(
+    () => parseWorkshopMeta(profile).subscription || null
+  );
+  const [mpPlatformConfigured, setMpPlatformConfigured] = useState(true);
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 60000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const fromProfile = parseWorkshopMeta(profile).subscription;
+    if (fromProfile) {
+      setSubscriptionRecord((prev) =>
+        !prev || fromProfile.payload.updatedAt > prev.payload.updatedAt ? fromProfile : prev
+      );
+    }
+  }, [profile]);
+
+  useEffect(() => {
+    if (!userId) return;
+    let active = true;
+    const currentFromProfile = parseWorkshopMeta(profile).subscription || null;
+
+    const syncSub = async () => {
+      try {
+        const res = await fetchSubscriptionStatus(currentFromProfile);
+        if (!active || !res.ok || !res.subscription) return;
+        setMpPlatformConfigured(Boolean(res.mpConfigured));
+        setSubscriptionRecord(res.subscription);
+
+        const changed =
+          !currentFromProfile ||
+          currentFromProfile.sig !== res.subscription.sig ||
+          currentFromProfile.payload.expiresAt !== res.subscription.payload.expiresAt;
+        if (changed) {
+          void saveSubscriptionToProfile(profile, res.subscription).catch(() => {});
+        }
+
+        // Check Mercado Pago redirect callback params if user returned from payment
+        const url = new URL(window.location.href);
+        const mpSubParam = url.searchParams.get('mp_sub');
+        const preapprovalId = url.searchParams.get('preapproval_id') || '';
+        const paymentId = url.searchParams.get('payment_id') || url.searchParams.get('collection_id') || '';
+        const extRef = url.searchParams.get('external_reference') || '';
+
+        let pendingSaved: PendingCheckoutState | null = null;
+        try {
+          const rawPending = window.sessionStorage.getItem(PENDING_SUB_STORAGE_KEY);
+          if (rawPending) pendingSaved = JSON.parse(rawPending) as PendingCheckoutState;
+        } catch {
+          // Ignore storage error
+        }
+
+        if (mpSubParam === 'return' || preapprovalId || paymentId || extRef) {
+          const verifyRes = await verifySubscriptionPayment({
+            planId: pendingSaved?.planId,
+            providerId: preapprovalId || paymentId || pendingSaved?.providerId || '',
+            kind: preapprovalId
+              ? 'preapproval'
+              : paymentId
+                ? 'preference'
+                : pendingSaved?.kind,
+            externalReference: extRef || pendingSaved?.externalReference || '',
+            subscriptionToken: res.subscription,
+          });
+          if (!active) return;
+          if (verifyRes.ok && verifyRes.paid && verifyRes.subscription) {
+            setSubscriptionRecord(verifyRes.subscription);
+            void saveSubscriptionToProfile(profile, verifyRes.subscription).catch(() => {});
+            try {
+              window.sessionStorage.removeItem(PENDING_SUB_STORAGE_KEY);
+            } catch {
+              // Ignore
+            }
+          }
+          url.searchParams.delete('mp_sub');
+          url.searchParams.delete('preapproval_id');
+          url.searchParams.delete('payment_id');
+          url.searchParams.delete('collection_id');
+          url.searchParams.delete('collection_status');
+          url.searchParams.delete('status');
+          url.searchParams.delete('external_reference');
+          url.searchParams.delete('payment_type');
+          url.searchParams.delete('merchant_order_id');
+          url.searchParams.delete('preference_id');
+          window.history.replaceState({}, '', url.toString());
+        }
+      } catch {
+        // Keep cached/profile subscription if offline
+      }
+    };
+
+    void syncSub();
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+
+  const subscriptionRemaining = useMemo(
+    () => getSubscriptionRemaining(subscriptionRecord?.payload, nowMs),
+    [subscriptionRecord, nowMs]
+  );
+
+  const isSubscriptionBlocking = Boolean(
+    subscriptionRecord &&
+      !subscriptionRecord.payload.isExemptAnnual &&
+      subscriptionRemaining.isExpired
+  );
+
   // Onboarding tour & per-window first-visit guides
   const [onboardingState, setOnboardingState] = useState<OnboardingState>(() =>
     loadOnboardingState(userId)
@@ -279,11 +411,11 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   }, [userId]);
 
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || isSubscriptionBlocking) return;
     if (!onboardingState.welcomeTourDone && !onboardingState.dismissAllGuides) {
       setWelcomeTourOpen(true);
     }
-  }, [isLoading, onboardingState.welcomeTourDone, onboardingState.dismissAllGuides]);
+  }, [isLoading, isSubscriptionBlocking, onboardingState.welcomeTourDone, onboardingState.dismissAllGuides]);
 
   const updateOnboarding = (updater: (prev: OnboardingState) => OnboardingState) => {
     setOnboardingState((prev) => {
@@ -308,6 +440,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   const activeContextualGuide = useMemo(() => {
     if (
       isLoading ||
+      isSubscriptionBlocking ||
       welcomeTourOpen ||
       !onboardingState.welcomeTourDone ||
       onboardingState.dismissAllGuides
@@ -316,7 +449,8 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
     }
 
     let actionId: ActionGuideId | null = null;
-    if (showNewRepair) actionId = 'new_repair';
+    if (showSubscriptionModal) actionId = 'subscription';
+    else if (showNewRepair) actionId = 'new_repair';
     else if (selectedRepair) actionId = 'repair_detail';
     else if (showNewSale) actionId = 'new_sale';
     else if (showBrandSettings) actionId = 'brand_settings';
@@ -342,8 +476,10 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
     };
   }, [
     isLoading,
+    isSubscriptionBlocking,
     welcomeTourOpen,
     onboardingState,
+    showSubscriptionModal,
     showNewRepair,
     selectedRepair,
     showNewSale,
@@ -456,7 +592,37 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
           </div>
         </div>
 
-        <div className="border-t border-slate-100 p-3 dark:border-slate-800">
+        <div className="space-y-2 border-t border-slate-100 p-3 dark:border-slate-800">
+          {subscriptionRecord && (
+            <button
+              type="button"
+              onClick={() => setShowSubscriptionModal(true)}
+              className={`flex w-full items-center justify-between gap-2 rounded-xl border px-2.5 py-2 text-left transition ${
+                subscriptionRecord.payload.isExemptAnnual
+                  ? 'border-emerald-200 bg-emerald-50/70 text-emerald-900 hover:bg-emerald-50 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200'
+                  : subscriptionRemaining.isExpired
+                    ? 'border-red-200 bg-red-50 text-red-800 hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200'
+                    : subscriptionRemaining.days <= 5
+                      ? 'border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200'
+                      : 'border-sky-200 bg-sky-50/60 text-slate-800 hover:bg-sky-50 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-slate-100'
+              }`}
+            >
+              <div className="min-w-0">
+                <div className="truncate text-[11px] font-bold">
+                  {getPlanDisplayName(
+                    subscriptionRecord.payload.planId,
+                    subscriptionRecord.payload.isExemptAnnual
+                  )}
+                </div>
+                <div className="truncate font-mono-num text-[11px] opacity-85">
+                  {subscriptionRemaining.shortLabel}
+                </div>
+              </div>
+              <span className="shrink-0 rounded-lg bg-white/90 px-2 py-0.5 text-[10px] font-bold text-[#0072BB] dark:bg-slate-900 dark:text-sky-300">
+                Planes
+              </span>
+            </button>
+          )}
           <div className="truncate px-2 text-xs font-medium text-slate-700 dark:text-slate-300">
             {profile.firstName
               ? `${profile.firstName} ${profile.lastName || ''}`.trim()
@@ -494,6 +660,41 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
           />
 
           <div data-tour="header-actions" className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+            {subscriptionRecord && (
+              <button
+                type="button"
+                data-tour="subscription-badge"
+                onClick={() => setShowSubscriptionModal(true)}
+                title={`${getPlanDisplayName(
+                  subscriptionRecord.payload.planId,
+                  subscriptionRecord.payload.isExemptAnnual
+                )} · ${subscriptionRemaining.detailLabel}`}
+                className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-2.5 text-xs font-semibold transition ${
+                  subscriptionRecord.payload.isExemptAnnual
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-200'
+                    : subscriptionRemaining.isExpired
+                      ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-950/50 dark:text-red-200'
+                      : subscriptionRemaining.days <= 5
+                        ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-200'
+                        : 'border-sky-200 bg-sky-50/80 text-[#0072BB] hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300'
+                }`}
+              >
+                <span className="hidden md:inline">
+                  {getPlanDisplayName(
+                    subscriptionRecord.payload.planId,
+                    subscriptionRecord.payload.isExemptAnnual
+                  )}
+                  {' · '}
+                </span>
+                <span className="font-mono-num">
+                  {subscriptionRemaining.isExpired
+                    ? 'Vencida'
+                    : subscriptionRemaining.days >= 1
+                      ? `Faltan ${subscriptionRemaining.days}d`
+                      : subscriptionRemaining.shortLabel}
+                </span>
+              </button>
+            )}
             <PWAInstallButton />
 
             <button
@@ -974,6 +1175,24 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         ownerId={userId}
         suppliers={suppliers}
         profile={profile}
+      />
+
+      <SubscriptionModal
+        open={showSubscriptionModal || isSubscriptionBlocking}
+        blocking={isSubscriptionBlocking}
+        onClose={() => setShowSubscriptionModal(false)}
+        subscriptionRecord={subscriptionRecord}
+        mpConfigured={mpPlatformConfigured}
+        nowMs={nowMs}
+        onSubscriptionUpdated={(next) => {
+          setSubscriptionRecord(next);
+          void saveSubscriptionToProfile(profile, next).catch(() => {});
+        }}
+        onSignOut={() => {
+          clearTransferConfigCache(userId);
+          clearMercadoPagoConfigCache(userId);
+          void supabase.auth.signOut();
+        }}
       />
 
       <WelcomeSpotlightTour

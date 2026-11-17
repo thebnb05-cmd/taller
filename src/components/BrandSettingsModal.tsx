@@ -267,6 +267,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
         techniciansEnabled,
         technicians: sanitizeTechnicianList(technicians),
         mercadoPago: latestMpConfig ?? existingMeta.mercadoPago,
+        subscription: existingMeta.subscription,
       });
       const safeColors = wordColors
         .slice(0, 12)
@@ -276,7 +277,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
 
       const payload = stripUndefined({
         brandName: sanitizePlainLine(brandName || 'TH3 BNB', 80) || 'TH3 BNB',
-        subtitle: clampStr(encodedSubtitle, 4000),
+        subtitle: clampStr(encodedSubtitle, 8000),
         businessPhone: sanitizePhone(businessPhone, 50),
         businessAddress: sanitizePlainLine(businessAddress, 200),
         wordColors: safeColors,

@@ -1,6 +1,11 @@
 import type { PageId } from '../types/workshop';
 
-export type ActionGuideId = 'new_repair' | 'repair_detail' | 'new_sale' | 'brand_settings';
+export type ActionGuideId =
+  | 'new_repair'
+  | 'repair_detail'
+  | 'new_sale'
+  | 'brand_settings'
+  | 'subscription';
 
 export interface GuideBullet {
   id: string;
@@ -112,6 +117,16 @@ export const WELCOME_TOUR_STEPS: WelcomeTourStep[] = [
       'La campanita te avisa cuando un repuesto tiene stock bajo. En el engranaje configurás el logo, términos de boleta, técnicos opcionales y monedas.',
     tips: [
       'Si alguna vez querés repetir este recorrido, podés abrirlo desde el ícono «?» en la barra superior.',
+    ],
+  },
+  {
+    id: 'subscription-status',
+    targetSelector: '[data-tour="subscription-badge"]',
+    title: 'Tu suscripción y días restantes',
+    description:
+      'En la barra superior ves en todo momento tu plan activo y exactamente cuánto falta para el próximo vencimiento o renovación.',
+    tips: [
+      'Tocá el indicador para ver los planes con descuento (Mensual, 6 Meses o Anual) y suscribirte con Mercado Pago.',
     ],
   },
 ];
@@ -339,6 +354,20 @@ export const ACTION_GUIDES: Record<ActionGuideId, ContextualGuideDef> = {
       {
         id: 'settings_mercadopago',
         text: 'Cargá tu Access Token de Mercado Pago, ID de punto de venta (QR) y Terminal Point para cobrar desde Nueva venta.',
+      },
+    ],
+  },
+  subscription: {
+    title: 'Guía rápida · Suscripción y Planes',
+    subtitle: 'Controlá tus días disponibles y renová con Mercado Pago',
+    bullets: [
+      {
+        id: 'sub_countdown',
+        text: 'Las cuentas nuevas arrancan con 15 días de prueba gratis y arriba siempre ves cuántos días y horas faltan.',
+      },
+      {
+        id: 'sub_mp_plans',
+        text: 'Elegí entre Plan Mensual ($3.655), 6 Meses ($21.930) o Anual ($43.860) con 48% OFF pagando por Suscripciones de Mercado Pago.',
       },
     ],
   },
