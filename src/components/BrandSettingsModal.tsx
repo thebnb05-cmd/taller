@@ -88,6 +88,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
   const [techniciansEnabled, setTechniciansEnabled] = useState(initialMeta.techniciansEnabled);
   const [technicians, setTechnicians] = useState<string[]>(initialMeta.technicians);
   const [newTechnicianName, setNewTechnicianName] = useState('');
+  const [latestMpConfig, setLatestMpConfig] = useState(initialMeta.mercadoPago);
   const [dragOver, setDragOver] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -119,6 +120,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
     setTechniciansEnabled(meta.techniciansEnabled);
     setTechnicians(meta.technicians);
     setNewTechnicianName('');
+    setLatestMpConfig(meta.mercadoPago);
   }, [open, profile]);
 
   const ownerDisplayName = [profile.firstName, profile.lastName]
@@ -252,6 +254,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
         ? ''
         : clampStr(cleanedTrackingUrl, 250);
       const safeSecondaryCurrencies = sanitizeSecondaryCurrencies(parsedSecondary, safeCurrency);
+      const existingMeta = parseWorkshopMeta(profile);
       const encodedSubtitle = serializeWorkshopSubtitle({
         subtitle: sanitizePlainLine(subtitleText, 80),
         hours: sanitizePlainLine(hours, 100),
@@ -263,6 +266,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
         secondaryCurrencies: safeSecondaryCurrencies,
         techniciansEnabled,
         technicians: sanitizeTechnicianList(technicians),
+        mercadoPago: latestMpConfig ?? existingMeta.mercadoPago,
       });
       const safeColors = wordColors
         .slice(0, 12)
@@ -272,7 +276,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
 
       const payload = stripUndefined({
         brandName: sanitizePlainLine(brandName || 'TH3 BNB', 80) || 'TH3 BNB',
-        subtitle: clampStr(encodedSubtitle, 2000),
+        subtitle: clampStr(encodedSubtitle, 4000),
         businessPhone: sanitizePhone(businessPhone, 50),
         businessAddress: sanitizePlainLine(businessAddress, 200),
         wordColors: safeColors,
@@ -700,7 +704,11 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
           )}
         </div>
 
-        <PaymentSettingsPanel ownerId={profile.ownerId || profile.id} />
+        <PaymentSettingsPanel
+          ownerId={profile.ownerId || profile.id}
+          profile={profile}
+          onSaved={(saved) => setLatestMpConfig(saved)}
+        />
 
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
           <div className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-300">

@@ -15,21 +15,15 @@ interface MpErrorPayload {
 }
 
 function resolveAccessToken(bodyToken: unknown): string {
-  const candidate = typeof bodyToken === 'string' ? bodyToken.trim() : '';
-  if (candidate) return candidate;
-  return (process.env.MERCADOPAGO_ACCESS_TOKEN || '').trim();
+  return typeof bodyToken === 'string' ? bodyToken.trim() : '';
 }
 
 function resolvePosId(bodyPosId: unknown): string {
-  const candidate = typeof bodyPosId === 'string' ? bodyPosId.trim() : '';
-  if (candidate) return candidate;
-  return (process.env.MERCADOPAGO_POS_ID || '').trim();
+  return typeof bodyPosId === 'string' ? bodyPosId.trim() : '';
 }
 
 function resolveTerminalId(bodyTerminalId: unknown): string {
-  const candidate = typeof bodyTerminalId === 'string' ? bodyTerminalId.trim() : '';
-  if (candidate) return candidate;
-  return (process.env.MERCADOPAGO_TERMINAL_ID || '').trim();
+  return typeof bodyTerminalId === 'string' ? bodyTerminalId.trim() : '';
 }
 
 function extractMpErrorMessage(payload: unknown, fallback: string): string {

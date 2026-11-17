@@ -58,7 +58,7 @@ import {
   type TransferConfig,
 } from '../utils/payment';
 import { serializeSaleStatus } from '../utils/saleMeta';
-import { parseWorkshopMeta } from '../utils/workshopMeta';
+import { parseWorkshopMeta, syncMercadoPagoConfigFromProfile } from '../utils/workshopMeta';
 import {
   parseSafeNonNegativeInt,
   parseSafePositiveNumber,
@@ -188,12 +188,17 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     });
     void hydrateMercadoPagoConfig(ownerId).then((hydratedMp) => {
       if (cancelled) return;
-      setMpConfig(hydratedMp);
+      if (!hydratedMp.accessToken && !hydratedMp.terminalId && !hydratedMp.posExternalId) {
+        const synced = syncMercadoPagoConfigFromProfile(ownerId, profile);
+        setMpConfig(synced || hydratedMp);
+      } else {
+        setMpConfig(hydratedMp);
+      }
     });
     return () => {
       cancelled = true;
     };
-  }, [open, ownerId, preselectedProduct, baseCurrency]);
+  }, [open, ownerId, preselectedProduct, baseCurrency, profile]);
 
   const numericAmount = parseSafePositiveNumber(amount, 0);
   const rawDeposit = parseSafePositiveNumber(deposit, 0);
@@ -1488,6 +1493,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         open={showMpSettings}
         onClose={() => setShowMpSettings(false)}
         ownerId={ownerId}
+        profile={profile}
         onSaved={(saved) => setMpConfig(saved)}
       />
     </ModalShell>

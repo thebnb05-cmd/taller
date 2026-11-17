@@ -1,3 +1,4 @@
+import { clampStr, stripUndefined, updateRow } from '../lib/db';
 import type { WorkshopProfile } from '../types/workshop';
 import {
   DEFAULT_CURRENCY,
@@ -6,6 +7,11 @@ import {
   type CurrencyCode,
   type SecondaryCurrencyConfig,
 } from './currency';
+import {
+  saveMercadoPagoConfig,
+  sanitizeMercadoPagoConfig,
+  type MercadoPagoConfig,
+} from './mercadoPago';
 
 export interface WorkshopReceiptMeta {
   subtitle: string;
@@ -18,6 +24,7 @@ export interface WorkshopReceiptMeta {
   secondaryCurrencies: SecondaryCurrencyConfig[];
   techniciansEnabled: boolean;
   technicians: string[];
+  mercadoPago?: MercadoPagoConfig;
 }
 
 const DEFAULT_SUBTITLE = 'Servicio técnico';
@@ -43,6 +50,18 @@ export function sanitizeTechnicianList(raw: unknown): string[] {
   return out;
 }
 
+function hasMercadoPagoFields(cfg?: MercadoPagoConfig | null): boolean {
+  if (!cfg) return false;
+  return Boolean(
+    cfg.accessToken ||
+      cfg.posExternalId ||
+      cfg.terminalId ||
+      cfg.printOnTerminal ||
+      cfg.sellerNickname ||
+      cfg.sellerEmail
+  );
+}
+
 export function parseWorkshopMeta(
   profile?: Partial<WorkshopProfile> | null
 ): WorkshopReceiptMeta {
@@ -62,8 +81,28 @@ export function parseWorkshopMeta(
         sc: unknown;
         te: boolean;
         ts: unknown;
+        mp: Partial<{
+          at: string;
+          pos: string;
+          tid: string;
+          pr: boolean;
+          sn: string;
+          se: string;
+        }>;
       }>;
       const currency = sanitizeCurrencyCode(parsed.c);
+      const mp =
+        parsed.mp && typeof parsed.mp === 'object'
+          ? sanitizeMercadoPagoConfig({
+              accessToken: parsed.mp.at,
+              posExternalId: parsed.mp.pos,
+              terminalId: parsed.mp.tid,
+              printOnTerminal: parsed.mp.pr,
+              sellerNickname: parsed.mp.sn,
+              sellerEmail: parsed.mp.se,
+            })
+          : undefined;
+
       return {
         subtitle: typeof parsed.s === 'string' ? parsed.s : '',
         hours: typeof parsed.h === 'string' ? parsed.h : '',
@@ -76,6 +115,7 @@ export function parseWorkshopMeta(
         secondaryCurrencies: sanitizeSecondaryCurrencies(parsed.sc, currency),
         techniciansEnabled: Boolean(parsed.te),
         technicians: sanitizeTechnicianList(parsed.ts),
+        ...(hasMercadoPagoFields(mp) ? { mercadoPago: mp } : {}),
       };
     } catch {
       // Fallback to treating raw as plain subtitle
@@ -107,6 +147,7 @@ export function serializeWorkshopSubtitle(meta: {
   secondaryCurrencies?: SecondaryCurrencyConfig[];
   techniciansEnabled?: boolean;
   technicians?: string[];
+  mercadoPago?: MercadoPagoConfig;
 }): string {
   const s = meta.subtitle.trim().slice(0, 120);
   const h = meta.hours.trim().slice(0, 120);
@@ -121,6 +162,8 @@ export function serializeWorkshopSubtitle(meta: {
   }));
   const te = Boolean(meta.techniciansEnabled);
   const ts = sanitizeTechnicianList(meta.technicians);
+  const cleanMp = meta.mercadoPago ? sanitizeMercadoPagoConfig(meta.mercadoPago) : undefined;
+  const includeMp = hasMercadoPagoFields(cleanMp);
 
   if (
     !h &&
@@ -131,7 +174,8 @@ export function serializeWorkshopSubtitle(meta: {
     c === DEFAULT_CURRENCY &&
     sc.length === 0 &&
     !te &&
-    ts.length === 0
+    ts.length === 0 &&
+    !includeMp
   ) {
     return s || DEFAULT_SUBTITLE;
   }
@@ -147,5 +191,51 @@ export function serializeWorkshopSubtitle(meta: {
     ...(sc.length > 0 ? { sc } : {}),
     ...(te ? { te: true } : {}),
     ...(ts.length > 0 ? { ts } : {}),
+    ...(includeMp && cleanMp
+      ? {
+          mp: {
+            ...(cleanMp.accessToken ? { at: cleanMp.accessToken } : {}),
+            ...(cleanMp.posExternalId ? { pos: cleanMp.posExternalId } : {}),
+            ...(cleanMp.terminalId ? { tid: cleanMp.terminalId } : {}),
+            ...(cleanMp.printOnTerminal ? { pr: true } : {}),
+            ...(cleanMp.sellerNickname ? { sn: cleanMp.sellerNickname } : {}),
+            ...(cleanMp.sellerEmail ? { se: cleanMp.sellerEmail } : {}),
+          },
+        }
+      : {}),
   });
+}
+
+export function syncMercadoPagoConfigFromProfile(
+  ownerId: string,
+  profile?: Partial<WorkshopProfile> | null
+): MercadoPagoConfig | null {
+  if (!ownerId || !profile) return null;
+  const parsed = parseWorkshopMeta(profile);
+  if (!parsed.mercadoPago) return null;
+  return saveMercadoPagoConfig(ownerId, parsed.mercadoPago);
+}
+
+export async function saveMercadoPagoConfigToProfile(
+  profile: WorkshopProfile,
+  config: MercadoPagoConfig
+): Promise<MercadoPagoConfig> {
+  const ownerId = profile.ownerId || profile.id;
+  const savedLocal = saveMercadoPagoConfig(ownerId, config);
+  const currentMeta = parseWorkshopMeta(profile);
+  const encodedSubtitle = serializeWorkshopSubtitle({
+    ...currentMeta,
+    mercadoPago: savedLocal,
+  });
+
+  await updateRow(
+    'workshop_profiles',
+    profile.id,
+    stripUndefined({
+      subtitle: clampStr(encodedSubtitle, 4000),
+      updatedAt: new Date().toISOString(),
+    })
+  );
+
+  return savedLocal;
 }

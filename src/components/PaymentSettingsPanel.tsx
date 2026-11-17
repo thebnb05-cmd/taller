@@ -20,17 +20,24 @@ import {
   type MpPosSummary,
   type MpTerminalSummary,
 } from '../utils/mercadoPago';
+import {
+  parseWorkshopMeta,
+  saveMercadoPagoConfigToProfile,
+} from '../utils/workshopMeta';
+import type { WorkshopProfile } from '../types/workshop';
 import { ModalShell } from './ModalShell';
 import { useToast } from './ToastProvider';
 
 interface PaymentSettingsPanelProps {
   ownerId: string;
+  profile?: WorkshopProfile | null;
   onSaved?: (config: MercadoPagoConfig) => void;
   compact?: boolean;
 }
 
 export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
   ownerId,
+  profile,
   onSaved,
   compact = false,
 }) => {
@@ -38,6 +45,7 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
   const [config, setConfig] = useState<MercadoPagoConfig>(() => loadMercadoPagoConfig(ownerId));
   const [showToken, setShowToken] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [savingConfig, setSavingConfig] = useState(false);
   const [terminals, setTerminals] = useState<MpTerminalSummary[]>([]);
   const [posList, setPosList] = useState<MpPosSummary[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'ok' | 'error'>('idle');
@@ -45,22 +53,45 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
 
   useEffect(() => {
     let cancelled = false;
-    setConfig(loadMercadoPagoConfig(ownerId));
+    const profileMp = profile ? parseWorkshopMeta(profile).mercadoPago : undefined;
+    const localMp = loadMercadoPagoConfig(ownerId);
+    setConfig(localMp.accessToken || localMp.terminalId || localMp.posExternalId ? localMp : profileMp || localMp);
     void hydrateMercadoPagoConfig(ownerId).then((hydrated) => {
-      if (!cancelled) {
+      if (cancelled) return;
+      if (hydrated.accessToken || hydrated.terminalId || hydrated.posExternalId) {
+        setConfig(hydrated);
+      } else if (profileMp) {
+        setConfig(saveMercadoPagoConfig(ownerId, profileMp));
+      } else {
         setConfig(hydrated);
       }
     });
     return () => {
       cancelled = true;
     };
-  }, [ownerId]);
+  }, [ownerId, profile]);
+
+  const persistMpConfig = async (nextConfig: MercadoPagoConfig, successMessage: string) => {
+    setSavingConfig(true);
+    try {
+      const saved = profile
+        ? await saveMercadoPagoConfigToProfile(profile, nextConfig)
+        : saveMercadoPagoConfig(ownerId, nextConfig);
+      setConfig(saved);
+      notify(successMessage);
+      onSaved?.(saved);
+    } catch {
+      const savedLocal = saveMercadoPagoConfig(ownerId, nextConfig);
+      setConfig(savedLocal);
+      notify(`${successMessage} (solo en este dispositivo por error de red)`);
+      onSaved?.(savedLocal);
+    } finally {
+      setSavingConfig(false);
+    }
+  };
 
   const handleSave = () => {
-    const saved = saveMercadoPagoConfig(ownerId, config);
-    setConfig(saved);
-    notify('Configuración de Mercado Pago guardada (cifrada).');
-    onSaved?.(saved);
+    void persistMpConfig(config, 'Configuración de Mercado Pago guardada en tu cuenta.');
   };
 
   const handleClear = () => {
@@ -72,14 +103,11 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
       sellerNickname: '',
       sellerEmail: '',
     };
-    const saved = saveMercadoPagoConfig(ownerId, empty);
-    setConfig(saved);
     setTerminals([]);
     setPosList([]);
     setConnectionStatus('idle');
     setConnectionMessage('');
-    notify('Credenciales de Mercado Pago eliminadas.');
-    onSaved?.(saved);
+    void persistMpConfig(empty, 'Credenciales de Mercado Pago eliminadas de tu cuenta.');
   };
 
   const handleTestConnection = async () => {
@@ -120,9 +148,22 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
           '',
       };
 
-      setConfig(nextConfig);
-      saveMercadoPagoConfig(ownerId, nextConfig);
-      onSaved?.(nextConfig);
+      if (profile) {
+        void saveMercadoPagoConfigToProfile(profile, nextConfig)
+          .then((saved) => {
+            setConfig(saved);
+            onSaved?.(saved);
+          })
+          .catch(() => {
+            const savedLocal = saveMercadoPagoConfig(ownerId, nextConfig);
+            setConfig(savedLocal);
+            onSaved?.(savedLocal);
+          });
+      } else {
+        setConfig(nextConfig);
+        saveMercadoPagoConfig(ownerId, nextConfig);
+        onSaved?.(nextConfig);
+      }
 
       setConnectionStatus('ok');
       const accountLabel =
@@ -356,10 +397,11 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
         <button
           type="button"
           onClick={handleSave}
-          className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0072BB] px-3.5 text-xs font-semibold text-white transition hover:bg-[#005f9c]"
+          disabled={savingConfig}
+          className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0072BB] px-3.5 text-xs font-semibold text-white transition hover:bg-[#005f9c] disabled:opacity-60"
         >
           <Save className="h-3.5 w-3.5" />
-          Guardar pagos
+          {savingConfig ? 'Guardando...' : 'Guardar pagos'}
         </button>
       </div>
     </div>
@@ -370,6 +412,7 @@ interface PaymentSettingsModalProps {
   open: boolean;
   onClose: () => void;
   ownerId: string;
+  profile?: WorkshopProfile | null;
   onSaved?: (config: MercadoPagoConfig) => void;
 }
 
@@ -377,6 +420,7 @@ export const PaymentSettingsModal: React.FC<PaymentSettingsModalProps> = ({
   open,
   onClose,
   ownerId,
+  profile,
   onSaved,
 }) => {
   return (
@@ -384,6 +428,7 @@ export const PaymentSettingsModal: React.FC<PaymentSettingsModalProps> = ({
       <div className="space-y-4">
         <PaymentSettingsPanel
           ownerId={ownerId}
+          profile={profile}
           onSaved={(saved) => {
             onSaved?.(saved);
             onClose();

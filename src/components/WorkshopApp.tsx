@@ -32,6 +32,7 @@ import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useActiveCurrency } from '../utils/currency';
 import { clearTransferConfigCache, hydrateTransferConfig } from '../utils/payment';
 import { clearMercadoPagoConfigCache, hydrateMercadoPagoConfig } from '../utils/mercadoPago';
+import { syncMercadoPagoConfigFromProfile } from '../utils/workshopMeta';
 import {
   ACTION_GUIDES,
   getPendingContextualGuide,
@@ -161,7 +162,12 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
     if (!userId) return;
     let active = true;
     void hydrateTransferConfig(userId);
-    void hydrateMercadoPagoConfig(userId);
+    void hydrateMercadoPagoConfig(userId).then((hydrated) => {
+      if (!active) return;
+      if (!hydrated.accessToken && !hydrated.terminalId && !hydrated.posExternalId) {
+        syncMercadoPagoConfigFromProfile(userId, profile);
+      }
+    });
     const loadedSet = new Set<string>();
     setLoadingCount(7);
     setSyncError(null);
