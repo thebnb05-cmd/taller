@@ -1490,6 +1490,319 @@ export async function handleApiRequest(
     }
   }
 
+  if (apiPath === '/api/subscriptions/diagnose-platform-token') {
+    const user = await verifySupabaseSessionUser(req);
+    if (!user) {
+      sendJson(res, 401, {
+        ok: false,
+        error: 'Sesión inválida o expirada.',
+        timestamp: new Date().toISOString(),
+        runtime: process.env.VERCEL ? 'vercel' : 'node',
+        envStatus: 'missing',
+        detectedKey: null,
+        tokenLength: 0,
+        prefixType: 'none',
+        hadQuotesOrWhitespace: false,
+        checks: [],
+        hints: ['Iniciá sesión nuevamente para ejecutar el diagnóstico en el servidor.'],
+      });
+      return true;
+    }
+
+    const timestamp = new Date().toISOString();
+    const runtime = process.env.VERCEL ? 'vercel' : 'node';
+    const vercelEnv = process.env.VERCEL_ENV || null;
+
+    let detectedKey: string | null = null;
+    let rawEnvValue: string | undefined = undefined;
+    const misnamedKeys: string[] = [];
+
+    for (const [k, v] of Object.entries(process.env)) {
+      const trimmedKey = k.trim();
+      const upperKey = trimmedKey.toUpperCase();
+      if (trimmedKey === 'PLATFORM_MERCADOPAGO_ACCESS_TOKEN') {
+        detectedKey = k;
+        rawEnvValue = v;
+      } else if (
+        upperKey === 'PLATFORM_MERCADOPAGO_ACCESS_TOKEN' ||
+        upperKey === 'PLATFORM_MERCADO_PAGO_ACCESS_TOKEN'
+      ) {
+        if (!detectedKey) {
+          detectedKey = k;
+          rawEnvValue = v;
+        }
+        misnamedKeys.push(k);
+      } else if (
+        upperKey === 'VITE_PLATFORM_MERCADOPAGO_ACCESS_TOKEN' ||
+        upperKey === 'MERCADOPAGO_PLATFORM_ACCESS_TOKEN'
+      ) {
+        if (v && v.trim()) misnamedKeys.push(k);
+      }
+    }
+
+    const resolvedToken = resolvePlatformMpToken();
+    const hadQuotesOrWhitespace =
+      typeof rawEnvValue === 'string' && rawEnvValue !== resolvedToken && rawEnvValue.length > 0;
+    const isEmptyString = detectedKey !== null && resolvedToken.length === 0;
+    const envStatus: 'loaded' | 'empty_string' | 'missing' = resolvedToken
+      ? 'loaded'
+      : isEmptyString
+        ? 'empty_string'
+        : 'missing';
+
+    const prefixType: 'APP_USR' | 'TEST' | 'unknown' | 'none' = !resolvedToken
+      ? 'none'
+      : resolvedToken.startsWith('APP_USR-')
+        ? 'APP_USR'
+        : resolvedToken.startsWith('TEST-')
+          ? 'TEST'
+          : 'unknown';
+
+    const checks: Array<{
+      id: string;
+      label: string;
+      status: 'pass' | 'warn' | 'fail';
+      httpStatus?: number;
+      detail: string;
+    }> = [];
+    const hints: string[] = [];
+
+    if (envStatus === 'missing') {
+      checks.push({
+        id: 'env_presence',
+        label: 'Variable de entorno en servidor',
+        status: 'fail',
+        detail:
+          'No existe PLATFORM_MERCADOPAGO_ACCESS_TOKEN en process.env de este servidor.',
+      });
+      if (misnamedKeys.length > 0) {
+        hints.push(
+          `Se detectaron variables con nombre similar (${misnamedKeys.join(', ')}). Renombrala exactamente a PLATFORM_MERCADOPAGO_ACCESS_TOKEN.`
+        );
+      } else {
+        hints.push(
+          'Cargá PLATFORM_MERCADOPAGO_ACCESS_TOKEN en Settings → Environment Variables (tildando Production) y luego hacé Redeploy.'
+        );
+      }
+      sendJson(res, 200, {
+        ok: false,
+        timestamp,
+        runtime,
+        vercelEnv,
+        envStatus,
+        detectedKey,
+        tokenLength: 0,
+        prefixType,
+        hadQuotesOrWhitespace,
+        checks,
+        hints,
+      });
+      return true;
+    }
+
+    if (envStatus === 'empty_string') {
+      checks.push({
+        id: 'env_presence',
+        label: 'Variable de entorno en servidor',
+        status: 'fail',
+        detail: `La variable ${detectedKey || 'PLATFORM_MERCADOPAGO_ACCESS_TOKEN'} está definida pero contiene una cadena vacía o solo espacios.`,
+      });
+      hints.push(
+        'Pegá el Access Token real en el campo Value de PLATFORM_MERCADOPAGO_ACCESS_TOKEN (actualmente está vacío) y hacé Redeploy.'
+      );
+      sendJson(res, 200, {
+        ok: false,
+        timestamp,
+        runtime,
+        vercelEnv,
+        envStatus,
+        detectedKey,
+        tokenLength: 0,
+        prefixType,
+        hadQuotesOrWhitespace,
+        checks,
+        hints,
+      });
+      return true;
+    }
+
+    checks.push({
+      id: 'env_presence',
+      label: 'Variable de entorno en servidor',
+      status: detectedKey === 'PLATFORM_MERCADOPAGO_ACCESS_TOKEN' ? 'pass' : 'warn',
+      detail:
+        detectedKey === 'PLATFORM_MERCADOPAGO_ACCESS_TOKEN'
+          ? `Cargada correctamente (${resolvedToken.length} caracteres).`
+          : `Cargada con nombre aproximado "${detectedKey}" (${resolvedToken.length} caracteres). Conviene usar el nombre exacto PLATFORM_MERCADOPAGO_ACCESS_TOKEN.`,
+    });
+
+    if (prefixType === 'unknown' || hadQuotesOrWhitespace) {
+      checks.push({
+        id: 'token_format',
+        label: 'Formato del Access Token',
+        status: prefixType === 'unknown' ? 'fail' : 'warn',
+        detail:
+          prefixType === 'unknown'
+            ? 'El token no comienza con APP_USR- ni TEST-. Puede que hayas copiado el Public Key o Client Secret en lugar del Access Token.'
+            : 'El valor tenía espacios o comillas alrededor que fueron limpiados automáticamente.',
+      });
+      if (prefixType === 'unknown') {
+        hints.push(
+          'Asegurate de copiar el "Access Token" (no la Public Key ni el Client Secret) desde Mercado Pago Developers → Credenciales.'
+        );
+      }
+    } else {
+      checks.push({
+        id: 'token_format',
+        label: 'Formato del Access Token',
+        status: 'pass',
+        detail: `Prefijo válido (${prefixType}- · ${prefixType === 'TEST' ? 'Prueba' : 'Producción'}).`,
+      });
+    }
+
+    try {
+      const meRes = await mpFetch('/users/me', resolvedToken);
+      if (!meRes.ok) {
+        checks.push({
+          id: 'users_me_auth',
+          label: 'Autenticación básica (/users/me)',
+          status: 'fail',
+          httpStatus: meRes.status,
+          detail: extractMpErrorMessage(
+            meRes.data,
+            `Mercado Pago rechazó el token con HTTP ${meRes.status}.`
+          ),
+        });
+        hints.push(
+          'El Access Token es inválido, fue revocado o está mal copiado. Generá o copiá nuevamente las credenciales en Mercado Pago Developers.'
+        );
+        sendJson(res, 200, {
+          ok: false,
+          timestamp,
+          runtime,
+          vercelEnv,
+          envStatus,
+          detectedKey,
+          tokenLength: resolvedToken.length,
+          prefixType,
+          hadQuotesOrWhitespace,
+          checks,
+          hints,
+        });
+        return true;
+      }
+
+      checks.push({
+        id: 'users_me_auth',
+        label: 'Autenticación básica (/users/me)',
+        status: 'pass',
+        httpStatus: meRes.status,
+        detail: `Token autenticado correctamente en Mercado Pago (${String(meRes.data.site_id || 'MP')}).`,
+      });
+
+      const [preRes, payRes] = await Promise.all([
+        mpFetch('/preapproval/search?limit=1', resolvedToken),
+        mpFetch('/v1/payments/search?limit=1', resolvedToken),
+      ]);
+
+      if (preRes.ok) {
+        checks.push({
+          id: 'preapproval_scope',
+          label: 'Permisos de Suscripciones (/preapproval)',
+          status: 'pass',
+          httpStatus: preRes.status,
+          detail: 'La aplicación tiene permisos habilitados para crear y consultar suscripciones.',
+        });
+      } else {
+        const isPermError = preRes.status === 401 || preRes.status === 403;
+        checks.push({
+          id: 'preapproval_scope',
+          label: 'Permisos de Suscripciones (/preapproval)',
+          status: isPermError ? 'fail' : 'warn',
+          httpStatus: preRes.status,
+          detail: extractMpErrorMessage(
+            preRes.data,
+            isPermError
+              ? `Faltan permisos/scopes de Suscripciones (HTTP ${preRes.status}).`
+              : `Respuesta inesperada al consultar Suscripciones (HTTP ${preRes.status}).`
+          ),
+        });
+        if (isPermError) {
+          hints.push(
+            'Tu aplicación en Mercado Pago Developers no tiene permisos de Suscripciones (Preapproval) o usaste una credencial restringida. Verificá los scopes/productos habilitados en tu app de Mercado Pago.'
+          );
+        }
+      }
+
+      if (payRes.ok) {
+        checks.push({
+          id: 'payments_scope',
+          label: 'Permisos de Pagos (/v1/payments)',
+          status: 'pass',
+          httpStatus: payRes.status,
+          detail: 'Lectura y verificación de pagos habilitada correctamente.',
+        });
+      } else {
+        const isPermError = payRes.status === 401 || payRes.status === 403;
+        checks.push({
+          id: 'payments_scope',
+          label: 'Permisos de Pagos (/v1/payments)',
+          status: isPermError ? 'fail' : 'warn',
+          httpStatus: payRes.status,
+          detail: extractMpErrorMessage(
+            payRes.data,
+            `Error al consultar pagos (HTTP ${payRes.status}).`
+          ),
+        });
+        if (isPermError) {
+          hints.push(
+            'El token no tiene permisos de lectura de pagos (payments). Verificá que la app de Mercado Pago sea de tipo "Pagos online".'
+          );
+        }
+      }
+
+      const allPassed = checks.every((c) => c.status !== 'fail');
+      sendJson(res, 200, {
+        ok: allPassed,
+        timestamp,
+        runtime,
+        vercelEnv,
+        envStatus,
+        detectedKey,
+        tokenLength: resolvedToken.length,
+        prefixType,
+        hadQuotesOrWhitespace,
+        checks,
+        hints,
+      });
+      return true;
+    } catch (err) {
+      checks.push({
+        id: 'network',
+        label: 'Conexión saliente a api.mercadopago.com',
+        status: 'fail',
+        detail:
+          err instanceof Error
+            ? err.message
+            : 'No se pudo establecer conexión con api.mercadopago.com.',
+      });
+      sendJson(res, 502, {
+        ok: false,
+        timestamp,
+        runtime,
+        vercelEnv,
+        envStatus,
+        detectedKey,
+        tokenLength: resolvedToken.length,
+        prefixType,
+        hadQuotesOrWhitespace,
+        checks,
+        hints,
+      });
+      return true;
+    }
+  }
+
   sendJson(res, 404, { ok: false, error: 'Ruta de API no encontrada.' });
   return true;
 }

@@ -4,6 +4,7 @@ import {
   CalendarClock,
   CheckCircle2,
   Coins,
+  Copy,
   Crown,
   ExternalLink,
   Image as ImageIcon,
@@ -12,6 +13,7 @@ import {
   RefreshCw,
   ShieldCheck,
   Store,
+  Terminal,
   Trash2,
   UploadCloud,
   Users,
@@ -52,8 +54,10 @@ import {
 } from '../utils/validation';
 import type { WorkshopProfile } from '../types/workshop';
 import {
+  diagnosePlatformMercadoPagoToken,
   testPlatformSubscriptionCheckout,
   verifyPlatformMercadoPagoToken,
+  type MpPlatformDiagnosticResult,
   type MpPlatformTokenVerificationResult,
   type MpTestCheckoutResult,
 } from '../utils/mercadoPago';
@@ -129,6 +133,8 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
   const [checkingPlatformToken, setCheckingPlatformToken] = useState(false);
   const [testCheckout, setTestCheckout] = useState<MpTestCheckoutResult | null>(null);
   const [creatingTestCheckout, setCreatingTestCheckout] = useState(false);
+  const [diagnosticResult, setDiagnosticResult] = useState<MpPlatformDiagnosticResult | null>(null);
+  const [runningDiagnostic, setRunningDiagnostic] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -148,6 +154,31 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
       setCheckingPlatformToken(false);
     }
   }, [notify]);
+
+  const handleRunDiagnostic = useCallback(async () => {
+    setRunningDiagnostic(true);
+    try {
+      const diag = await diagnosePlatformMercadoPagoToken();
+      setDiagnosticResult(diag);
+      if (diag.ok) {
+        notify('Diagnóstico completado: variable y permisos correctos (registrado en consola).');
+      } else {
+        notify('Diagnóstico completado con observaciones (revisá el detalle y la consola).', 'error');
+      }
+    } finally {
+      setRunningDiagnostic(false);
+    }
+  }, [notify]);
+
+  const handleCopyDiagnosticLog = useCallback(async () => {
+    if (!diagnosticResult || !navigator.clipboard) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(diagnosticResult, null, 2));
+      notify('Reporte de diagnóstico copiado al portapapeles.');
+    } catch {
+      notify('No se pudo copiar el reporte.', 'error');
+    }
+  }, [diagnosticResult, notify]);
 
   const handleCreateTestCheckout = useCallback(async () => {
     setCreatingTestCheckout(true);
@@ -197,6 +228,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
     setNewTechnicianName('');
     setLatestMpConfig(meta.mercadoPago);
     setTestCheckout(null);
+    setDiagnosticResult(null);
     void runPlatformTokenCheck(false);
   }, [open, profile, runPlatformTokenCheck]);
 
@@ -916,19 +948,35 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
               </div>
             </div>
 
-            <button
-              type="button"
-              disabled={checkingPlatformToken}
-              onClick={() => void runPlatformTokenCheck(true)}
-              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0072BB] px-3.5 text-xs font-semibold text-white transition hover:bg-[#005f9c] disabled:opacity-60"
-            >
-              {checkingPlatformToken ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5" />
-              )}
-              {checkingPlatformToken ? 'Validando...' : 'Validar Mercado Pago'}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={checkingPlatformToken}
+                onClick={() => void runPlatformTokenCheck(true)}
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0072BB] px-3.5 text-xs font-semibold text-white transition hover:bg-[#005f9c] disabled:opacity-60"
+              >
+                {checkingPlatformToken ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                )}
+                {checkingPlatformToken ? 'Validando...' : 'Validar Mercado Pago'}
+              </button>
+
+              <button
+                type="button"
+                disabled={runningDiagnostic}
+                onClick={() => void handleRunDiagnostic()}
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                {runningDiagnostic ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Terminal className="h-3.5 w-3.5" />
+                )}
+                {runningDiagnostic ? 'Diagnosticando...' : 'Diagnóstico'}
+              </button>
+            </div>
           </div>
 
           {platformCheck?.valid ? (
@@ -1012,6 +1060,103 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
           ) : (
             <div className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300">
               Tocá <strong>«Validar Mercado Pago»</strong> para comprobar si el token configurado responde correctamente.
+            </div>
+          )}
+
+          {diagnosticResult && (
+            <div className="space-y-2.5 rounded-xl border border-slate-200 bg-white/95 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/90">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2 dark:border-slate-800">
+                <div className="flex items-center gap-2">
+                  <Terminal className="h-3.5 w-3.5 text-[#0072BB]" />
+                  <span className="font-bold text-slate-900 dark:text-white">
+                    Diagnóstico de entorno y permisos
+                  </span>
+                  <span
+                    className={`rounded px-1.5 py-0.5 font-mono-num text-[10px] font-bold ${
+                      diagnosticResult.ok
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'
+                        : 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
+                    }`}
+                  >
+                    {diagnosticResult.runtime.toUpperCase()}
+                    {diagnosticResult.vercelEnv ? ` (${diagnosticResult.vercelEnv})` : ''}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => void handleCopyDiagnosticLog()}
+                  className="inline-flex h-7 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  <Copy className="h-3 w-3" />
+                  Copiar log
+                </button>
+              </div>
+
+              <div className="grid gap-1.5 font-mono-num text-[11px] text-slate-600 sm:grid-cols-3 dark:text-slate-300">
+                <div>
+                  Estado:{' '}
+                  <strong className="text-slate-900 dark:text-white">
+                    {diagnosticResult.envStatus === 'loaded'
+                      ? 'Cargada'
+                      : diagnosticResult.envStatus === 'empty_string'
+                        ? 'Cadena vacía'
+                        : 'No encontrada'}
+                  </strong>
+                </div>
+                <div>
+                  Prefijo:{' '}
+                  <strong className="text-slate-900 dark:text-white">
+                    {diagnosticResult.prefixType}
+                  </strong>
+                </div>
+                <div>
+                  Longitud:{' '}
+                  <strong className="text-slate-900 dark:text-white">
+                    {diagnosticResult.tokenLength} chars
+                  </strong>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                {diagnosticResult.checks.map((chk) => (
+                  <div
+                    key={chk.id}
+                    className={`flex items-start justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-[11px] ${
+                      chk.status === 'pass'
+                        ? 'border-emerald-200/80 bg-emerald-50/60 text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/25 dark:text-emerald-200'
+                        : chk.status === 'warn'
+                          ? 'border-amber-200/80 bg-amber-50/70 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200'
+                          : 'border-red-200/80 bg-red-50/70 text-red-800 dark:border-red-900/50 dark:bg-red-950/25 dark:text-red-300'
+                    }`}
+                  >
+                    <div>
+                      <div className="font-semibold">{chk.label}</div>
+                      <div className="opacity-90">{chk.detail}</div>
+                    </div>
+                    {typeof chk.httpStatus === 'number' && (
+                      <span className="shrink-0 rounded bg-white/80 px-1.5 py-0.5 font-mono-num text-[10px] font-bold dark:bg-slate-900/70">
+                        HTTP {chk.httpStatus}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {diagnosticResult.hints.length > 0 && (
+                <div className="rounded-lg border border-sky-200 bg-sky-50/70 px-2.5 py-2 text-[11px] text-sky-900 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200">
+                  <div className="font-semibold">Sugerencias:</div>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                    {diagnosticResult.hints.map((hint, idx) => (
+                      <li key={idx}>{hint}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div className="text-[10px] text-slate-400 dark:text-slate-500">
+                Resultado completo registrado en la consola del navegador (`[TH3 BNB · Diagnóstico Mercado Pago]`).
+              </div>
             </div>
           )}
         </div>

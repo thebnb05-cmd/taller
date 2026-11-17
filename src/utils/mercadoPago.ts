@@ -325,3 +325,103 @@ export async function testPlatformSubscriptionCheckout(
     };
   }
 }
+
+export interface MpPlatformDiagnosticCheck {
+  id: string;
+  label: string;
+  status: 'pass' | 'warn' | 'fail';
+  httpStatus?: number;
+  detail: string;
+}
+
+export interface MpPlatformDiagnosticResult {
+  ok: boolean;
+  timestamp: string;
+  runtime: string;
+  vercelEnv?: string | null;
+  envStatus: 'loaded' | 'empty_string' | 'missing';
+  detectedKey: string | null;
+  tokenLength: number;
+  prefixType: 'APP_USR' | 'TEST' | 'unknown' | 'none';
+  hadQuotesOrWhitespace: boolean;
+  checks: MpPlatformDiagnosticCheck[];
+  hints: string[];
+  error?: string;
+}
+
+/**
+ * Ejecuta un diagnóstico detallado en el servidor sobre PLATFORM_MERCADOPAGO_ACCESS_TOKEN
+ * (existencia, cadenas vacías, formato y scopes/permisos en Mercado Pago) y registra el resultado en consola.
+ */
+export async function diagnosePlatformMercadoPagoToken(): Promise<MpPlatformDiagnosticResult> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const jwt = data?.session?.access_token;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (jwt) {
+      headers.Authorization = `Bearer ${jwt}`;
+    }
+
+    const res = await fetch('/api/subscriptions/diagnose-platform-token', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({}),
+    });
+
+    const contentType = res.headers.get('content-type') || '';
+    const parsed = (await res.json().catch(() => null)) as MpPlatformDiagnosticResult | null;
+    if (!parsed || typeof parsed !== 'object') {
+      const fallback: MpPlatformDiagnosticResult = {
+        ok: false,
+        timestamp: new Date().toISOString(),
+        runtime: 'unknown',
+        envStatus: 'missing',
+        detectedKey: null,
+        tokenLength: 0,
+        prefixType: 'none',
+        hadQuotesOrWhitespace: false,
+        checks: [
+          {
+            id: 'api_reachability',
+            label: 'Respuesta del endpoint de diagnóstico',
+            status: 'fail',
+            httpStatus: res.status,
+            detail: contentType.includes('text/html')
+              ? 'El servidor devolvió HTML en lugar de JSON (el backend /api no está actualizado).'
+              : `Respuesta inválida del servidor (HTTP ${res.status}).`,
+          },
+        ],
+        hints: ['Verificá que la última versión del backend esté desplegada correctamente.'],
+        error: `HTTP ${res.status}`,
+      };
+      console.error('[TH3 BNB · Diagnóstico Mercado Pago]', fallback);
+      return fallback;
+    }
+
+    console.info('[TH3 BNB · Diagnóstico Mercado Pago]', parsed);
+    return parsed;
+  } catch (err) {
+    const networkFailure: MpPlatformDiagnosticResult = {
+      ok: false,
+      timestamp: new Date().toISOString(),
+      runtime: 'unknown',
+      envStatus: 'missing',
+      detectedKey: null,
+      tokenLength: 0,
+      prefixType: 'none',
+      hadQuotesOrWhitespace: false,
+      checks: [
+        {
+          id: 'network_error',
+          label: 'Conexión con el servidor',
+          status: 'fail',
+          detail: err instanceof Error ? err.message : 'Error de red al consultar el servidor.',
+        },
+      ],
+      hints: ['Comprobá tu conexión a internet y recargá la aplicación.'],
+      error: 'Error de red',
+    };
+    console.error('[TH3 BNB · Diagnóstico Mercado Pago]', networkFailure);
+    return networkFailure;
+  }
+}
