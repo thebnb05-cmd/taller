@@ -1188,6 +1188,87 @@ async function startServer() {
     }
   });
 
+  app.post('/api/subscriptions/verify-platform-token', async (req: Request, res: Response) => {
+    const user = await verifySupabaseSessionUser(req);
+    if (!user) {
+      res.status(401).json({
+        ok: false,
+        configured: false,
+        valid: false,
+        error: 'Sesión inválida o expirada.',
+      });
+      return;
+    }
+
+    if (!EXEMPT_ANNUAL_EMAILS.has(user.email.toLowerCase())) {
+      res.status(403).json({
+        ok: false,
+        forbidden: true,
+        configured: false,
+        valid: false,
+        error: 'Solo el administrador de la plataforma puede verificar este token.',
+      });
+      return;
+    }
+
+    const platformToken = resolvePlatformMpToken();
+    if (!platformToken) {
+      res.json({
+        ok: false,
+        configured: false,
+        valid: false,
+        error:
+          'Todavía no cargaste PLATFORM_MERCADOPAGO_ACCESS_TOKEN en los Secrets del servidor.',
+      });
+      return;
+    }
+
+    try {
+      const meRes = await mpFetch('/users/me', platformToken);
+      if (!meRes.ok) {
+        res.json({
+          ok: false,
+          configured: true,
+          valid: false,
+          error: extractMpErrorMessage(
+            meRes.data,
+            'Mercado Pago rechazó el PLATFORM_MERCADOPAGO_ACCESS_TOKEN (revisá que sea el Access Token completo).'
+          ),
+        });
+        return;
+      }
+
+      const preSearchRes = await mpFetch('/preapproval/search?limit=1', platformToken);
+      const mode: 'production' | 'test' = platformToken.startsWith('TEST-')
+        ? 'test'
+        : 'production';
+
+      res.json({
+        ok: true,
+        configured: true,
+        valid: true,
+        mode,
+        subscriptionsReady: preSearchRes.ok,
+        account: {
+          sellerId: String(meRes.data.id || ''),
+          nickname: String(meRes.data.nickname || ''),
+          email: String(meRes.data.email || ''),
+          siteId: String(meRes.data.site_id || ''),
+        },
+      });
+    } catch (err) {
+      res.status(502).json({
+        ok: false,
+        configured: true,
+        valid: false,
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Error de red al probar PLATFORM_MERCADOPAGO_ACCESS_TOKEN contra Mercado Pago.',
+      });
+    }
+  });
+
   const httpServer = http.createServer(app);
 
   if (process.env.NODE_ENV !== 'production') {

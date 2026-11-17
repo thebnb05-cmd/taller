@@ -1012,6 +1012,10 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         open={showBrandSettings}
         onClose={() => setShowBrandSettings(false)}
         profile={profile}
+        userEmail={userEmail}
+        subscriptionRecord={subscriptionRecord}
+        nowMs={nowMs}
+        onOpenSubscription={() => setShowSubscriptionModal(true)}
       />
 
       <NewRepairModal

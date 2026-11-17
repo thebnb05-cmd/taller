@@ -1,3 +1,4 @@
+import { supabase } from '../lib/db';
 import { decryptJsonValue, encryptJsonValue, isEncryptedValue } from './crypto';
 import { isSafeId, sanitizePlainLine } from './validation';
 
@@ -62,6 +63,22 @@ export interface MpOrderStatusResponse {
   isPaid?: boolean;
   isCanceled?: boolean;
   isFailed?: boolean;
+}
+
+export interface MpPlatformTokenVerificationResult {
+  ok: boolean;
+  configured: boolean;
+  valid: boolean;
+  forbidden?: boolean;
+  mode?: 'production' | 'test';
+  subscriptionsReady?: boolean;
+  error?: string;
+  account?: {
+    sellerId: string;
+    nickname: string;
+    email: string;
+    siteId: string;
+  };
 }
 
 const EMPTY_MP_CONFIG: MercadoPagoConfig = {
@@ -224,4 +241,43 @@ export async function cancelMercadoPagoOrder(params: {
   posExternalId?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   return postJson<{ ok: boolean; error?: string }>('/api/mercadopago/orders/cancel', params);
+}
+
+/**
+ * Verifica si PLATFORM_MERCADOPAGO_ACCESS_TOKEN configurado en el servidor es válido
+ * realizando una llamada de prueba autenticada a la API de Mercado Pago (/users/me).
+ */
+export async function verifyPlatformMercadoPagoToken(): Promise<MpPlatformTokenVerificationResult> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const jwt = data?.session?.access_token;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (jwt) {
+      headers.Authorization = `Bearer ${jwt}`;
+    }
+
+    const res = await fetch('/api/subscriptions/verify-platform-token', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({}),
+    });
+
+    const parsed = (await res.json().catch(() => null)) as MpPlatformTokenVerificationResult | null;
+    if (!parsed || typeof parsed !== 'object') {
+      return {
+        ok: false,
+        configured: false,
+        valid: false,
+        error: 'Respuesta inválida al verificar el token de la plataforma.',
+      };
+    }
+    return parsed;
+  } catch {
+    return {
+      ok: false,
+      configured: false,
+      valid: false,
+      error: 'Error de red al verificar PLATFORM_MERCADOPAGO_ACCESS_TOKEN.',
+    };
+  }
 }
