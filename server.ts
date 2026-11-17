@@ -1200,17 +1200,7 @@ async function startServer() {
       return;
     }
 
-    if (!EXEMPT_ANNUAL_EMAILS.has(user.email.toLowerCase())) {
-      res.status(403).json({
-        ok: false,
-        forbidden: true,
-        configured: false,
-        valid: false,
-        error: 'Solo el administrador de la plataforma puede verificar este token.',
-      });
-      return;
-    }
-
+    const isPlatformAdmin = EXEMPT_ANNUAL_EMAILS.has(user.email.toLowerCase());
     const platformToken = resolvePlatformMpToken();
     if (!platformToken) {
       res.json({
@@ -1218,7 +1208,7 @@ async function startServer() {
         configured: false,
         valid: false,
         error:
-          'Todavía no cargaste PLATFORM_MERCADOPAGO_ACCESS_TOKEN en los Secrets del servidor.',
+          'No se encontró PLATFORM_MERCADOPAGO_ACCESS_TOKEN configurado en los Secrets del servidor.',
       });
       return;
     }
@@ -1232,7 +1222,7 @@ async function startServer() {
           valid: false,
           error: extractMpErrorMessage(
             meRes.data,
-            'Mercado Pago rechazó el PLATFORM_MERCADOPAGO_ACCESS_TOKEN (revisá que sea el Access Token completo).'
+            'Mercado Pago rechazó las credenciales de PLATFORM_MERCADOPAGO_ACCESS_TOKEN.'
           ),
         });
         return;
@@ -1249,12 +1239,16 @@ async function startServer() {
         valid: true,
         mode,
         subscriptionsReady: preSearchRes.ok,
-        account: {
-          sellerId: String(meRes.data.id || ''),
-          nickname: String(meRes.data.nickname || ''),
-          email: String(meRes.data.email || ''),
-          siteId: String(meRes.data.site_id || ''),
-        },
+        ...(isPlatformAdmin
+          ? {
+              account: {
+                sellerId: String(meRes.data.id || ''),
+                nickname: String(meRes.data.nickname || ''),
+                email: String(meRes.data.email || ''),
+                siteId: String(meRes.data.site_id || ''),
+              },
+            }
+          : {}),
       });
     } catch (err) {
       res.status(502).json({

@@ -132,11 +132,11 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
     try {
       const result = await verifyPlatformMercadoPagoToken();
       setPlatformCheck(result);
-      if (showToast && !result.forbidden) {
+      if (showToast) {
         if (result.valid) {
-          notify('PLATFORM_MERCADOPAGO_ACCESS_TOKEN verificado correctamente.');
+          notify('Conexión Exitosa con Mercado Pago.');
         } else {
-          notify(result.error || 'El token de plataforma no es válido o falta configurarlo.', 'error');
+          notify(result.error || 'Error en Credenciales de Mercado Pago.', 'error');
         }
       }
     } finally {
@@ -832,116 +832,113 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
           );
         })()}
 
-        {((platformCheck && !platformCheck.forbidden) ||
-          (checkingPlatformToken &&
-            (userEmail || profile.email || '').trim().toLowerCase() === 'thebnb05@gmail.com')) && (
-          <div
-            className={`space-y-3 rounded-2xl border p-4 ${
-              platformCheck?.valid
-                ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/60 dark:bg-emerald-950/30'
-                : platformCheck?.configured
-                  ? 'border-red-200 bg-red-50/70 dark:border-red-900/60 dark:bg-red-950/30'
-                  : 'border-amber-200 bg-amber-50/70 dark:border-amber-900/60 dark:bg-amber-950/30'
-            }`}
-          >
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div className="flex items-start gap-2.5">
-                <span
-                  className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
-                    platformCheck?.valid
-                      ? 'bg-emerald-600 text-white'
-                      : platformCheck?.configured
-                        ? 'bg-red-600 text-white'
-                        : 'bg-amber-500 text-white'
-                  }`}
-                >
-                  {checkingPlatformToken && !platformCheck ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : platformCheck?.valid ? (
-                    <CheckCircle2 className="h-4 w-4" />
-                  ) : platformCheck?.configured ? (
-                    <AlertTriangle className="h-4 w-4" />
-                  ) : (
-                    <ShieldCheck className="h-4 w-4" />
-                  )}
-                </span>
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
-                      Token de suscripciones de la plataforma
-                    </h4>
-                    <span
-                      className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
-                        platformCheck?.valid
-                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/70 dark:text-emerald-200'
-                          : platformCheck?.configured
-                            ? 'bg-red-100 text-red-700 dark:bg-red-900/70 dark:text-red-200'
-                            : 'bg-amber-100 text-amber-800 dark:bg-amber-900/70 dark:text-amber-200'
-                      }`}
-                    >
-                      {checkingPlatformToken && !platformCheck
-                        ? 'Verificando...'
-                        : platformCheck?.valid
-                          ? platformCheck.mode === 'test'
-                            ? 'Válido · Prueba'
-                            : 'Válido · Producción'
-                          : platformCheck?.configured
-                            ? 'Token inválido'
-                            : 'Sin configurar'}
-                    </span>
-                  </div>
-                  <p className="mt-0.5 font-mono-num text-[11px] text-slate-600 dark:text-slate-300">
-                    PLATFORM_MERCADOPAGO_ACCESS_TOKEN
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                disabled={checkingPlatformToken}
-                onClick={() => void runPlatformTokenCheck(true)}
-                className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
-              >
-                {checkingPlatformToken ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-3.5 w-3.5" />
-                )}
-                Verificar token
-              </button>
-            </div>
-
-            {platformCheck?.valid && platformCheck.account ? (
-              <div className="rounded-xl border border-emerald-200/80 bg-white/80 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-800/60 dark:bg-slate-900/70 dark:text-emerald-200">
-                <div>
-                  Cuenta verificada en Mercado Pago:{' '}
-                  <strong>
-                    {platformCheck.account.nickname || platformCheck.account.email || platformCheck.account.sellerId}
-                  </strong>
-                  {platformCheck.account.siteId ? ` (${platformCheck.account.siteId})` : ''}
-                </div>
-                <div className="mt-0.5 text-[11px] opacity-85">
-                  {platformCheck.subscriptionsReady
-                    ? 'API de Suscripciones habilitada y lista para cobrar planes.'
-                    : 'Token de cuenta válido; se usará Checkout / Suscripciones según disponibilidad.'}
-                </div>
-              </div>
-            ) : (
-              <div
-                className={`rounded-xl border px-3 py-2 text-xs ${
-                  platformCheck?.configured
-                    ? 'border-red-200/80 bg-white/80 text-red-700 dark:border-red-900/60 dark:bg-slate-900/70 dark:text-red-300'
-                    : 'border-amber-200/80 bg-white/80 text-amber-800 dark:border-amber-900/60 dark:bg-slate-900/70 dark:text-amber-200'
+        <div
+          className={`space-y-3 rounded-2xl border p-4 ${
+            platformCheck?.valid
+              ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/60 dark:bg-emerald-950/30'
+              : platformCheck && !platformCheck.valid
+                ? 'border-red-200 bg-red-50/70 dark:border-red-900/60 dark:bg-red-950/30'
+                : 'border-slate-200 bg-slate-50/80 dark:border-slate-800 dark:bg-slate-800/40'
+          }`}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="flex items-start gap-2.5">
+              <span
+                className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
+                  platformCheck?.valid
+                    ? 'bg-emerald-600 text-white'
+                    : platformCheck && !platformCheck.valid
+                      ? 'bg-red-600 text-white'
+                      : 'bg-[#0072BB] text-white'
                 }`}
               >
-                {checkingPlatformToken && !platformCheck
-                  ? 'Consultando estado de PLATFORM_MERCADOPAGO_ACCESS_TOKEN con Mercado Pago...'
-                  : platformCheck?.error ||
-                    'Cargá el Access Token en el Secret PLATFORM_MERCADOPAGO_ACCESS_TOKEN y volvé a verificar.'}
+                {checkingPlatformToken ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : platformCheck?.valid ? (
+                  <CheckCircle2 className="h-4 w-4" />
+                ) : platformCheck && !platformCheck.valid ? (
+                  <AlertTriangle className="h-4 w-4" />
+                ) : (
+                  <ShieldCheck className="h-4 w-4" />
+                )}
+              </span>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                    Validación Mercado Pago (Suscripciones)
+                  </h4>
+                  {checkingPlatformToken ? (
+                    <span className="rounded-md bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-[#0072BB] dark:bg-sky-950/70 dark:text-sky-300">
+                      Verificando...
+                    </span>
+                  ) : platformCheck?.valid ? (
+                    <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-900/70 dark:text-emerald-200">
+                      <CheckCircle2 className="h-3 w-3" />
+                      Conexión Exitosa
+                    </span>
+                  ) : platformCheck ? (
+                    <span className="inline-flex items-center gap-1 rounded-md bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700 dark:bg-red-900/70 dark:text-red-200">
+                      <AlertTriangle className="h-3 w-3" />
+                      Error en Credenciales
+                    </span>
+                  ) : null}
+                </div>
+                <p className="mt-0.5 font-mono-num text-[11px] text-slate-600 dark:text-slate-300">
+                  PLATFORM_MERCADOPAGO_ACCESS_TOKEN
+                  {platformCheck?.valid && platformCheck.mode
+                    ? ` · ${platformCheck.mode === 'test' ? 'Modo Prueba' : 'Modo Producción'}`
+                    : ''}
+                </p>
               </div>
-            )}
+            </div>
+
+            <button
+              type="button"
+              disabled={checkingPlatformToken}
+              onClick={() => void runPlatformTokenCheck(true)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0072BB] px-3.5 text-xs font-semibold text-white transition hover:bg-[#005f9c] disabled:opacity-60"
+            >
+              {checkingPlatformToken ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" />
+              )}
+              {checkingPlatformToken ? 'Validando...' : 'Validar Mercado Pago'}
+            </button>
           </div>
-        )}
+
+          {platformCheck?.valid ? (
+            <div className="rounded-xl border border-emerald-200/80 bg-white/85 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-800/60 dark:bg-slate-900/70 dark:text-emerald-200">
+              <div className="font-semibold">
+                Conexión Exitosa
+                {platformCheck.account
+                  ? ` · ${
+                      platformCheck.account.nickname ||
+                      platformCheck.account.email ||
+                      platformCheck.account.sellerId
+                    }${platformCheck.account.siteId ? ` (${platformCheck.account.siteId})` : ''}`
+                  : ''}
+              </div>
+              <div className="mt-0.5 text-[11px] opacity-85">
+                {platformCheck.subscriptionsReady
+                  ? 'Credenciales verificadas y API de Suscripciones operativa.'
+                  : 'Credenciales verificadas correctamente con Mercado Pago.'}
+              </div>
+            </div>
+          ) : platformCheck ? (
+            <div className="rounded-xl border border-red-200/80 bg-white/85 px-3 py-2 text-xs text-red-700 dark:border-red-900/60 dark:bg-slate-900/70 dark:text-red-300">
+              <div className="font-semibold">Error en Credenciales</div>
+              <div className="mt-0.5 text-[11px]">
+                {platformCheck.error ||
+                  'Verificá que PLATFORM_MERCADOPAGO_ACCESS_TOKEN esté cargado correctamente en los Secrets.'}
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300">
+              Tocá <strong>«Validar Mercado Pago»</strong> para comprobar si el token configurado responde correctamente.
+            </div>
+          )}
+        </div>
 
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
           <div className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
