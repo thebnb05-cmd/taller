@@ -31,6 +31,7 @@ import {
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useActiveCurrency } from '../utils/currency';
 import { clearTransferConfigCache, hydrateTransferConfig } from '../utils/payment';
+import { clearMercadoPagoConfigCache, hydrateMercadoPagoConfig } from '../utils/mercadoPago';
 import {
   ACTION_GUIDES,
   getPendingContextualGuide,
@@ -160,6 +161,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
     if (!userId) return;
     let active = true;
     void hydrateTransferConfig(userId);
+    void hydrateMercadoPagoConfig(userId);
     const loadedSet = new Set<string>();
     setLoadingCount(7);
     setSyncError(null);
@@ -541,6 +543,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               type="button"
               onClick={() => {
                 clearTransferConfigCache(userId);
+                clearMercadoPagoConfigCache(userId);
                 void supabase.auth.signOut();
               }}
               aria-label="Cerrar sesión"

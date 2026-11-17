@@ -240,6 +240,10 @@ export const PAGE_GUIDES: Record<PageId, ContextualGuideDef> = {
         text: 'Registrá ventas en efectivo, tarjeta o transferencia con tu Alias/CBU y QR visible.',
       },
       {
+        id: 'sales_mercadopago_qr_point',
+        text: 'Conectá Mercado Pago en Configuración para generar QR dinámicos o enviar cobros directo a tu terminal Point.',
+      },
+      {
         id: 'sales_receipts',
         text: 'Emití tickets térmicos 80mm o comprobantes A4 al instante después de cobrar.',
       },
@@ -314,6 +318,10 @@ export const ACTION_GUIDES: Record<ActionGuideId, ContextualGuideDef> = {
         id: 'new_sale_transfer_qr',
         text: 'Si elegís Transferencia podés cargar tu Alias, CBU y QR una vez y mostrarlo en pantalla y boleta.',
       },
+      {
+        id: 'new_sale_mercadopago',
+        text: 'Con Mercado Pago conectado generás QR dinámicos (Transferencia) o enviás la orden al Point físico (Tarjeta) con verificación automática.',
+      },
     ],
   },
   brand_settings: {
@@ -327,6 +335,10 @@ export const ACTION_GUIDES: Record<ActionGuideId, ContextualGuideDef> = {
       {
         id: 'settings_techs_currency',
         text: 'Activá o desactivá la asignación opcional de técnicos y agregá monedas secundarias con cotización.',
+      },
+      {
+        id: 'settings_mercadopago',
+        text: 'Cargá tu Access Token de Mercado Pago, ID de punto de venta (QR) y Terminal Point para cobrar desde Nueva venta.',
       },
     ],
   },

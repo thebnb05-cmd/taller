@@ -36,6 +36,7 @@ import {
 import type { WorkshopProfile } from '../types/workshop';
 import { ModalShell } from './ModalShell';
 import { BrandMark } from './BrandMark';
+import { PaymentSettingsPanel } from './PaymentSettingsPanel';
 import { useToast } from './ToastProvider';
 
 interface BrandSettingsModalProps {
@@ -698,6 +699,8 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
             </div>
           )}
         </div>
+
+        <PaymentSettingsPanel ownerId={profile.ownerId || profile.id} />
 
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
           <div className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
