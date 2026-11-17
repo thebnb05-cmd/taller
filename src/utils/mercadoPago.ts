@@ -243,24 +243,54 @@ export async function cancelMercadoPagoOrder(params: {
   return postJson<{ ok: boolean; error?: string }>('/api/mercadopago/orders/cancel', params);
 }
 
+async function getAuthHeaders(forceRefresh = false): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  try {
+    let session = (await supabase.auth.getSession()).data?.session ?? null;
+    const nowSec = Math.floor(Date.now() / 1000);
+    const isNearExpiry = Boolean(session?.expires_at && session.expires_at - nowSec < 60);
+    if (forceRefresh || !session?.access_token || isNearExpiry) {
+      const refreshed = await supabase.auth.refreshSession();
+      if (refreshed.data?.session?.access_token) {
+        session = refreshed.data.session;
+      }
+    }
+    if (session?.access_token) {
+      headers.Authorization = `Bearer ${session.access_token}`;
+    }
+  } catch {
+    // Ignore session refresh error
+  }
+  return headers;
+}
+
+async function fetchAuthedPost(url: string, body: Record<string, unknown>): Promise<Response> {
+  const headers = await getAuthHeaders(false);
+  let res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (res.status === 401) {
+    const freshHeaders = await getAuthHeaders(true);
+    if (freshHeaders.Authorization && freshHeaders.Authorization !== headers.Authorization) {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: freshHeaders,
+        body: JSON.stringify(body),
+      });
+    }
+  }
+  return res;
+}
+
 /**
  * Verifica si PLATFORM_MERCADOPAGO_ACCESS_TOKEN configurado en el servidor es válido
  * realizando una llamada de prueba autenticada a la API de Mercado Pago (/users/me).
  */
 export async function verifyPlatformMercadoPagoToken(): Promise<MpPlatformTokenVerificationResult> {
   try {
-    const { data } = await supabase.auth.getSession();
-    const jwt = data?.session?.access_token;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (jwt) {
-      headers.Authorization = `Bearer ${jwt}`;
-    }
-
-    const res = await fetch('/api/subscriptions/verify-platform-token', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({}),
-    });
+    const res = await fetchAuthedPost('/api/subscriptions/verify-platform-token', {});
 
     const contentType = res.headers.get('content-type') || '';
     const parsed = (await res.json().catch(() => null)) as MpPlatformTokenVerificationResult | null;
@@ -298,17 +328,8 @@ export async function testPlatformSubscriptionCheckout(
   backUrl?: string
 ): Promise<MpTestCheckoutResult> {
   try {
-    const { data } = await supabase.auth.getSession();
-    const jwt = data?.session?.access_token;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (jwt) {
-      headers.Authorization = `Bearer ${jwt}`;
-    }
-
-    const res = await fetch('/api/subscriptions/test-checkout', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ backUrl: backUrl || window.location.href }),
+    const res = await fetchAuthedPost('/api/subscriptions/test-checkout', {
+      backUrl: backUrl || window.location.href,
     });
     const parsed = (await res.json().catch(() => null)) as MpTestCheckoutResult | null;
     if (!parsed || typeof parsed !== 'object') {
@@ -355,18 +376,7 @@ export interface MpPlatformDiagnosticResult {
  */
 export async function diagnosePlatformMercadoPagoToken(): Promise<MpPlatformDiagnosticResult> {
   try {
-    const { data } = await supabase.auth.getSession();
-    const jwt = data?.session?.access_token;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (jwt) {
-      headers.Authorization = `Bearer ${jwt}`;
-    }
-
-    const res = await fetch('/api/subscriptions/diagnose-platform-token', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({}),
-    });
+    const res = await fetchAuthedPost('/api/subscriptions/diagnose-platform-token', {});
 
     const contentType = res.headers.get('content-type') || '';
     const parsed = (await res.json().catch(() => null)) as MpPlatformDiagnosticResult | null;

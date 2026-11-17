@@ -1498,13 +1498,26 @@ export async function handleApiRequest(
         error: 'Sesión inválida o expirada.',
         timestamp: new Date().toISOString(),
         runtime: process.env.VERCEL ? 'vercel' : 'node',
-        envStatus: 'missing',
+        vercelEnv: process.env.VERCEL_ENV || null,
+        envStatus: resolvePlatformMpToken() ? 'loaded' : 'missing',
         detectedKey: null,
         tokenLength: 0,
         prefixType: 'none',
         hadQuotesOrWhitespace: false,
-        checks: [],
-        hints: ['Iniciá sesión nuevamente para ejecutar el diagnóstico en el servidor.'],
+        checks: [
+          {
+            id: 'auth_session',
+            label: 'Autenticación de sesión',
+            status: 'fail',
+            httpStatus: 401,
+            detail: 'El token de sesión JWT no fue enviado o expiró. Recargá la app o cerrá e iniciá sesión.',
+          },
+        ],
+        hints: [
+          'Recargá la página con F5 o cerrá sesión y volvé a ingresar para renovar tu JWT.',
+          'Además, en este servidor Vercel la variable PLATFORM_MERCADOPAGO_ACCESS_TOKEN todavía figura: ' +
+            (resolvePlatformMpToken() ? 'cargada.' : 'NO cargada en este entorno.'),
+        ],
       });
       return true;
     }

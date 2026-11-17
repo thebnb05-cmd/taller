@@ -172,18 +172,48 @@ export function getSubscriptionRemaining(
   };
 }
 
-async function getAuthHeaders(): Promise<Record<string, string>> {
+async function getAuthHeaders(forceRefresh = false): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   try {
-    const { data } = await supabase.auth.getSession();
-    const token = data?.session?.access_token;
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
+    let session = (await supabase.auth.getSession()).data?.session ?? null;
+    const nowSec = Math.floor(Date.now() / 1000);
+    const isNearExpiry = Boolean(session?.expires_at && session.expires_at - nowSec < 60);
+    if (forceRefresh || !session?.access_token || isNearExpiry) {
+      const refreshed = await supabase.auth.refreshSession();
+      if (refreshed.data?.session?.access_token) {
+        session = refreshed.data.session;
+      }
+    }
+    if (session?.access_token) {
+      headers.Authorization = `Bearer ${session.access_token}`;
     }
   } catch {
     // Ignore session read error
   }
   return headers;
+}
+
+async function fetchAuthedSubscriptionPost(
+  url: string,
+  body: Record<string, unknown>
+): Promise<Response> {
+  const headers = await getAuthHeaders(false);
+  let res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (res.status === 401) {
+    const freshHeaders = await getAuthHeaders(true);
+    if (freshHeaders.Authorization && freshHeaders.Authorization !== headers.Authorization) {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: freshHeaders,
+        body: JSON.stringify(body),
+      });
+    }
+  }
+  return res;
 }
 
 export async function fetchSubscriptionStatus(
@@ -194,11 +224,8 @@ export async function fetchSubscriptionStatus(
   mpConfigured?: boolean;
   error?: string;
 }> {
-  const headers = await getAuthHeaders();
-  const res = await fetch('/api/subscriptions/status', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ subscriptionToken: existingToken || null }),
+  const res = await fetchAuthedSubscriptionPost('/api/subscriptions/status', {
+    subscriptionToken: existingToken || null,
   });
   return (await res.json().catch(() => ({ ok: false, error: 'Error de red' }))) as {
     ok: boolean;
@@ -220,12 +247,7 @@ export async function createSubscriptionCheckout(params: {
   planId?: SubscriptionPlanId;
   error?: string;
 }> {
-  const headers = await getAuthHeaders();
-  const res = await fetch('/api/subscriptions/checkout', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(params),
-  });
+  const res = await fetchAuthedSubscriptionPost('/api/subscriptions/checkout', params);
   return (await res.json().catch(() => ({ ok: false, error: 'Error de red' }))) as {
     ok: boolean;
     checkoutUrl?: string;
@@ -250,12 +272,7 @@ export async function verifySubscriptionPayment(params: {
   subscription?: SignedSubscriptionRecord;
   error?: string;
 }> {
-  const headers = await getAuthHeaders();
-  const res = await fetch('/api/subscriptions/verify', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(params),
-  });
+  const res = await fetchAuthedSubscriptionPost('/api/subscriptions/verify', params);
   return (await res.json().catch(() => ({ ok: false, error: 'Error de red' }))) as {
     ok: boolean;
     paid?: boolean;
