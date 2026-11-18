@@ -269,7 +269,13 @@ export const AdminTallerPage: React.FC<AdminTallerPageProps> = ({ userEmail }) =
               </p>
               <ol className="list-decimal space-y-1 pl-4 text-xs text-amber-900 dark:text-amber-200">
                 <li>
-                  En Supabase → <span className="font-semibold">Project Settings → API</span>, copiá la clave secreta{' '}
+                  En Supabase → <span className="font-semibold">Project Settings → API Keys</span>, copiá tu clave privada:{' '}
+                  en la pestaña <span className="font-semibold">Publishable and secret API keys</span> usá{' '}
+                  <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-[11px] dark:bg-amber-900/60">
+                    Secret keys
+                  </code>{' '}
+                  (<code className="font-mono text-[11px]">sb_secret_...</code>) o en{' '}
+                  <span className="font-semibold">Legacy anon, service_role API keys</span> tocá Reveal en{' '}
                   <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-[11px] dark:bg-amber-900/60">
                     service_role
                   </code>{' '}

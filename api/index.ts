@@ -249,17 +249,30 @@ function resolveServiceRoleKey(): string {
     .trim();
 }
 
+function buildSupabaseServiceHeaders(
+  serviceKey: string,
+  extra: Record<string, string> = {}
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    apikey: serviceKey,
+    ...extra,
+  };
+  // Las nuevas claves sb_secret_* no son JWT: enviarlas como Bearer provoca 401
+  if (!serviceKey.startsWith('sb_secret_')) {
+    headers.Authorization = `Bearer ${serviceKey}`;
+  }
+  return headers;
+}
+
 async function fetchSupabaseAdminJson<T>(
   pathAndQuery: string,
   serviceKey: string
 ): Promise<{ ok: boolean; status: number; data: T | null; errorText?: string }> {
   try {
     const res = await fetch(`${SUPABASE_URL}${pathAndQuery}`, {
-      headers: {
-        apikey: serviceKey,
-        Authorization: `Bearer ${serviceKey}`,
+      headers: buildSupabaseServiceHeaders(serviceKey, {
         Accept: 'application/json',
-      },
+      }),
     });
     const text = await res.text();
     if (!res.ok) {
@@ -2441,12 +2454,10 @@ export async function handleApiRequest(
         `${SUPABASE_URL}/rest/v1/app_installs?on_conflict=device_id`,
         {
           method: 'POST',
-          headers: {
-            apikey: serviceKey,
-            Authorization: `Bearer ${serviceKey}`,
+          headers: buildSupabaseServiceHeaders(serviceKey, {
             'Content-Type': 'application/json',
             Prefer: 'resolution=merge-duplicates,return=minimal',
-          },
+          }),
           body: JSON.stringify(record),
         }
       );
