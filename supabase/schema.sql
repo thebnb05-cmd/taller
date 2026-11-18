@@ -410,6 +410,23 @@ alter table public.purchases
   add constraint chk_purchases_non_negative
   check (amount >= 0) not valid;
 
+-- 10. Registro privado de instalaciones de la app (PWA) - solo accesible desde servidor con service_role
+create table if not exists public.app_installs (
+  device_id text primary key,
+  user_id uuid references auth.users(id) on delete set null,
+  platform text not null default 'other',
+  install_source text not null default 'standalone',
+  user_agent text,
+  first_seen_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now()
+);
+
+create index if not exists idx_app_installs_last_seen on public.app_installs(last_seen_at desc);
+create index if not exists idx_app_installs_platform on public.app_installs(platform);
+
+alter table public.app_installs enable row level security;
+revoke all on table public.app_installs from anon, public, authenticated;
+
 -- Nota sobre Realtime (opcional para sincronización entre múltiples dispositivos):
 -- En Supabase Dashboard -> Database -> Publications -> supabase_realtime,
 -- podés activar las tablas de arriba con un clic si usás varios dispositivos a la vez.

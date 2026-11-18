@@ -7,7 +7,8 @@ export type PageId =
   | 'suppliers'
   | 'sales'
   | 'purchases'
-  | 'reports';
+  | 'reports'
+  | 'admin_taller';
 
 export type RepairStatus =
   | 'recibido'

@@ -131,7 +131,7 @@ export const WELCOME_TOUR_STEPS: WelcomeTourStep[] = [
   },
 ];
 
-export const PAGE_GUIDES: Record<PageId, ContextualGuideDef> = {
+export const PAGE_GUIDES: Record<Exclude<PageId, 'admin_taller'>, ContextualGuideDef> = {
   home: {
     title: 'Guía rápida · Inicio',
     subtitle: 'Tu tablero general del taller en tiempo real',
@@ -392,7 +392,7 @@ export function loadOnboardingState(userId: string): OnboardingState {
     if (parsed.visitedPages && typeof parsed.visitedPages === 'object') {
       for (const [pageKey, visited] of Object.entries(parsed.visitedPages)) {
         if (!visited) continue;
-        const def = PAGE_GUIDES[pageKey as PageId];
+        const def = PAGE_GUIDES[pageKey as Exclude<PageId, 'admin_taller'>];
         if (!def) continue;
         for (const bullet of def.bullets) {
           seenGuideItems[`page:${pageKey}:${bullet.id}`] = true;

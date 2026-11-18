@@ -232,6 +232,77 @@ function resolvePlatformMpToken(): string {
     .trim();
 }
 
+function resolveServiceRoleKey(): string {
+  let raw = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!raw) {
+    for (const [k, v] of Object.entries(process.env)) {
+      const normalizedKey = k.trim().toUpperCase();
+      if (normalizedKey === 'SUPABASE_SERVICE_ROLE_KEY' && v) {
+        raw = v;
+        break;
+      }
+    }
+  }
+  return String(raw || '')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '')
+    .trim();
+}
+
+async function fetchSupabaseAdminJson<T>(
+  pathAndQuery: string,
+  serviceKey: string
+): Promise<{ ok: boolean; status: number; data: T | null; errorText?: string }> {
+  try {
+    const res = await fetch(`${SUPABASE_URL}${pathAndQuery}`, {
+      headers: {
+        apikey: serviceKey,
+        Authorization: `Bearer ${serviceKey}`,
+        Accept: 'application/json',
+      },
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      return { ok: false, status: res.status, data: null, errorText: text.slice(0, 300) };
+    }
+    const data = text ? (JSON.parse(text) as T) : null;
+    return { ok: true, status: res.status, data };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 502,
+      data: null,
+      errorText: err instanceof Error ? err.message : 'Error de red con Supabase.',
+    };
+  }
+}
+
+async function fetchAllSupabaseTableRows<T>(
+  tableAndSelect: string,
+  serviceKey: string,
+  maxPages = 10
+): Promise<{ ok: boolean; status: number; rows: T[]; errorText?: string }> {
+  const rows: T[] = [];
+  const pageSize = 1000;
+  const separator = tableAndSelect.includes('?') ? '&' : '?';
+
+  for (let page = 0; page < maxPages; page += 1) {
+    const offset = page * pageSize;
+    const res = await fetchSupabaseAdminJson<T[]>(
+      `${tableAndSelect}${separator}limit=${pageSize}&offset=${offset}`,
+      serviceKey
+    );
+    if (!res.ok) {
+      return { ok: false, status: res.status, rows: [], errorText: res.errorText };
+    }
+    const batch = Array.isArray(res.data) ? res.data : [];
+    rows.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+
+  return { ok: true, status: 200, rows };
+}
+
 function resolveUserSubscriptionState(
   user: { userId: string; email: string; createdAt: number },
   existingRaw: unknown
@@ -2322,6 +2393,355 @@ export async function handleApiRequest(
       channels: isAdmin ? succeeded : undefined,
     });
     return true;
+  }
+
+  if (apiPath === '/api/telemetry/install') {
+    const deviceId = String(body.deviceId || '').trim();
+    if (!/^[a-zA-Z0-9_-]{8,80}$/.test(deviceId)) {
+      sendJson(res, 400, { ok: false, error: 'Identificador de dispositivo inválido.' });
+      return true;
+    }
+
+    const rawPlatform = String(body.platform || 'other').trim().toLowerCase();
+    const platform =
+      rawPlatform === 'android' || rawPlatform === 'ios' || rawPlatform === 'desktop'
+        ? rawPlatform
+        : 'other';
+
+    const rawSource = String(body.installSource || 'standalone').trim().toLowerCase();
+    const installSource = rawSource === 'appinstalled' ? 'appinstalled' : 'standalone';
+
+    const userAgent = String(body.userAgent || '')
+      .replace(/[\x00-\x1F\x7F]/g, ' ')
+      .trim()
+      .slice(0, 220);
+
+    const serviceKey = resolveServiceRoleKey();
+    if (!serviceKey) {
+      sendJson(res, 200, { ok: true, skipped: true });
+      return true;
+    }
+
+    const sessionUser = await verifySupabaseSessionUser(req);
+    const nowIso = new Date().toISOString();
+
+    const record: Record<string, unknown> = {
+      device_id: deviceId,
+      platform,
+      install_source: installSource,
+      user_agent: userAgent || null,
+      last_seen_at: nowIso,
+    };
+    if (sessionUser?.userId) {
+      record.user_id = sessionUser.userId;
+    }
+
+    try {
+      const upsertRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/app_installs?on_conflict=device_id`,
+        {
+          method: 'POST',
+          headers: {
+            apikey: serviceKey,
+            Authorization: `Bearer ${serviceKey}`,
+            'Content-Type': 'application/json',
+            Prefer: 'resolution=merge-duplicates,return=minimal',
+          },
+          body: JSON.stringify(record),
+        }
+      );
+
+      if (!upsertRes.ok) {
+        sendJson(res, 200, { ok: false, skipped: true });
+        return true;
+      }
+
+      sendJson(res, 200, { ok: true });
+      return true;
+    } catch {
+      sendJson(res, 200, { ok: false, skipped: true });
+      return true;
+    }
+  }
+
+  if (apiPath === '/api/admin/overview') {
+    const user = await verifySupabaseSessionUser(req);
+    if (!user) {
+      sendJson(res, 401, { ok: false, error: 'Sesión inválida o expirada.' });
+      return true;
+    }
+    if (!EXEMPT_ANNUAL_EMAILS.has(user.email.toLowerCase())) {
+      sendJson(res, 403, {
+        ok: false,
+        error: 'Acceso exclusivo para la cuenta administradora de la plataforma.',
+      });
+      return true;
+    }
+
+    const serviceKey = resolveServiceRoleKey();
+    const generatedAt = new Date().toISOString();
+
+    if (!serviceKey) {
+      sendJson(res, 200, {
+        ok: true,
+        serviceRoleConfigured: false,
+        installsTableReady: false,
+        generatedAt,
+        summary: {
+          totalUsers: 0,
+          confirmedUsers: 0,
+          configuredWorkshops: 0,
+          activeToday: 0,
+          active7d: 0,
+          active30d: 0,
+          totalInstalls: 0,
+          installsByPlatform: { android: 0, ios: 0, desktop: 0, other: 0 },
+          totalRepairs: 0,
+          totalClients: 0,
+          totalSales: 0,
+          totalProducts: 0,
+        },
+        workshops: [],
+        recentInstalls: [],
+      });
+      return true;
+    }
+
+    try {
+      interface SupabaseAdminUser {
+        id?: string;
+        email?: string;
+        created_at?: string;
+        email_confirmed_at?: string | null;
+        confirmed_at?: string | null;
+        last_sign_in_at?: string | null;
+        app_metadata?: { provider?: string; providers?: string[] };
+        user_metadata?: { full_name?: string; name?: string };
+      }
+
+      const authUsers: SupabaseAdminUser[] = [];
+      for (let page = 1; page <= 5; page += 1) {
+        const usersRes = await fetchSupabaseAdminJson<{ users?: SupabaseAdminUser[] }>(
+          `/auth/v1/admin/users?page=${page}&per_page=1000`,
+          serviceKey
+        );
+        if (!usersRes.ok) {
+          sendJson(res, 502, {
+            ok: false,
+            error:
+              'No se pudo consultar la lista de usuarios en Supabase Auth. Verificá que SUPABASE_SERVICE_ROLE_KEY corresponda a la clave service_role.',
+          });
+          return true;
+        }
+        const batch = Array.isArray(usersRes.data?.users) ? usersRes.data.users : [];
+        authUsers.push(...batch);
+        if (batch.length < 1000) break;
+      }
+
+      interface ProfileRow {
+        owner_id?: string;
+        email?: string;
+        first_name?: string;
+        last_name?: string;
+        brand_name?: string;
+        business_phone?: string;
+        created_at?: string;
+        updated_at?: string;
+      }
+      interface OwnerIdRow {
+        owner_id?: string;
+      }
+      interface InstallRow {
+        device_id?: string;
+        user_id?: string | null;
+        platform?: string;
+        install_source?: string;
+        first_seen_at?: string;
+        last_seen_at?: string;
+      }
+
+      const [profilesRes, repairsRes, clientsRes, salesRes, productsRes, installsRes] =
+        await Promise.all([
+          fetchAllSupabaseTableRows<ProfileRow>(
+            '/rest/v1/workshop_profiles?select=owner_id,email,first_name,last_name,brand_name,business_phone,created_at,updated_at',
+            serviceKey
+          ),
+          fetchAllSupabaseTableRows<OwnerIdRow>('/rest/v1/repairs?select=owner_id', serviceKey),
+          fetchAllSupabaseTableRows<OwnerIdRow>('/rest/v1/clients?select=owner_id', serviceKey),
+          fetchAllSupabaseTableRows<OwnerIdRow>('/rest/v1/sales?select=owner_id', serviceKey),
+          fetchAllSupabaseTableRows<OwnerIdRow>('/rest/v1/products?select=owner_id', serviceKey),
+          fetchSupabaseAdminJson<InstallRow[]>(
+            '/rest/v1/app_installs?select=device_id,user_id,platform,install_source,first_seen_at,last_seen_at&order=last_seen_at.desc&limit=1000',
+            serviceKey
+          ),
+        ]);
+
+      const countByOwner = (rows: OwnerIdRow[]) => {
+        const map = new Map<string, number>();
+        for (const r of rows) {
+          const ownerId = String(r.owner_id || '').trim();
+          if (!ownerId) continue;
+          map.set(ownerId, (map.get(ownerId) || 0) + 1);
+        }
+        return map;
+      };
+
+      const profileByOwner = new Map<string, ProfileRow>();
+      for (const p of profilesRes.rows) {
+        const ownerId = String(p.owner_id || '').trim();
+        if (ownerId) profileByOwner.set(ownerId, p);
+      }
+
+      const repairsMap = countByOwner(repairsRes.rows);
+      const clientsMap = countByOwner(clientsRes.rows);
+      const salesMap = countByOwner(salesRes.rows);
+      const productsMap = countByOwner(productsRes.rows);
+
+      const installsErrLower = String(installsRes.errorText || '').toLowerCase();
+      const installsTableMissing =
+        !installsRes.ok &&
+        (installsRes.status === 404 ||
+          installsErrLower.includes('42p01') ||
+          installsErrLower.includes('pgrst205') ||
+          installsErrLower.includes('app_installs'));
+
+      const installsTableReady = !installsTableMissing && installsRes.ok;
+      const installRows: InstallRow[] =
+        installsTableReady && Array.isArray(installsRes.data) ? installsRes.data : [];
+
+      const installsByPlatform = { android: 0, ios: 0, desktop: 0, other: 0 };
+      const platformsByUser = new Map<string, Set<string>>();
+
+      for (const inst of installRows) {
+        const plat = String(inst.platform || 'other').toLowerCase();
+        if (plat === 'android') installsByPlatform.android += 1;
+        else if (plat === 'ios') installsByPlatform.ios += 1;
+        else if (plat === 'desktop') installsByPlatform.desktop += 1;
+        else installsByPlatform.other += 1;
+
+        const uid = String(inst.user_id || '').trim();
+        if (uid) {
+          const set = platformsByUser.get(uid) || new Set<string>();
+          set.add(plat);
+          platformsByUser.set(uid, set);
+        }
+      }
+
+      const nowMs = Date.now();
+      const dayMs = 24 * 60 * 60 * 1000;
+      let confirmedUsers = 0;
+      let configuredWorkshops = 0;
+      let activeToday = 0;
+      let active7d = 0;
+      let active30d = 0;
+
+      const emailByUserId = new Map<string, string>();
+      for (const u of authUsers) {
+        const uid = String(u.id || '').trim();
+        const email = String(u.email || '').trim().toLowerCase();
+        if (uid && email) emailByUserId.set(uid, email);
+      }
+
+      const workshops = authUsers
+        .map((u) => {
+          const userId = String(u.id || '').trim();
+          const email = String(u.email || '').trim().toLowerCase();
+          const profile = profileByOwner.get(userId);
+          const confirmed = Boolean(u.email_confirmed_at || u.confirmed_at);
+          if (confirmed) confirmedUsers += 1;
+          if (profile) configuredWorkshops += 1;
+
+          const lastSignInMs = u.last_sign_in_at ? Date.parse(u.last_sign_in_at) : 0;
+          if (lastSignInMs > 0) {
+            const diff = nowMs - lastSignInMs;
+            if (diff <= dayMs) activeToday += 1;
+            if (diff <= 7 * dayMs) active7d += 1;
+            if (diff <= 30 * dayMs) active30d += 1;
+          }
+
+          const provider = String(
+            u.app_metadata?.provider ||
+              (Array.isArray(u.app_metadata?.providers) ? u.app_metadata?.providers[0] : '') ||
+              'email'
+          ).toLowerCase();
+
+          const ownerFullName = [profile?.first_name, profile?.last_name]
+            .map((v) => String(v || '').trim())
+            .filter(Boolean)
+            .join(' ') || String(u.user_metadata?.full_name || u.user_metadata?.name || '').trim();
+
+          return {
+            userId,
+            email,
+            provider,
+            confirmed,
+            createdAt: u.created_at || null,
+            lastSignInAt: u.last_sign_in_at || null,
+            workshopName: String(profile?.brand_name || '').trim() || 'Sin configurar',
+            ownerFullName,
+            phone: String(profile?.business_phone || '').trim(),
+            repairsCount: repairsMap.get(userId) || 0,
+            clientsCount: clientsMap.get(userId) || 0,
+            salesCount: salesMap.get(userId) || 0,
+            productsCount: productsMap.get(userId) || 0,
+            installedPlatforms: Array.from(platformsByUser.get(userId) || []),
+            isPlatformAdmin: EXEMPT_ANNUAL_EMAILS.has(email),
+          };
+        })
+        .sort((a, b) => {
+          const aTime = a.lastSignInAt ? Date.parse(a.lastSignInAt) : Date.parse(a.createdAt || '') || 0;
+          const bTime = b.lastSignInAt ? Date.parse(b.lastSignInAt) : Date.parse(b.createdAt || '') || 0;
+          return bTime - aTime;
+        });
+
+      const recentInstalls = installRows.slice(0, 30).map((inst) => {
+        const rawDev = String(inst.device_id || '');
+        const maskedDev =
+          rawDev.length > 10 ? `${rawDev.slice(0, 7)}…${rawDev.slice(-4)}` : rawDev;
+        const uid = String(inst.user_id || '').trim();
+        return {
+          deviceId: maskedDev,
+          platform: String(inst.platform || 'other').toLowerCase(),
+          installSource: String(inst.install_source || 'standalone').toLowerCase(),
+          firstSeenAt: inst.first_seen_at || null,
+          lastSeenAt: inst.last_seen_at || null,
+          linkedEmail: uid ? emailByUserId.get(uid) || null : null,
+        };
+      });
+
+      sendJson(res, 200, {
+        ok: true,
+        serviceRoleConfigured: true,
+        installsTableReady,
+        generatedAt,
+        summary: {
+          totalUsers: authUsers.length,
+          confirmedUsers,
+          configuredWorkshops,
+          activeToday,
+          active7d,
+          active30d,
+          totalInstalls: installRows.length,
+          installsByPlatform,
+          totalRepairs: repairsRes.rows.length,
+          totalClients: clientsRes.rows.length,
+          totalSales: salesRes.rows.length,
+          totalProducts: productsRes.rows.length,
+        },
+        workshops,
+        recentInstalls,
+      });
+      return true;
+    } catch (err) {
+      sendJson(res, 502, {
+        ok: false,
+        error:
+          err instanceof Error
+            ? err.message
+            : 'No se pudo obtener el resumen administrativo de la plataforma.',
+      });
+      return true;
+    }
   }
 
   sendJson(res, 404, { ok: false, error: 'Ruta de API no encontrada.' });

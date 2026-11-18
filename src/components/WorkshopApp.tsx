@@ -14,6 +14,7 @@ import {
   Plus,
   Receipt,
   Settings,
+  ShieldCheck,
   ShoppingBag,
   Sun,
   Users,
@@ -72,6 +73,7 @@ import type {
   TaskRecord,
   WorkshopProfile,
 } from '../types/workshop';
+import { AdminTallerPage } from '../pages/AdminTallerPage';
 import { AgendaPage } from '../pages/AgendaPage';
 import { ClientsPage } from '../pages/ClientsPage';
 import { HomePage } from '../pages/HomePage';
@@ -152,6 +154,8 @@ const MOBILE_MORE_ITEMS: NavItem[] = NAV_ITEMS.filter((item) =>
   ['agenda', 'suppliers', 'purchases', 'sales', 'reports'].includes(item.id)
 );
 
+const PLATFORM_ADMIN_EMAIL = 'thebnb05@gmail.com';
+
 export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   userId,
   userEmail,
@@ -161,12 +165,20 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
 }) => {
   const isOnline = useOnlineStatus();
   useActiveCurrency();
+  const isPlatformAdmin =
+    (userEmail || profile.email || '').trim().toLowerCase() === PLATFORM_ADMIN_EMAIL;
   const [page, setPage] = useState<PageId>('home');
   const [inventoryInitialFilter, setInventoryInitialFilter] = useState<
     'all' | 'repuestos' | 'accesorios' | 'bajo_stock'
   >('all');
   const [inventoryFilterNonce, setInventoryFilterNonce] = useState(0);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isPlatformAdmin && page === 'admin_taller') {
+      setPage('home');
+    }
+  }, [isPlatformAdmin, page]);
 
   // Supabase real-time state scoped to the authenticated owner
   const [clients, setClients] = useState<ClientRecord[]>([]);
@@ -469,6 +481,8 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
       };
     }
 
+    if (page === 'admin_taller') return null;
+
     const pageDef = PAGE_GUIDES[page];
     const resolvedPage = getPendingContextualGuide(`page:${page}`, pageDef, onboardingState);
     if (!resolvedPage) return null;
@@ -554,6 +568,26 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                 </div>
               </div>
             ))}
+
+            {isPlatformAdmin && (
+              <div className="border-t border-slate-100 pt-4 dark:border-slate-800">
+                <div className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  Plataforma
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigateTo('admin_taller')}
+                  className={`flex h-10 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium transition ${
+                    page === 'admin_taller'
+                      ? 'bg-sky-50 font-semibold text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-400'
+                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-white'
+                  }`}
+                >
+                  <ShieldCheck className="h-4 w-4 shrink-0" />
+                  <span className="truncate">Admin de taller</span>
+                </button>
+              </div>
+            )}
           </nav>
 
           <div data-tour="quick-actions" className="mt-6 border-t border-slate-100 pt-4 dark:border-slate-800">
@@ -657,7 +691,9 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               />
             </div>
             <span className="hidden text-sm font-semibold text-slate-500 lg:inline dark:text-slate-400">
-              {NAV_ITEMS.find((n) => n.id === page)?.label}
+              {page === 'admin_taller'
+                ? 'Admin de taller'
+                : NAV_ITEMS.find((n) => n.id === page)?.label}
             </span>
           </div>
 
@@ -925,6 +961,10 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                   onSelectProduct={(p) => setSelectedProductId(p.id)}
                 />
               )}
+
+              {page === 'admin_taller' && isPlatformAdmin && (
+                <AdminTallerPage userEmail={userEmail} />
+              )}
             </>
           )}
         </main>
@@ -971,7 +1011,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
           onClick={() => setMoreMenuOpen((prev) => !prev)}
           className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition ${
             moreMenuOpen ||
-            ['agenda', 'suppliers', 'sales', 'purchases', 'reports'].includes(page)
+            ['agenda', 'suppliers', 'sales', 'purchases', 'reports', 'admin_taller'].includes(page)
               ? 'text-[#0072BB] dark:text-sky-400'
               : 'text-slate-500 dark:text-slate-400'
           }`}
@@ -1023,6 +1063,20 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                   </button>
                 );
               })}
+              {isPlatformAdmin && (
+                <button
+                  type="button"
+                  onClick={() => navigateTo('admin_taller')}
+                  className={`flex min-h-[72px] flex-col items-center justify-center gap-1.5 rounded-2xl border p-3 text-xs font-semibold transition ${
+                    page === 'admin_taller'
+                      ? 'border-[#0072BB] bg-sky-50 text-[#0072BB] dark:border-sky-400 dark:bg-sky-950/50 dark:text-sky-300'
+                      : 'border-slate-200 text-slate-700 dark:border-slate-800 dark:text-slate-200'
+                  }`}
+                >
+                  <ShieldCheck className="h-5 w-5" />
+                  <span className="text-center leading-tight">Admin de taller</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
