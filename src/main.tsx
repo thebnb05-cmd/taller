@@ -42,6 +42,11 @@ if (rootElement) {
         <App />
       </StrictMode>
     );
+    rootElement.setAttribute('data-mounted', '1');
+    const win = window as unknown as { __th3MarkMounted?: () => void };
+    if (typeof win.__th3MarkMounted === 'function') {
+      win.__th3MarkMounted();
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error al iniciar la aplicación.';
     rootElement.innerHTML = `<div style="font-family:system-ui,sans-serif;padding:24px;max-width:460px;margin:40px auto;color:#0f172a">

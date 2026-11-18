@@ -1,17 +1,38 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import { transform as esbuildTransform } from 'esbuild';
 import path from 'path';
-import {defineConfig} from 'vite';
-import {VitePWA} from 'vite-plugin-pwa';
+import { defineConfig, type Plugin } from 'vite';
+import { VitePWA } from 'vite-plugin-pwa';
+
+function legacyChunkCompatPlugin(): Plugin {
+  return {
+    name: 'legacy-chunk-compat',
+    apply: 'build',
+    async renderChunk(code) {
+      const result = await esbuildTransform(code, {
+        loader: 'js',
+        format: 'esm',
+        target: ['chrome79', 'safari13.1', 'firefox75', 'edge79'],
+        minify: true,
+      });
+      return {
+        code: result.code,
+        map: result.map || null,
+      };
+    },
+  };
+}
 
 export default defineConfig(() => {
   return {
     plugins: [
       react(),
       tailwindcss(),
+      legacyChunkCompatPlugin(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['icon.svg', 'apple-touch-icon.png'],
+        includeAssets: ['icon.svg', 'apple-touch-icon.png', 'boot-guard.js'],
         manifest: {
           id: '/',
           name: 'TH3 BNB Servicio Técnico',
@@ -83,8 +104,7 @@ export default defineConfig(() => {
           ],
         },
         devOptions: {
-          enabled: true,
-          type: 'module',
+          enabled: false,
         },
       }),
     ],
