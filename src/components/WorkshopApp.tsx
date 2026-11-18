@@ -8,6 +8,7 @@ import {
   HelpCircle,
   Home,
   LogOut,
+  MessageSquarePlus,
   Moon,
   MoreHorizontal,
   Plus,
@@ -102,6 +103,7 @@ import {
   SubscriptionModal,
   type PendingCheckoutState,
 } from './SubscriptionModal';
+import { SupportModal } from './SupportModal';
 
 interface WorkshopAppProps {
   userId: string;
@@ -293,6 +295,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   );
   const [mpPlatformConfigured, setMpPlatformConfigured] = useState(true);
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+  const [showSupportModal, setShowSupportModal] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
@@ -623,6 +626,14 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               </span>
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setShowSupportModal(true)}
+            className="flex h-9 w-full items-center gap-2 rounded-xl border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+          >
+            <MessageSquarePlus className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
+            <span>Soporte y sugerencias</span>
+          </button>
           <div className="truncate px-2 text-xs font-medium text-slate-700 dark:text-slate-300">
             {profile.firstName
               ? `${profile.firstName} ${profile.lastName || ''}`.trim()
@@ -696,6 +707,16 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               </button>
             )}
             <PWAInstallButton />
+
+            <button
+              type="button"
+              onClick={() => setShowSupportModal(true)}
+              aria-label="Soporte y sugerencias"
+              title="Soporte y sugerencias"
+              className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              <MessageSquarePlus className="h-4 w-4" />
+            </button>
 
             <button
               type="button"
@@ -1197,6 +1218,14 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
           clearMercadoPagoConfigCache(userId);
           void supabase.auth.signOut();
         }}
+      />
+
+      <SupportModal
+        open={showSupportModal}
+        onClose={() => setShowSupportModal(false)}
+        profile={profile}
+        userEmail={userEmail}
+        currentPage={page}
       />
 
       <WelcomeSpotlightTour

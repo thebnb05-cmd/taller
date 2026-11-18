@@ -2021,6 +2021,309 @@ export async function handleApiRequest(
     }
   }
 
+  if (apiPath === '/api/support/status') {
+    const user = await verifySupabaseSessionUser(req);
+    if (!user) {
+      sendJson(res, 401, { ok: false, error: 'Iniciá sesión nuevamente para continuar.' });
+      return true;
+    }
+    const tgToken = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
+    const tgChatId = String(process.env.TELEGRAM_CHAT_ID || '').trim();
+    const resendKey = String(process.env.RESEND_API_KEY || '').trim();
+    const telegramConfigured = Boolean(tgToken && tgChatId);
+    const emailConfigured = Boolean(resendKey);
+    const configured = telegramConfigured || emailConfigured;
+    const isAdmin = EXEMPT_ANNUAL_EMAILS.has(user.email.toLowerCase());
+
+    if (!isAdmin) {
+      sendJson(res, 200, { ok: true, configured });
+      return true;
+    }
+
+    const targetEmail =
+      String(process.env.SUPPORT_TO_EMAIL || 'thebnb05@gmail.com').trim() || 'thebnb05@gmail.com';
+    sendJson(res, 200, {
+      ok: true,
+      configured,
+      isAdmin: true,
+      telegramConfigured,
+      emailConfigured,
+      targetEmail,
+    });
+    return true;
+  }
+
+  if (apiPath === '/api/support/send') {
+    const user = await verifySupabaseSessionUser(req);
+    if (!user) {
+      sendJson(res, 401, { ok: false, error: 'Iniciá sesión nuevamente para enviar tu mensaje.' });
+      return true;
+    }
+
+    const isAdmin = EXEMPT_ANNUAL_EMAILS.has(user.email.toLowerCase());
+    const SUPPORT_RL_COOKIE = 'th3bnb_sup_rl';
+    const RL_WINDOW_MS = 15 * 60 * 1000;
+    const RL_MAX_MESSAGES = 5;
+    const now = Date.now();
+
+    let timestamps: number[] = [];
+    try {
+      const rawCookie = parseCookies(req)[SUPPORT_RL_COOKIE];
+      if (rawCookie) {
+        const dot = rawCookie.indexOf('.');
+        if (dot > 0) {
+          const b64 = rawCookie.slice(0, dot);
+          const sig = rawCookie.slice(dot + 1);
+          const expectedSig = crypto
+            .createHmac('sha256', SUBSCRIPTION_SIGNING_SECRET)
+            .update(`sup:${user.userId}:${b64}`)
+            .digest('hex');
+          const sigBuf = Buffer.from(sig, 'utf8');
+          const expBuf = Buffer.from(expectedSig, 'utf8');
+          if (sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf)) {
+            const parsed = JSON.parse(Buffer.from(b64, 'base64url').toString('utf8'));
+            if (Array.isArray(parsed)) {
+              timestamps = parsed.filter(
+                (t): t is number => typeof t === 'number' && Number.isFinite(t) && now - t < RL_WINDOW_MS
+              );
+            }
+          }
+        }
+      }
+    } catch {
+      timestamps = [];
+    }
+
+    if (!isAdmin && timestamps.length >= RL_MAX_MESSAGES) {
+      sendJson(res, 429, {
+        ok: false,
+        error: 'Alcanzaste el límite temporal de envíos. Esperá unos minutos antes de mandar otro mensaje.',
+      });
+      return true;
+    }
+
+    const rawCategory = String(body.category || 'consulta').trim().toLowerCase();
+    const category =
+      rawCategory === 'falla' || rawCategory === 'mejora' || rawCategory === 'consulta'
+        ? rawCategory
+        : 'consulta';
+    const cleanLine = (val: unknown, max: number) =>
+      String(val ?? '')
+        .replace(/[\x00-\x1F\x7F]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, max);
+    const cleanText = (val: unknown, max: number) =>
+      String(val ?? '')
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+        .trim()
+        .slice(0, max);
+
+    const subject = cleanLine(body.subject, 120);
+    const message = cleanText(body.message, 2000);
+    const workshopName = cleanLine(body.workshopName, 80) || 'Taller sin nombre';
+    const contactPhone = cleanLine(body.contactPhone, 40);
+    const currentPage = cleanLine(body.currentPage, 40);
+
+    if (subject.length < 3) {
+      sendJson(res, 400, { ok: false, error: 'Ingresá un asunto de al menos 3 caracteres.' });
+      return true;
+    }
+    if (message.length < 10) {
+      sendJson(res, 400, { ok: false, error: 'Contanos un poco más de detalle (mínimo 10 caracteres).' });
+      return true;
+    }
+
+    const tgToken = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
+    const tgChatId = String(process.env.TELEGRAM_CHAT_ID || '').trim();
+    const resendKey = String(process.env.RESEND_API_KEY || '').trim();
+    const hasTelegram = Boolean(tgToken && tgChatId);
+    const hasEmail = Boolean(resendKey);
+
+    if (!hasTelegram && !hasEmail) {
+      sendJson(res, 503, {
+        ok: false,
+        error:
+          'El canal de aviso automático (Telegram o Email) todavía no está configurado en el servidor.',
+      });
+      return true;
+    }
+
+    const categoryLabels: Record<string, string> = {
+      falla: 'Falla / Error',
+      consulta: 'Consulta',
+      mejora: 'Mejora / Sugerencia',
+    };
+    const categoryLabel = categoryLabels[category] || 'Consulta';
+    const sentAtIso = new Date().toISOString();
+
+    const escapeHtml = (input: string) =>
+      input
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
+    const deliveries: Array<{ channel: 'telegram' | 'email'; ok: boolean; detail?: string }> = [];
+
+    const tasks: Array<Promise<void>> = [];
+
+    if (hasTelegram) {
+      const tgText = [
+        `[${categoryLabel.toUpperCase()}] TH3 BNB Soporte`,
+        `Taller: ${workshopName}`,
+        `Correo: ${user.email}`,
+        contactPhone ? `Tel/WhatsApp: ${contactPhone}` : null,
+        currentPage ? `Sección: ${currentPage}` : null,
+        `Asunto: ${subject}`,
+        '',
+        message,
+      ]
+        .filter((line): line is string => line !== null)
+        .join('\n')
+        .slice(0, 3900);
+
+      tasks.push(
+        fetch(`https://api.telegram.org/bot${encodeURIComponent(tgToken)}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: tgChatId,
+            text: tgText,
+            disable_web_page_preview: true,
+          }),
+        })
+          .then(async (r) => {
+            if (!r.ok) {
+              const errBody = await r.text().catch(() => '');
+              deliveries.push({
+                channel: 'telegram',
+                ok: false,
+                detail: `Telegram HTTP ${r.status}: ${errBody.slice(0, 140)}`,
+              });
+            } else {
+              deliveries.push({ channel: 'telegram', ok: true });
+            }
+          })
+          .catch((e) => {
+            deliveries.push({
+              channel: 'telegram',
+              ok: false,
+              detail: e instanceof Error ? e.message : 'Error de red Telegram',
+            });
+          })
+      );
+    }
+
+    if (hasEmail) {
+      const toEmail =
+        String(process.env.SUPPORT_TO_EMAIL || 'thebnb05@gmail.com').trim() || 'thebnb05@gmail.com';
+      const fromEmail =
+        String(process.env.SUPPORT_FROM_EMAIL || 'TH3 BNB Soporte <onboarding@resend.dev>').trim() ||
+        'TH3 BNB Soporte <onboarding@resend.dev>';
+
+      const htmlBody = `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#0f172a">
+          <h2 style="margin-bottom:4px;color:#0072BB">[${escapeHtml(categoryLabel)}] ${escapeHtml(subject)}</h2>
+          <p style="margin-top:0;font-size:13px;color:#475569">Enviado el ${escapeHtml(sentAtIso)}</p>
+          <table style="width:100%;border-collapse:collapse;font-size:13px;margin:12px 0">
+            <tr><td style="padding:6px 8px;border:1px solid #e2e8f0;font-weight:bold">Taller</td><td style="padding:6px 8px;border:1px solid #e2e8f0">${escapeHtml(workshopName)}</td></tr>
+            <tr><td style="padding:6px 8px;border:1px solid #e2e8f0;font-weight:bold">Correo</td><td style="padding:6px 8px;border:1px solid #e2e8f0">${escapeHtml(user.email)}</td></tr>
+            ${contactPhone ? `<tr><td style="padding:6px 8px;border:1px solid #e2e8f0;font-weight:bold">Tel/WhatsApp</td><td style="padding:6px 8px;border:1px solid #e2e8f0">${escapeHtml(contactPhone)}</td></tr>` : ''}
+            ${currentPage ? `<tr><td style="padding:6px 8px;border:1px solid #e2e8f0;font-weight:bold">Sección</td><td style="padding:6px 8px;border:1px solid #e2e8f0">${escapeHtml(currentPage)}</td></tr>` : ''}
+          </table>
+          <div style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;white-space:pre-wrap;font-size:14px;line-height:1.5">${escapeHtml(message)}</div>
+        </div>
+      `;
+
+      const textBody = [
+        `[${categoryLabel}] ${subject}`,
+        `Taller: ${workshopName}`,
+        `Correo: ${user.email}`,
+        contactPhone ? `Tel/WhatsApp: ${contactPhone}` : null,
+        currentPage ? `Sección: ${currentPage}` : null,
+        `Fecha: ${sentAtIso}`,
+        '',
+        message,
+      ]
+        .filter((line): line is string => line !== null)
+        .join('\n');
+
+      tasks.push(
+        fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${resendKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            from: fromEmail,
+            to: [toEmail],
+            reply_to: user.email,
+            subject: `[TH3 BNB · ${categoryLabel}] ${subject}`,
+            html: htmlBody,
+            text: textBody,
+          }),
+        })
+          .then(async (r) => {
+            if (!r.ok) {
+              const errBody = await r.text().catch(() => '');
+              deliveries.push({
+                channel: 'email',
+                ok: false,
+                detail: `Resend HTTP ${r.status}: ${errBody.slice(0, 140)}`,
+              });
+            } else {
+              deliveries.push({ channel: 'email', ok: true });
+            }
+          })
+          .catch((e) => {
+            deliveries.push({
+              channel: 'email',
+              ok: false,
+              detail: e instanceof Error ? e.message : 'Error de red Resend',
+            });
+          })
+      );
+    }
+
+    await Promise.all(tasks);
+
+    const succeeded = deliveries.filter((d) => d.ok).map((d) => d.channel);
+    if (succeeded.length === 0) {
+      sendJson(res, 502, {
+        ok: false,
+        error: isAdmin
+          ? deliveries.map((d) => d.detail).filter(Boolean).join(' | ') || 'No se pudo entregar el aviso.'
+          : 'No pudimos entregar tu mensaje en este momento. Intentá nuevamente en unos minutos.',
+      });
+      return true;
+    }
+
+    const nextTimestamps = [...timestamps, now].slice(-RL_MAX_MESSAGES);
+    const b64 = Buffer.from(JSON.stringify(nextTimestamps), 'utf8').toString('base64url');
+    const sig = crypto
+      .createHmac('sha256', SUBSCRIPTION_SIGNING_SECRET)
+      .update(`sup:${user.userId}:${b64}`)
+      .digest('hex');
+    const isHttps =
+      req.headers['x-forwarded-proto'] === 'https' ||
+      String(req.headers.origin || '').startsWith('https://') ||
+      Boolean(process.env.VERCEL);
+    const sameSite = isHttps ? 'SameSite=None; Secure' : 'SameSite=Lax';
+    res.setHeader(
+      'Set-Cookie',
+      `${SUPPORT_RL_COOKIE}=${b64}.${sig}; Path=/; Max-Age=${Math.floor(RL_WINDOW_MS / 1000)}; HttpOnly; ${sameSite}`
+    );
+
+    sendJson(res, 200, {
+      ok: true,
+      channels: isAdmin ? succeeded : undefined,
+    });
+    return true;
+  }
+
   sendJson(res, 404, { ok: false, error: 'Ruta de API no encontrada.' });
   return true;
 }
