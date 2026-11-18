@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   Building2,
+  Clock,
   Coins,
   Image as ImageIcon,
   KeyRound,
@@ -50,8 +51,10 @@ import {
 } from '../utils/validation';
 import {
   getLoginGuardStatus,
+  getRememberedLockedEmail,
   MAX_LOGIN_ATTEMPTS,
   recordFailedPasswordAttempt,
+  rememberLockedEmail,
   resetLoginGuard,
 } from '../utils/loginGuard';
 import { BrandMark } from './BrandMark';
@@ -63,10 +66,19 @@ interface AuthScreenProps {
 
 interface OtpChallengeState {
   email: string;
+  lockedUntil: number;
+  lockRemainingSec: number;
   codeSent: boolean;
   sending: boolean;
   verifying: boolean;
   cooldownSec: number;
+}
+
+function formatLockCountdown(totalSeconds: number): string {
+  const clamped = Math.max(0, Math.floor(totalSeconds));
+  const mins = Math.floor(clamped / 60);
+  const secs = clamped % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) => {
@@ -82,17 +94,66 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
   const [otpChallenge, setOtpChallenge] = useState<OtpChallengeState | null>(null);
   const [otpCode, setOtpCode] = useState('');
 
+  // Restore active 5-minute lockout if user refreshes during lockout
   useEffect(() => {
-    if (!otpChallenge || otpChallenge.cooldownSec <= 0) return;
+    const lastLockedEmail = getRememberedLockedEmail();
+    if (!lastLockedEmail) return;
+    let active = true;
+    void getLoginGuardStatus(lastLockedEmail).then((status) => {
+      if (!active) return;
+      if (status.requiresOtp && status.lockedUntil && status.lockRemainingSec > 0) {
+        setEmail(lastLockedEmail);
+        setRemainingAttempts(0);
+        setOtpChallenge({
+          email: lastLockedEmail,
+          lockedUntil: status.lockedUntil,
+          lockRemainingSec: status.lockRemainingSec,
+          codeSent: false,
+          sending: false,
+          verifying: false,
+          cooldownSec: 0,
+        });
+        setErrorMsg(
+          `Bloqueo temporal de 5 minutos activo para ${lastLockedEmail}. Ingresá el código de 6 dígitos enviado a tu correo para desbloquear antes.`
+        );
+      } else {
+        rememberLockedEmail(null);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Tick OTP resend cooldown and 5-minute temporary lockout timer
+  useEffect(() => {
+    if (!otpChallenge) return;
     const timer = window.setInterval(() => {
-      setOtpChallenge((prev) =>
-        prev && prev.cooldownSec > 0
-          ? { ...prev, cooldownSec: Math.max(0, prev.cooldownSec - 1) }
-          : prev
-      );
+      const now = Date.now();
+      const nextLockSec = Math.max(0, Math.ceil((otpChallenge.lockedUntil - now) / 1000));
+      if (nextLockSec <= 0) {
+        const unlockedEmail = otpChallenge.email;
+        rememberLockedEmail(null);
+        setOtpChallenge(null);
+        setOtpCode('');
+        setRemainingAttempts(null);
+        setErrorMsg('');
+        setInfoMsg(
+          `El bloqueo temporal de 5 minutos para ${unlockedEmail} finalizó. Ya podés volver a intentar con tu contraseña.`
+        );
+        return;
+      }
+      setOtpChallenge((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          lockRemainingSec: nextLockSec,
+          cooldownSec: prev.cooldownSec > 0 ? Math.max(0, prev.cooldownSec - 1) : 0,
+        };
+      });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [otpChallenge?.cooldownSec]);
+  }, [otpChallenge !== null, otpChallenge?.lockedUntil]);
 
   const handleGoogleAuth = async () => {
     setErrorMsg('');
@@ -227,19 +288,22 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
     try {
       if (mode === 'login') {
         const guard = await getLoginGuardStatus(cleanEmail);
-        if (guard.requiresOtp) {
+        if (guard.requiresOtp && guard.lockedUntil) {
+          rememberLockedEmail(cleanEmail);
           setRemainingAttempts(0);
           setPassword('');
           setOtpCode('');
           setOtpChallenge({
             email: cleanEmail,
+            lockedUntil: guard.lockedUntil,
+            lockRemainingSec: guard.lockRemainingSec,
             codeSent: false,
             sending: false,
             verifying: false,
             cooldownSec: 0,
           });
           setErrorMsg(
-            `Este correo superó los ${MAX_LOGIN_ATTEMPTS} intentos fallidos con contraseña. Solicitá e ingresá un código de 6 dígitos para volver a entrar.`
+            `Cuenta bloqueada temporalmente por 5 minutos tras ${MAX_LOGIN_ATTEMPTS} intentos fallidos. Solicitá e ingresá un código de 6 dígitos enviado a tu correo para desbloquear.`
           );
           return;
         }
@@ -278,19 +342,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
       if (msg.includes('invalid login credentials')) {
         if (mode === 'login') {
           const nextGuard = await recordFailedPasswordAttempt(cleanEmail);
-          if (nextGuard.requiresOtp) {
+          if (nextGuard.requiresOtp && nextGuard.lockedUntil) {
             setRemainingAttempts(0);
             setPassword('');
             setOtpCode('');
             setOtpChallenge({
               email: cleanEmail,
+              lockedUntil: nextGuard.lockedUntil,
+              lockRemainingSec: nextGuard.lockRemainingSec,
               codeSent: false,
               sending: false,
               verifying: false,
               cooldownSec: 0,
             });
             setErrorMsg(
-              `Superaste el límite de ${MAX_LOGIN_ATTEMPTS} errores con la contraseña. Por seguridad, pedí un código de 6 dígitos a tu correo para volver a entrar.`
+              `Superaste los ${MAX_LOGIN_ATTEMPTS} errores de contraseña. Bloqueamos el acceso por 5 minutos; pedí un código de 6 dígitos a tu correo para desbloquear antes.`
             );
           } else {
             setRemainingAttempts(nextGuard.remainingAttempts);
@@ -299,7 +365,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
                 nextGuard.remainingAttempts === 1
                   ? 'queda 1 intento'
                   : `quedan ${nextGuard.remainingAttempts} intentos`
-              } antes de pedir código de 6 dígitos.`
+              } antes del bloqueo temporal de 5 minutos.`
             );
           }
         } else {
@@ -368,16 +434,23 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
           {otpChallenge ? (
             <div className="space-y-5">
               <div>
-                <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">
-                  <KeyRound className="h-5 w-5" />
-                </span>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">
+                    <KeyRound className="h-5 w-5" />
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-1.5 font-mono-num text-xs font-bold text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-200">
+                    <Clock className="h-3.5 w-3.5" />
+                    <span>Bloqueo: {formatLockCountdown(otpChallenge.lockRemainingSec)}</span>
+                  </span>
+                </div>
                 <h2 className="mt-3 text-xl font-bold text-slate-900 dark:text-white font-display">
-                  Verificación por código de 6 dígitos
+                  Acceso bloqueado temporalmente (5 min)
                 </h2>
                 <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                  Alcanzaste los {MAX_LOGIN_ATTEMPTS} intentos incorrectos de contraseña para{' '}
+                  Alcanzaste los {MAX_LOGIN_ATTEMPTS} intentos fallidos para{' '}
                   <strong className="text-slate-800 dark:text-slate-200">{otpChallenge.email}</strong>.
-                  Pedí un código de 6 dígitos (OTP) por correo para desbloquear tu acceso.
+                  Esperá {formatLockCountdown(otpChallenge.lockRemainingSec)} o desbloqueá ahora mismo con un
+                  código de 6 dígitos enviado a tu correo.
                 </p>
               </div>
 
@@ -414,7 +487,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
               <form onSubmit={handleVerifyOtpCode} className="space-y-3.5">
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    Código de verificación (6 dígitos)
+                    Código de desbloqueo (6 dígitos)
                   </label>
                   <input
                     type="text"
@@ -435,7 +508,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
                   className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0072BB] px-4 text-sm font-semibold text-white transition hover:bg-[#005f9c] disabled:opacity-60"
                 >
                   <ShieldCheck className="h-4 w-4" />
-                  <span>{otpChallenge.verifying ? 'Verificando...' : 'Verificar código y entrar'}</span>
+                  <span>
+                    {otpChallenge.verifying ? 'Verificando...' : 'Verificar código y desbloquear'}
+                  </span>
                 </button>
               </form>
 
@@ -449,6 +524,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
               <button
                 type="button"
                 onClick={() => {
+                  rememberLockedEmail(null);
                   setOtpChallenge(null);
                   setOtpCode('');
                   setErrorMsg('');
@@ -519,7 +595,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
                   <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
                   <span>
                     Protección de acceso: {MAX_LOGIN_ATTEMPTS - remainingAttempts}/{MAX_LOGIN_ATTEMPTS}{' '}
-                    errores usados. Al llegar a {MAX_LOGIN_ATTEMPTS}, se pedirá código de 6 dígitos por correo.
+                    errores usados. Al llegar a {MAX_LOGIN_ATTEMPTS}, se bloqueará por 5 minutos con código de 6 dígitos.
                   </span>
                 </div>
               )}

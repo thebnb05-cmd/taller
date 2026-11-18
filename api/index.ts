@@ -87,6 +87,7 @@ function sendJson(res: ServerResponse, status: number, payload: unknown): void {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
   res.end(JSON.stringify(payload));
 }
 
@@ -444,7 +445,8 @@ function resolveApiPath(req: ApiIncomingRequest): string {
 
 const LOGIN_GUARD_COOKIE = 'th3bnb_lg';
 const MAX_LOGIN_ATTEMPTS = 5;
-const LOGIN_GUARD_TTL_MS = 24 * 60 * 60 * 1000;
+const LOGIN_LOCKOUT_MS = 5 * 60 * 1000;
+const LOGIN_ATTEMPT_WINDOW_MS = 30 * 60 * 1000;
 
 function parseCookies(req: ApiIncomingRequest): Record<string, string> {
   const raw = req.headers.cookie;
@@ -468,7 +470,7 @@ function hashLoginEmail(email: string): string {
     .slice(0, 24);
 }
 
-type LoginGuardMap = Record<string, { n: number; r: boolean; t: number }>;
+type LoginGuardMap = Record<string, { n: number; u: number; t: number }>;
 
 function readLoginGuardCookie(req: ApiIncomingRequest): LoginGuardMap {
   try {
@@ -492,13 +494,17 @@ function readLoginGuardCookie(req: ApiIncomingRequest): LoginGuardMap {
     const now = Date.now();
     const clean: LoginGuardMap = {};
     for (const [k, v] of Object.entries(parsed)) {
-      if (v && typeof v.n === 'number' && typeof v.t === 'number' && now - v.t < LOGIN_GUARD_TTL_MS) {
-        clean[k] = {
-          n: Math.max(0, Math.min(MAX_LOGIN_ATTEMPTS, Math.floor(v.n))),
-          r: Boolean(v.r),
-          t: v.t,
-        };
-      }
+      if (!v || typeof v.n !== 'number' || typeof v.t !== 'number') continue;
+      const lockedUntil = typeof v.u === 'number' && Number.isFinite(v.u) ? v.u : 0;
+      // Expired 5-minute lockout resets cleanly
+      if (lockedUntil > 0 && now >= lockedUntil) continue;
+      // Expired pre-lockout attempt window resets cleanly
+      if (lockedUntil === 0 && now - v.t >= LOGIN_ATTEMPT_WINDOW_MS) continue;
+      clean[k] = {
+        n: Math.max(0, Math.min(MAX_LOGIN_ATTEMPTS, Math.floor(v.n))),
+        u: lockedUntil,
+        t: v.t,
+      };
     }
     return clean;
   } catch {
@@ -521,11 +527,35 @@ function writeLoginGuardCookie(req: ApiIncomingRequest, res: ServerResponse, map
     String(req.headers.origin || '').startsWith('https://') ||
     Boolean(process.env.VERCEL);
   const sameSite = isHttps ? 'SameSite=None; Secure' : 'SameSite=Lax';
-  const maxAge = entries.length === 0 ? 0 : Math.floor(LOGIN_GUARD_TTL_MS / 1000);
+  const maxAge = entries.length === 0 ? 0 : Math.floor(LOGIN_ATTEMPT_WINDOW_MS / 1000);
   res.setHeader(
     'Set-Cookie',
     `${LOGIN_GUARD_COOKIE}=${b64}.${sig}; Path=/; Max-Age=${maxAge}; HttpOnly; ${sameSite}`
   );
+}
+
+function buildLoginGuardResponse(entry: { n: number; u: number; t: number } | undefined, now: number) {
+  if (!entry || (entry.u > 0 && now >= entry.u)) {
+    return {
+      ok: true,
+      attempts: 0,
+      remainingAttempts: MAX_LOGIN_ATTEMPTS,
+      requiresOtp: false,
+      lockedUntil: null,
+      lockRemainingSec: 0,
+    };
+  }
+  const locked = entry.u > now || entry.n >= MAX_LOGIN_ATTEMPTS;
+  const lockedUntil = locked ? (entry.u > now ? entry.u : now + LOGIN_LOCKOUT_MS) : null;
+  const lockRemainingSec = lockedUntil ? Math.max(0, Math.ceil((lockedUntil - now) / 1000)) : 0;
+  return {
+    ok: true,
+    attempts: entry.n,
+    remainingAttempts: Math.max(0, MAX_LOGIN_ATTEMPTS - entry.n),
+    requiresOtp: locked,
+    lockedUntil,
+    lockRemainingSec,
+  };
 }
 
 export async function handleApiRequest(
@@ -570,9 +600,10 @@ export async function handleApiRequest(
       sendJson(res, 400, { ok: false, error: 'Correo inválido.' });
       return true;
     }
+    const now = Date.now();
     const emailHash = hashLoginEmail(rawEmail);
     const guardMap = readLoginGuardCookie(req);
-    const current = guardMap[emailHash] || { n: 0, r: false, t: Date.now() };
+    const current = guardMap[emailHash];
 
     if (action === 'reset') {
       const user = await verifySupabaseSessionUser(req);
@@ -585,35 +616,26 @@ export async function handleApiRequest(
       }
       delete guardMap[emailHash];
       writeLoginGuardCookie(req, res, guardMap);
-      sendJson(res, 200, {
-        ok: true,
-        attempts: 0,
-        remainingAttempts: MAX_LOGIN_ATTEMPTS,
-        requiresOtp: false,
-      });
+      sendJson(res, 200, buildLoginGuardResponse(undefined, now));
       return true;
     }
 
     if (action === 'fail') {
-      const nextAttempts = Math.min(MAX_LOGIN_ATTEMPTS, current.n + 1);
-      const requiresOtp = nextAttempts >= MAX_LOGIN_ATTEMPTS;
-      guardMap[emailHash] = { n: nextAttempts, r: requiresOtp, t: Date.now() };
+      if (current && current.u > now) {
+        sendJson(res, 200, buildLoginGuardResponse(current, now));
+        return true;
+      }
+      const baseAttempts = current && current.u === 0 ? current.n : 0;
+      const nextAttempts = Math.min(MAX_LOGIN_ATTEMPTS, baseAttempts + 1);
+      const lockedUntil = nextAttempts >= MAX_LOGIN_ATTEMPTS ? now + LOGIN_LOCKOUT_MS : 0;
+      const nextEntry = { n: nextAttempts, u: lockedUntil, t: now };
+      guardMap[emailHash] = nextEntry;
       writeLoginGuardCookie(req, res, guardMap);
-      sendJson(res, 200, {
-        ok: true,
-        attempts: nextAttempts,
-        remainingAttempts: Math.max(0, MAX_LOGIN_ATTEMPTS - nextAttempts),
-        requiresOtp,
-      });
+      sendJson(res, 200, buildLoginGuardResponse(nextEntry, now));
       return true;
     }
 
-    sendJson(res, 200, {
-      ok: true,
-      attempts: current.n,
-      remainingAttempts: Math.max(0, MAX_LOGIN_ATTEMPTS - current.n),
-      requiresOtp: current.r || current.n >= MAX_LOGIN_ATTEMPTS,
-    });
+    sendJson(res, 200, buildLoginGuardResponse(current, now));
     return true;
   }
 
@@ -1496,6 +1518,15 @@ export async function handleApiRequest(
     }
 
     const isPlatformAdmin = EXEMPT_ANNUAL_EMAILS.has(user.email.toLowerCase());
+    if (!isPlatformAdmin) {
+      sendJson(res, 403, {
+        ok: false,
+        configured: false,
+        valid: false,
+        error: 'Solo la cuenta administradora de la plataforma puede verificar el token central.',
+      });
+      return true;
+    }
     const platformToken = resolvePlatformMpToken();
     if (!platformToken) {
       sendJson(res, 200, {
@@ -1657,9 +1688,9 @@ export async function handleApiRequest(
         ok: false,
         error: 'Sesión inválida o expirada.',
         timestamp: new Date().toISOString(),
-        runtime: process.env.VERCEL ? 'vercel' : 'node',
-        vercelEnv: process.env.VERCEL_ENV || null,
-        envStatus: resolvePlatformMpToken() ? 'loaded' : 'missing',
+        runtime: 'restricted',
+        vercelEnv: null,
+        envStatus: 'missing',
         detectedKey: null,
         tokenLength: 0,
         prefixType: 'none',
@@ -1673,11 +1704,25 @@ export async function handleApiRequest(
             detail: 'El token de sesión JWT no fue enviado o expiró. Recargá la app o cerrá e iniciá sesión.',
           },
         ],
-        hints: [
-          'Recargá la página con F5 o cerrá sesión y volvé a ingresar para renovar tu JWT.',
-          'Además, en este servidor Vercel la variable PLATFORM_MERCADOPAGO_ACCESS_TOKEN todavía figura: ' +
-            (resolvePlatformMpToken() ? 'cargada.' : 'NO cargada en este entorno.'),
-        ],
+        hints: ['Recargá la página o cerrá sesión y volvé a ingresar para renovar tu JWT.'],
+      });
+      return true;
+    }
+
+    if (!EXEMPT_ANNUAL_EMAILS.has(user.email.toLowerCase())) {
+      sendJson(res, 403, {
+        ok: false,
+        error: 'Solo la cuenta administradora de la plataforma puede ejecutar el diagnóstico.',
+        timestamp: new Date().toISOString(),
+        runtime: 'restricted',
+        vercelEnv: null,
+        envStatus: 'missing',
+        detectedKey: null,
+        tokenLength: 0,
+        prefixType: 'none',
+        hadQuotesOrWhitespace: false,
+        checks: [],
+        hints: [],
       });
       return true;
     }

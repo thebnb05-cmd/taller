@@ -440,6 +440,7 @@ export async function updateRow(
   const payload = toSnakeRecord(prepared, keepNull);
   delete payload.id;
   delete payload.owner_id;
+  if (Object.keys(payload).length === 0) return;
 
   const { error } = await supabase
     .from(table)

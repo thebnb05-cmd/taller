@@ -1,19 +1,23 @@
 import { supabase } from '../lib/db';
 
 export const MAX_LOGIN_ATTEMPTS = 5;
+export const LOGIN_LOCKOUT_MS = 5 * 60 * 1000;
 
 const STORAGE_KEY = 'th3bnb_login_guard_v1';
-const LOCK_TTL_MS = 24 * 60 * 60 * 1000;
+const LAST_LOCKED_EMAIL_KEY = 'th3bnb_last_locked_email';
+const ATTEMPT_WINDOW_MS = 30 * 60 * 1000;
 
 export interface LoginGuardStatus {
   attempts: number;
   remainingAttempts: number;
   requiresOtp: boolean;
+  lockedUntil: number | null;
+  lockRemainingSec: number;
 }
 
 interface StoredAttemptEntry {
   n: number;
-  r: boolean;
+  u: number;
   t: number;
 }
 
@@ -54,14 +58,29 @@ function readLocalMap(): StoredGuardMap {
     if (!parsed || typeof parsed !== 'object') return {};
     const now = Date.now();
     const clean: StoredGuardMap = {};
+    let mutated = false;
     for (const [k, v] of Object.entries(parsed)) {
-      if (v && typeof v.n === 'number' && typeof v.t === 'number' && now - v.t < LOCK_TTL_MS) {
-        clean[k] = {
-          n: Math.max(0, Math.min(MAX_LOGIN_ATTEMPTS, Math.floor(v.n))),
-          r: Boolean(v.r),
-          t: v.t,
-        };
+      if (!v || typeof v.n !== 'number' || typeof v.t !== 'number') {
+        mutated = true;
+        continue;
       }
+      const lockedUntil = typeof v.u === 'number' && Number.isFinite(v.u) ? v.u : 0;
+      if (lockedUntil > 0 && now >= lockedUntil) {
+        mutated = true;
+        continue;
+      }
+      if (lockedUntil === 0 && now - v.t >= ATTEMPT_WINDOW_MS) {
+        mutated = true;
+        continue;
+      }
+      clean[k] = {
+        n: Math.max(0, Math.min(MAX_LOGIN_ATTEMPTS, Math.floor(v.n))),
+        u: lockedUntil,
+        t: v.t,
+      };
+    }
+    if (mutated) {
+      writeLocalMap(clean);
     }
     return clean;
   } catch {
@@ -85,13 +104,28 @@ function writeLocalMap(map: StoredGuardMap): void {
   }
 }
 
-function buildStatus(attempts: number, requiresOtp?: boolean): LoginGuardStatus {
+function buildStatus(attempts: number, lockedUntil: number | null): LoginGuardStatus {
+  const now = Date.now();
+  const activeLock = Boolean(lockedUntil && lockedUntil > now);
+  if (lockedUntil && !activeLock) {
+    return {
+      attempts: 0,
+      remainingAttempts: MAX_LOGIN_ATTEMPTS,
+      requiresOtp: false,
+      lockedUntil: null,
+      lockRemainingSec: 0,
+    };
+  }
   const clamped = Math.max(0, Math.min(MAX_LOGIN_ATTEMPTS, Math.floor(attempts)));
-  const locked = Boolean(requiresOtp) || clamped >= MAX_LOGIN_ATTEMPTS;
+  const locked = activeLock || clamped >= MAX_LOGIN_ATTEMPTS;
+  const effectiveUntil = locked ? (activeLock ? lockedUntil : now + LOGIN_LOCKOUT_MS) : null;
+  const lockRemainingSec = effectiveUntil ? Math.max(0, Math.ceil((effectiveUntil - now) / 1000)) : 0;
   return {
     attempts: clamped,
     remainingAttempts: Math.max(0, MAX_LOGIN_ATTEMPTS - clamped),
     requiresOtp: locked,
+    lockedUntil: effectiveUntil,
+    lockRemainingSec,
   };
 }
 
@@ -116,9 +150,38 @@ async function callServerLoginGuard(
       ok?: boolean;
       attempts?: number;
       requiresOtp?: boolean;
+      lockedUntil?: number | null;
     } | null;
     if (!data || !data.ok || typeof data.attempts !== 'number') return null;
-    return buildStatus(data.attempts, data.requiresOtp);
+    const serverUntil =
+      typeof data.lockedUntil === 'number' && data.lockedUntil > Date.now()
+        ? data.lockedUntil
+        : data.requiresOtp
+          ? Date.now() + LOGIN_LOCKOUT_MS
+          : null;
+    return buildStatus(data.attempts, serverUntil);
+  } catch {
+    return null;
+  }
+}
+
+export function rememberLockedEmail(email: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (!email) {
+      window.sessionStorage.removeItem(LAST_LOCKED_EMAIL_KEY);
+    } else {
+      window.sessionStorage.setItem(LAST_LOCKED_EMAIL_KEY, normalizeEmail(email));
+    }
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export function getRememberedLockedEmail(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.sessionStorage.getItem(LAST_LOCKED_EMAIL_KEY);
   } catch {
     return null;
   }
@@ -126,49 +189,81 @@ async function callServerLoginGuard(
 
 export async function getLoginGuardStatus(email: string): Promise<LoginGuardStatus> {
   const clean = normalizeEmail(email);
-  if (!clean || !clean.includes('@')) return buildStatus(0, false);
+  if (!clean || !clean.includes('@')) return buildStatus(0, null);
 
   const key = await hashEmailKey(clean);
   const localMap = readLocalMap();
   const localEntry = localMap[key];
-  const localStatus = buildStatus(localEntry?.n || 0, localEntry?.r);
+  const localStatus = buildStatus(
+    localEntry?.n || 0,
+    localEntry && localEntry.u > 0 ? localEntry.u : null
+  );
 
   const serverStatus = await callServerLoginGuard(clean, 'status');
   const mergedAttempts = Math.max(localStatus.attempts, serverStatus?.attempts || 0);
-  const mergedLocked = localStatus.requiresOtp || Boolean(serverStatus?.requiresOtp);
+  const mergedUntilCandidates = [localStatus.lockedUntil || 0, serverStatus?.lockedUntil || 0].filter(
+    (v) => v > Date.now()
+  );
+  const mergedLockedUntil =
+    mergedUntilCandidates.length > 0
+      ? Math.max(...mergedUntilCandidates)
+      : mergedAttempts >= MAX_LOGIN_ATTEMPTS
+        ? Date.now() + LOGIN_LOCKOUT_MS
+        : null;
 
-  if (mergedAttempts > (localEntry?.n || 0) || mergedLocked !== Boolean(localEntry?.r)) {
-    localMap[key] = { n: mergedAttempts, r: mergedLocked, t: Date.now() };
+  if (mergedAttempts > 0 || mergedLockedUntil) {
+    localMap[key] = {
+      n: mergedAttempts,
+      u: mergedLockedUntil || 0,
+      t: Date.now(),
+    };
     writeLocalMap(localMap);
   }
 
-  return buildStatus(mergedAttempts, mergedLocked);
+  return buildStatus(mergedAttempts, mergedLockedUntil);
 }
 
 export async function recordFailedPasswordAttempt(email: string): Promise<LoginGuardStatus> {
   const clean = normalizeEmail(email);
-  if (!clean || !clean.includes('@')) return buildStatus(0, false);
+  if (!clean || !clean.includes('@')) return buildStatus(0, null);
 
+  const now = Date.now();
   const key = await hashEmailKey(clean);
   const localMap = readLocalMap();
   const prev = localMap[key];
+
+  if (prev && prev.u > now) {
+    const serverStatus = await callServerLoginGuard(clean, 'status');
+    const mergedUntil = Math.max(prev.u, serverStatus?.lockedUntil || 0);
+    rememberLockedEmail(clean);
+    return buildStatus(MAX_LOGIN_ATTEMPTS, mergedUntil);
+  }
+
   const nextLocalAttempts = Math.min(MAX_LOGIN_ATTEMPTS, (prev?.n || 0) + 1);
-  const nextLocalLocked = Boolean(prev?.r) || nextLocalAttempts >= MAX_LOGIN_ATTEMPTS;
+  const nextLocalUntil = nextLocalAttempts >= MAX_LOGIN_ATTEMPTS ? now + LOGIN_LOCKOUT_MS : 0;
 
   const serverStatus = await callServerLoginGuard(clean, 'fail');
   const mergedAttempts = Math.max(nextLocalAttempts, serverStatus?.attempts || 0);
-  const mergedLocked = nextLocalLocked || Boolean(serverStatus?.requiresOtp);
+  const mergedUntil =
+    mergedAttempts >= MAX_LOGIN_ATTEMPTS
+      ? Math.max(nextLocalUntil || now + LOGIN_LOCKOUT_MS, serverStatus?.lockedUntil || 0)
+      : 0;
 
-  localMap[key] = { n: mergedAttempts, r: mergedLocked, t: Date.now() };
+  localMap[key] = { n: mergedAttempts, u: mergedUntil, t: now };
   writeLocalMap(localMap);
 
-  return buildStatus(mergedAttempts, mergedLocked);
+  if (mergedAttempts >= MAX_LOGIN_ATTEMPTS) {
+    rememberLockedEmail(clean);
+  }
+
+  return buildStatus(mergedAttempts, mergedUntil || null);
 }
 
 export async function resetLoginGuard(email: string, accessToken?: string): Promise<void> {
   const clean = normalizeEmail(email);
   if (!clean || !clean.includes('@')) return;
 
+  rememberLockedEmail(null);
   const key = await hashEmailKey(clean);
   const localMap = readLocalMap();
   if (key in localMap) {

@@ -138,6 +138,11 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
   const [dragOver, setDragOver] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  const isPlatformAdmin = Boolean(
+    subscriptionRecord?.payload?.isExemptAnnual ||
+      (userEmail || profile.email || '').trim().toLowerCase() === 'thebnb05@gmail.com'
+  );
+
   const runPlatformTokenCheck = useCallback(async (showToast = false) => {
     setCheckingPlatformToken(true);
     try {
@@ -229,8 +234,10 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
     setLatestMpConfig(meta.mercadoPago);
     setTestCheckout(null);
     setDiagnosticResult(null);
-    void runPlatformTokenCheck(false);
-  }, [open, profile, runPlatformTokenCheck]);
+    if (isPlatformAdmin) {
+      void runPlatformTokenCheck(false);
+    }
+  }, [open, profile, isPlatformAdmin, runPlatformTokenCheck]);
 
   const ownerDisplayName = [profile.firstName, profile.lastName]
     .filter(Boolean)
@@ -888,6 +895,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
           );
         })()}
 
+        {isPlatformAdmin && (
         <div
           className={`space-y-3 rounded-2xl border p-4 ${
             platformCheck?.valid
@@ -1160,6 +1168,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
             </div>
           )}
         </div>
+        )}
 
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
           <div className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
