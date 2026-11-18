@@ -12,6 +12,7 @@ import {
 import type { WorkshopProfile } from './types/workshop';
 import { getPreferenceCookie, setPreferenceCookie } from './utils/cookieStorage';
 import { setActiveCurrency } from './utils/currency';
+import { resetLoginGuard } from './utils/loginGuard';
 import { sanitizeDbErrorMessage } from './utils/validation';
 import { parseWorkshopMeta } from './utils/workshopMeta';
 import { AuthScreen, WorkshopOnboarding } from './components/AuthGate';
@@ -230,8 +231,11 @@ function AuthRouter({
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       if (!active) return;
+      if (event === 'SIGNED_IN' && session?.user?.email) {
+        void resetLoginGuard(session.user.email, session.access_token);
+      }
       setUser(session?.user ?? null);
       setAuthReady(true);
     });

@@ -244,21 +244,3 @@ export function getFunctionalCheckFields(deviceType?: string): CheckFieldOption[
   return FUNCTIONAL_DEFAULT_FIELDS;
 }
 
-export function getCapacityFieldLabel(deviceType?: string): string {
-  if (deviceType === 'Parlante' || deviceType === 'Auriculares') {
-    return 'Tipo / Formato';
-  }
-  if (deviceType === 'Consola / joystick') {
-    return 'Edición / Capacidad';
-  }
-  if (deviceType === 'Smartwatch') {
-    return 'Medida / Caja';
-  }
-  if (deviceType === 'Notebook') {
-    return 'Almacenamiento';
-  }
-  if (deviceType === 'Otros equipos') {
-    return 'Categoría / Tipo de equipo';
-  }
-  return 'Capacidad';
-}

@@ -1,10 +1,14 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+  AlertTriangle,
+  ArrowLeft,
   Building2,
   Coins,
   Image as ImageIcon,
+  KeyRound,
   LogIn,
   Mail,
+  Send,
   ShieldCheck,
   Smartphone,
   Store,
@@ -44,11 +48,25 @@ import {
   sanitizePlainLine,
   sanitizeText,
 } from '../utils/validation';
+import {
+  getLoginGuardStatus,
+  MAX_LOGIN_ATTEMPTS,
+  recordFailedPasswordAttempt,
+  resetLoginGuard,
+} from '../utils/loginGuard';
 import { BrandMark } from './BrandMark';
 import { useToast } from './ToastProvider';
 
 interface AuthScreenProps {
   onOpenTrackingLookup?: () => void;
+}
+
+interface OtpChallengeState {
+  email: string;
+  codeSent: boolean;
+  sending: boolean;
+  verifying: boolean;
+  cooldownSec: number;
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) => {
@@ -60,6 +78,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
   const [googleLoading, setGoogleLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [infoMsg, setInfoMsg] = useState('');
+  const [remainingAttempts, setRemainingAttempts] = useState<number | null>(null);
+  const [otpChallenge, setOtpChallenge] = useState<OtpChallengeState | null>(null);
+  const [otpCode, setOtpCode] = useState('');
+
+  useEffect(() => {
+    if (!otpChallenge || otpChallenge.cooldownSec <= 0) return;
+    const timer = window.setInterval(() => {
+      setOtpChallenge((prev) =>
+        prev && prev.cooldownSec > 0
+          ? { ...prev, cooldownSec: Math.max(0, prev.cooldownSec - 1) }
+          : prev
+      );
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [otpChallenge?.cooldownSec]);
 
   const handleGoogleAuth = async () => {
     setErrorMsg('');
@@ -95,6 +128,79 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
     }
   };
 
+  const handleSendOtpCode = async () => {
+    if (!otpChallenge || otpChallenge.sending || otpChallenge.cooldownSec > 0) return;
+    setErrorMsg('');
+    setInfoMsg('');
+    setOtpChallenge((prev) => (prev ? { ...prev, sending: true } : prev));
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: otpChallenge.email,
+        options: {
+          shouldCreateUser: false,
+          emailRedirectTo: window.location.origin,
+        },
+      });
+      if (error) throw error;
+      setOtpChallenge((prev) =>
+        prev ? { ...prev, sending: false, codeSent: true, cooldownSec: 60 } : prev
+      );
+      setInfoMsg(
+        `Enviamos un código de verificación de 6 dígitos a ${otpChallenge.email}. Revisá tu correo (y spam) e ingresalo abajo.`
+      );
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message?: unknown }).message).toLowerCase()
+          : '';
+      setOtpChallenge((prev) => (prev ? { ...prev, sending: false } : prev));
+      if (msg.includes('signups not allowed')) {
+        setErrorMsg(
+          'No existe una cuenta registrada con ese correo. Revisá si lo escribiste bien o usá otro correo.'
+        );
+      } else if (msg.includes('rate limit') || msg.includes('too many') || msg.includes('seconds')) {
+        setErrorMsg('Esperá unos segundos antes de solicitar un nuevo código por correo.');
+      } else {
+        setErrorMsg('No se pudo enviar el código de 6 dígitos. Intentá nuevamente en unos instantes.');
+      }
+    }
+  };
+
+  const handleVerifyOtpCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otpChallenge) return;
+    const cleanToken = otpCode.replace(/\D/g, '').slice(0, 6);
+    if (cleanToken.length !== 6) {
+      setErrorMsg('Ingresá el código numérico de 6 dígitos que recibiste por correo.');
+      return;
+    }
+
+    setErrorMsg('');
+    setInfoMsg('');
+    setOtpChallenge((prev) => (prev ? { ...prev, verifying: true } : prev));
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: otpChallenge.email,
+        token: cleanToken,
+        type: 'email',
+      });
+      if (error) throw error;
+      await resetLoginGuard(otpChallenge.email, data.session?.access_token);
+      notify('Código verificado. Sesión iniciada correctamente.');
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message?: unknown }).message).toLowerCase()
+          : '';
+      setOtpChallenge((prev) => (prev ? { ...prev, verifying: false } : prev));
+      if (msg.includes('expired') || msg.includes('invalid') || msg.includes('token')) {
+        setErrorMsg('El código de 6 dígitos es incorrecto o venció. Pedí uno nuevo e intentá otra vez.');
+      } else {
+        setErrorMsg('No se pudo validar el código. Verificá los 6 dígitos e intentá nuevamente.');
+      }
+    }
+  };
+
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanEmail = sanitizeEmail(email);
@@ -106,20 +212,45 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
       setErrorMsg('Ingresá tu contraseña.');
       return;
     }
-    if (mode === 'signup' && password.length < 8) {
-      setErrorMsg('Para crear una cuenta, la contraseña debe tener al menos 8 caracteres.');
-      return;
+    if (mode === 'signup') {
+      if (password.length < 8 || !/[a-zA-Z]/.test(password) || !/\d/.test(password)) {
+        setErrorMsg(
+          'Para crear una cuenta, la contraseña debe tener al menos 8 caracteres, incluyendo letras y números.'
+        );
+        return;
+      }
     }
+
     setLoading(true);
     setErrorMsg('');
     setInfoMsg('');
     try {
       if (mode === 'login') {
-        const { error } = await supabase.auth.signInWithPassword({
+        const guard = await getLoginGuardStatus(cleanEmail);
+        if (guard.requiresOtp) {
+          setRemainingAttempts(0);
+          setPassword('');
+          setOtpCode('');
+          setOtpChallenge({
+            email: cleanEmail,
+            codeSent: false,
+            sending: false,
+            verifying: false,
+            cooldownSec: 0,
+          });
+          setErrorMsg(
+            `Este correo superó los ${MAX_LOGIN_ATTEMPTS} intentos fallidos con contraseña. Solicitá e ingresá un código de 6 dígitos para volver a entrar.`
+          );
+          return;
+        }
+
+        const { data, error } = await supabase.auth.signInWithPassword({
           email: cleanEmail,
           password,
         });
         if (error) throw error;
+        setRemainingAttempts(null);
+        await resetLoginGuard(cleanEmail, data.session?.access_token);
         notify('Sesión iniciada correctamente.');
       } else {
         const { data, error } = await supabase.auth.signUp({
@@ -145,7 +276,35 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
           ? String((err as { message?: unknown }).message).toLowerCase()
           : '';
       if (msg.includes('invalid login credentials')) {
-        setErrorMsg('Correo o contraseña incorrectos.');
+        if (mode === 'login') {
+          const nextGuard = await recordFailedPasswordAttempt(cleanEmail);
+          if (nextGuard.requiresOtp) {
+            setRemainingAttempts(0);
+            setPassword('');
+            setOtpCode('');
+            setOtpChallenge({
+              email: cleanEmail,
+              codeSent: false,
+              sending: false,
+              verifying: false,
+              cooldownSec: 0,
+            });
+            setErrorMsg(
+              `Superaste el límite de ${MAX_LOGIN_ATTEMPTS} errores con la contraseña. Por seguridad, pedí un código de 6 dígitos a tu correo para volver a entrar.`
+            );
+          } else {
+            setRemainingAttempts(nextGuard.remainingAttempts);
+            setErrorMsg(
+              `Correo o contraseña incorrectos. Te ${
+                nextGuard.remainingAttempts === 1
+                  ? 'queda 1 intento'
+                  : `quedan ${nextGuard.remainingAttempts} intentos`
+              } antes de pedir código de 6 dígitos.`
+            );
+          }
+        } else {
+          setErrorMsg('Correo o contraseña incorrectos.');
+        }
       } else if (msg.includes('email not confirmed')) {
         setErrorMsg('Tu correo todavía no está confirmado. Revisá tu bandeja de entrada.');
       } else if (msg.includes('user already registered')) {
@@ -206,151 +365,265 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
         </div>
 
         <div className="flex flex-col justify-center p-8 sm:p-10">
-          <div className="space-y-5">
-            <div>
-              <h2 className="text-xl font-bold text-slate-900 dark:text-white font-display">
-                {mode === 'login' ? 'Ingresar al sistema' : 'Crear cuenta de taller'}
-              </h2>
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                {mode === 'login'
-                  ? 'Ingresá con tu correo y contraseña para acceder a tu taller.'
-                  : 'Registrate con tu correo para crear un nuevo taller en Supabase.'}
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('login');
-                  setErrorMsg('');
-                }}
-                className={`h-9 rounded-lg text-xs font-semibold transition ${
-                  mode === 'login'
-                    ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-700 dark:text-white'
-                    : 'text-slate-600 dark:text-slate-400'
-                }`}
-              >
-                Iniciar sesión
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('signup');
-                  setErrorMsg('');
-                }}
-                className={`h-9 rounded-lg text-xs font-semibold transition ${
-                  mode === 'signup'
-                    ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-700 dark:text-white'
-                    : 'text-slate-600 dark:text-slate-400'
-                }`}
-              >
-                Crear cuenta
-              </button>
-            </div>
-
-            {errorMsg && (
-              <div className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs font-medium text-red-700 dark:border-red-900/60 dark:bg-red-950/50 dark:text-red-300">
-                {errorMsg}
-              </div>
-            )}
-
-            {infoMsg && (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs font-medium text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-200">
-                {infoMsg}
-              </div>
-            )}
-
-            <button
-              type="button"
-              onClick={() => void handleGoogleAuth()}
-              disabled={loading || googleLoading}
-              className="flex h-11 w-full items-center justify-center gap-2.5 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 shadow-2xs transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-700"
-            >
-              <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  fill="#4285F4"
-                  d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z"
-                />
-                <path
-                  fill="#EA4335"
-                  d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
-                />
-              </svg>
-              <span>{googleLoading ? 'Redirigiendo a Google...' : 'Continuar con Google'}</span>
-            </button>
-
-            <div className="relative flex items-center py-0.5">
-              <div className="flex-grow border-t border-slate-200 dark:border-slate-800" />
-              <span className="mx-3 shrink-0 text-[11px] font-medium text-slate-400">
-                o con tu correo
-              </span>
-              <div className="flex-grow border-t border-slate-200 dark:border-slate-800" />
-            </div>
-
-            <form onSubmit={handleEmailAuth} className="space-y-3.5">
+          {otpChallenge ? (
+            <div className="space-y-5">
               <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Correo electrónico
-                </label>
-                <div className="relative">
-                  <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="taller@ejemplo.com"
-                    className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                  />
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">
+                  <KeyRound className="h-5 w-5" />
+                </span>
+                <h2 className="mt-3 text-xl font-bold text-slate-900 dark:text-white font-display">
+                  Verificación por código de 6 dígitos
+                </h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Alcanzaste los {MAX_LOGIN_ATTEMPTS} intentos incorrectos de contraseña para{' '}
+                  <strong className="text-slate-800 dark:text-slate-200">{otpChallenge.email}</strong>.
+                  Pedí un código de 6 dígitos (OTP) por correo para desbloquear tu acceso.
+                </p>
+              </div>
+
+              {errorMsg && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs font-medium text-red-700 dark:border-red-900/60 dark:bg-red-950/50 dark:text-red-300">
+                  {errorMsg}
                 </div>
-              </div>
+              )}
 
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Contraseña
-                </label>
-                <input
-                  type="password"
-                  required
-                  minLength={mode === 'signup' ? 8 : 6}
-                  maxLength={128}
-                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder={mode === 'signup' ? 'Mínimo 8 caracteres' : 'Tu contraseña'}
-                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                />
-              </div>
+              {infoMsg && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs font-medium text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-200">
+                  {infoMsg}
+                </div>
+              )}
 
               <button
-                type="submit"
-                disabled={loading || googleLoading}
-                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0072BB] px-4 text-sm font-semibold text-white transition hover:bg-[#005f9c] disabled:opacity-60"
+                type="button"
+                onClick={() => void handleSendOtpCode()}
+                disabled={otpChallenge.sending || otpChallenge.cooldownSec > 0}
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 text-sm font-semibold text-[#0072BB] transition hover:bg-sky-100 disabled:opacity-60 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-300 dark:hover:bg-sky-950/70"
               >
-                <LogIn className="h-4 w-4" />
+                <Send className="h-4 w-4" />
                 <span>
-                  {loading
-                    ? 'Conectando...'
-                    : mode === 'login'
-                    ? 'Ingresar'
-                    : 'Registrar taller'}
+                  {otpChallenge.sending
+                    ? 'Enviando código...'
+                    : otpChallenge.cooldownSec > 0
+                    ? `Reenviar código en ${otpChallenge.cooldownSec}s`
+                    : otpChallenge.codeSent
+                    ? 'Reenviar código de 6 dígitos'
+                    : 'Enviar código de 6 dígitos al correo'}
                 </span>
               </button>
-            </form>
 
-            <p className="text-center text-xs text-slate-500 dark:text-slate-400">
-              Cada taller mantiene sus órdenes, clientes, inventario y finanzas aislados bajo su cuenta.
-            </p>
-          </div>
+              <form onSubmit={handleVerifyOtpCode} className="space-y-3.5">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Código de verificación (6 dígitos)
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]{6}"
+                    maxLength={6}
+                    autoComplete="one-time-code"
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="000000"
+                    className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-center font-mono text-xl font-bold tracking-[0.45em] text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={otpChallenge.verifying || otpCode.length !== 6}
+                  className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0072BB] px-4 text-sm font-semibold text-white transition hover:bg-[#005f9c] disabled:opacity-60"
+                >
+                  <ShieldCheck className="h-4 w-4" />
+                  <span>{otpChallenge.verifying ? 'Verificando...' : 'Verificar código y entrar'}</span>
+                </button>
+              </form>
+
+              <p className="rounded-xl bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
+                Tip: si tu correo llega con un enlace de acceso directo en vez del número de 6 dígitos,
+                podés tocar ese enlace para entrar igual o agregar{' '}
+                <code className="font-mono text-slate-700 dark:text-slate-200">{'{{ .Token }}'}</code> en la
+                plantilla Magic Link de Supabase.
+              </p>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setOtpChallenge(null);
+                  setOtpCode('');
+                  setErrorMsg('');
+                  setInfoMsg('');
+                }}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                <span>Volver / Usar otro correo</span>
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900 dark:text-white font-display">
+                  {mode === 'login' ? 'Ingresar al sistema' : 'Crear cuenta de taller'}
+                </h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  {mode === 'login'
+                    ? 'Ingresá con tu correo y contraseña para acceder a tu taller.'
+                    : 'Registrate con tu correo para crear un nuevo taller en Supabase.'}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('login');
+                    setErrorMsg('');
+                    setInfoMsg('');
+                    setRemainingAttempts(null);
+                  }}
+                  className={`h-9 rounded-lg text-xs font-semibold transition ${
+                    mode === 'login'
+                      ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-700 dark:text-white'
+                      : 'text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  Iniciar sesión
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('signup');
+                    setErrorMsg('');
+                    setInfoMsg('');
+                    setRemainingAttempts(null);
+                  }}
+                  className={`h-9 rounded-lg text-xs font-semibold transition ${
+                    mode === 'signup'
+                      ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-700 dark:text-white'
+                      : 'text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  Crear cuenta
+                </button>
+              </div>
+
+              {errorMsg && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs font-medium text-red-700 dark:border-red-900/60 dark:bg-red-950/50 dark:text-red-300">
+                  {errorMsg}
+                </div>
+              )}
+
+              {mode === 'login' && remainingAttempts !== null && remainingAttempts > 0 && (
+                <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2 text-[11px] font-semibold text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    Protección de acceso: {MAX_LOGIN_ATTEMPTS - remainingAttempts}/{MAX_LOGIN_ATTEMPTS}{' '}
+                    errores usados. Al llegar a {MAX_LOGIN_ATTEMPTS}, se pedirá código de 6 dígitos por correo.
+                  </span>
+                </div>
+              )}
+
+              {infoMsg && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs font-medium text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-200">
+                  {infoMsg}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => void handleGoogleAuth()}
+                disabled={loading || googleLoading}
+                className="flex h-11 w-full items-center justify-center gap-2.5 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 shadow-2xs transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-700"
+              >
+                <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    fill="#4285F4"
+                    d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
+                  />
+                </svg>
+                <span>{googleLoading ? 'Redirigiendo a Google...' : 'Continuar con Google'}</span>
+              </button>
+
+              <div className="relative flex items-center py-0.5">
+                <div className="flex-grow border-t border-slate-200 dark:border-slate-800" />
+                <span className="mx-3 shrink-0 text-[11px] font-medium text-slate-400">
+                  o con tu correo
+                </span>
+                <div className="flex-grow border-t border-slate-200 dark:border-slate-800" />
+              </div>
+
+              <form onSubmit={handleEmailAuth} className="space-y-3.5">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Correo electrónico
+                  </label>
+                  <div className="relative">
+                    <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
+                        setRemainingAttempts(null);
+                      }}
+                      placeholder="taller@ejemplo.com"
+                      className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Contraseña
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    minLength={mode === 'signup' ? 8 : 6}
+                    maxLength={128}
+                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder={mode === 'signup' ? 'Mín. 8 caracteres (letras y números)' : 'Tu contraseña'}
+                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading || googleLoading}
+                  className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0072BB] px-4 text-sm font-semibold text-white transition hover:bg-[#005f9c] disabled:opacity-60"
+                >
+                  <LogIn className="h-4 w-4" />
+                  <span>
+                    {loading
+                      ? 'Conectando...'
+                      : mode === 'login'
+                      ? 'Ingresar'
+                      : 'Registrar taller'}
+                  </span>
+                </button>
+              </form>
+
+              <p className="text-center text-xs text-slate-500 dark:text-slate-400">
+                Cada taller mantiene sus órdenes, clientes, inventario y finanzas aislados bajo su cuenta.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>

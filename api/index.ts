@@ -442,6 +442,92 @@ function resolveApiPath(req: ApiIncomingRequest): string {
   return parsedUrl.pathname.replace(/\/+$/, '') || '/';
 }
 
+const LOGIN_GUARD_COOKIE = 'th3bnb_lg';
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOGIN_GUARD_TTL_MS = 24 * 60 * 60 * 1000;
+
+function parseCookies(req: ApiIncomingRequest): Record<string, string> {
+  const raw = req.headers.cookie;
+  const header = Array.isArray(raw) ? raw.join(';') : raw || '';
+  const map: Record<string, string> = {};
+  for (const part of header.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx <= 0) continue;
+    const key = part.slice(0, idx).trim();
+    const val = part.slice(idx + 1).trim();
+    if (key) map[key] = val;
+  }
+  return map;
+}
+
+function hashLoginEmail(email: string): string {
+  return crypto
+    .createHmac('sha256', SUBSCRIPTION_SIGNING_SECRET)
+    .update(`lg:${email.trim().toLowerCase()}`)
+    .digest('hex')
+    .slice(0, 24);
+}
+
+type LoginGuardMap = Record<string, { n: number; r: boolean; t: number }>;
+
+function readLoginGuardCookie(req: ApiIncomingRequest): LoginGuardMap {
+  try {
+    const raw = parseCookies(req)[LOGIN_GUARD_COOKIE];
+    if (!raw) return {};
+    const dot = raw.indexOf('.');
+    if (dot <= 0) return {};
+    const b64 = raw.slice(0, dot);
+    const sig = raw.slice(dot + 1);
+    const expectedSig = crypto
+      .createHmac('sha256', SUBSCRIPTION_SIGNING_SECRET)
+      .update(b64)
+      .digest('hex');
+    const sigBuf = Buffer.from(sig, 'utf8');
+    const expBuf = Buffer.from(expectedSig, 'utf8');
+    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+      return {};
+    }
+    const parsed = JSON.parse(Buffer.from(b64, 'base64url').toString('utf8')) as LoginGuardMap;
+    if (!parsed || typeof parsed !== 'object') return {};
+    const now = Date.now();
+    const clean: LoginGuardMap = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (v && typeof v.n === 'number' && typeof v.t === 'number' && now - v.t < LOGIN_GUARD_TTL_MS) {
+        clean[k] = {
+          n: Math.max(0, Math.min(MAX_LOGIN_ATTEMPTS, Math.floor(v.n))),
+          r: Boolean(v.r),
+          t: v.t,
+        };
+      }
+    }
+    return clean;
+  } catch {
+    return {};
+  }
+}
+
+function writeLoginGuardCookie(req: ApiIncomingRequest, res: ServerResponse, map: LoginGuardMap): void {
+  const entries = Object.entries(map)
+    .sort((a, b) => b[1].t - a[1].t)
+    .slice(0, 8);
+  const compact = Object.fromEntries(entries);
+  const b64 = Buffer.from(JSON.stringify(compact), 'utf8').toString('base64url');
+  const sig = crypto
+    .createHmac('sha256', SUBSCRIPTION_SIGNING_SECRET)
+    .update(b64)
+    .digest('hex');
+  const isHttps =
+    req.headers['x-forwarded-proto'] === 'https' ||
+    String(req.headers.origin || '').startsWith('https://') ||
+    Boolean(process.env.VERCEL);
+  const sameSite = isHttps ? 'SameSite=None; Secure' : 'SameSite=Lax';
+  const maxAge = entries.length === 0 ? 0 : Math.floor(LOGIN_GUARD_TTL_MS / 1000);
+  res.setHeader(
+    'Set-Cookie',
+    `${LOGIN_GUARD_COOKIE}=${b64}.${sig}; Path=/; Max-Age=${maxAge}; HttpOnly; ${sameSite}`
+  );
+}
+
 export async function handleApiRequest(
   req: ApiIncomingRequest,
   res: ServerResponse
@@ -477,7 +563,66 @@ export async function handleApiRequest(
     return true;
   }
 
+  if (apiPath === '/api/auth/login-guard') {
+    const rawEmail = String(body.email || '').trim().toLowerCase();
+    const action = String(body.action || 'status').trim();
+    if (!rawEmail || !rawEmail.includes('@')) {
+      sendJson(res, 400, { ok: false, error: 'Correo inválido.' });
+      return true;
+    }
+    const emailHash = hashLoginEmail(rawEmail);
+    const guardMap = readLoginGuardCookie(req);
+    const current = guardMap[emailHash] || { n: 0, r: false, t: Date.now() };
+
+    if (action === 'reset') {
+      const user = await verifySupabaseSessionUser(req);
+      if (!user || user.email.toLowerCase() !== rawEmail) {
+        sendJson(res, 401, {
+          ok: false,
+          error: 'Se requiere sesión verificada para restablecer los intentos.',
+        });
+        return true;
+      }
+      delete guardMap[emailHash];
+      writeLoginGuardCookie(req, res, guardMap);
+      sendJson(res, 200, {
+        ok: true,
+        attempts: 0,
+        remainingAttempts: MAX_LOGIN_ATTEMPTS,
+        requiresOtp: false,
+      });
+      return true;
+    }
+
+    if (action === 'fail') {
+      const nextAttempts = Math.min(MAX_LOGIN_ATTEMPTS, current.n + 1);
+      const requiresOtp = nextAttempts >= MAX_LOGIN_ATTEMPTS;
+      guardMap[emailHash] = { n: nextAttempts, r: requiresOtp, t: Date.now() };
+      writeLoginGuardCookie(req, res, guardMap);
+      sendJson(res, 200, {
+        ok: true,
+        attempts: nextAttempts,
+        remainingAttempts: Math.max(0, MAX_LOGIN_ATTEMPTS - nextAttempts),
+        requiresOtp,
+      });
+      return true;
+    }
+
+    sendJson(res, 200, {
+      ok: true,
+      attempts: current.n,
+      remainingAttempts: Math.max(0, MAX_LOGIN_ATTEMPTS - current.n),
+      requiresOtp: current.r || current.n >= MAX_LOGIN_ATTEMPTS,
+    });
+    return true;
+  }
+
   if (apiPath === '/api/mercadopago/test') {
+    const user = await verifySupabaseSessionUser(req);
+    if (!user) {
+      sendJson(res, 401, { ok: false, error: 'Iniciá sesión para probar Mercado Pago.' });
+      return true;
+    }
     const token = resolveAccessToken(body.accessToken);
     if (!token) {
       sendJson(res, 400, {
@@ -597,6 +742,11 @@ export async function handleApiRequest(
   }
 
   if (apiPath === '/api/mercadopago/orders') {
+    const user = await verifySupabaseSessionUser(req);
+    if (!user) {
+      sendJson(res, 401, { ok: false, error: 'Sesión inválida o expirada.' });
+      return true;
+    }
     const token = resolveAccessToken(body.accessToken);
     const mode = body.mode === 'point' ? 'point' : body.mode === 'qr' ? 'qr' : null;
     const rawAmount = Number(body.amount);
@@ -859,6 +1009,11 @@ export async function handleApiRequest(
   }
 
   if (apiPath === '/api/mercadopago/orders/status') {
+    const user = await verifySupabaseSessionUser(req);
+    if (!user) {
+      sendJson(res, 401, { ok: false, error: 'Sesión inválida o expirada.' });
+      return true;
+    }
     const token = resolveAccessToken(body.accessToken);
     const orderId = String(body.orderId || '').trim();
     const apiFamily = String(body.apiFamily || 'orders_v1');
@@ -948,6 +1103,11 @@ export async function handleApiRequest(
   }
 
   if (apiPath === '/api/mercadopago/orders/cancel') {
+    const user = await verifySupabaseSessionUser(req);
+    if (!user) {
+      sendJson(res, 401, { ok: false, error: 'Sesión inválida o expirada.' });
+      return true;
+    }
     const token = resolveAccessToken(body.accessToken);
     const orderId = String(body.orderId || '').trim();
     const apiFamily = String(body.apiFamily || 'orders_v1');

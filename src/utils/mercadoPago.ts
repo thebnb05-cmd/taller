@@ -196,11 +196,7 @@ export function clearMercadoPagoConfigCache(ownerId?: string): void {
 }
 
 async function postJson<T>(url: string, body: Record<string, unknown>): Promise<T> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  const res = await fetchAuthedPost(url, body);
   const data = (await res.json().catch(() => ({}))) as T & { ok?: boolean; error?: string };
   return data;
 }

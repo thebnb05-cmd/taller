@@ -113,10 +113,12 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
         void loadTicket(activeCode, false);
       }
     };
+    const pollInterval = window.setInterval(handleRefreshIfVisible, 20000);
     window.addEventListener('focus', handleRefreshIfVisible);
     document.addEventListener('visibilitychange', handleRefreshIfVisible);
 
     return () => {
+      window.clearInterval(pollInterval);
       window.removeEventListener('focus', handleRefreshIfVisible);
       document.removeEventListener('visibilitychange', handleRefreshIfVisible);
       void supabase.removeChannel(channel);

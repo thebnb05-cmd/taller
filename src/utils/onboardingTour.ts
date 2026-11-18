@@ -441,10 +441,6 @@ export function saveOnboardingState(userId: string, state: OnboardingState): voi
   }
 }
 
-export function getUnseenWelcomeSteps(state: OnboardingState): WelcomeTourStep[] {
-  return WELCOME_TOUR_STEPS.filter((step) => !state.seenWelcomeStepIds[step.id]);
-}
-
 export function markWelcomeStepsSeen(
   state: OnboardingState,
   steps: WelcomeTourStep[] = WELCOME_TOUR_STEPS

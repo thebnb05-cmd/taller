@@ -236,8 +236,8 @@ alter table public.purchases enable row level security;
 drop policy if exists "workshop_profiles_owner_all" on public.workshop_profiles;
 create policy "workshop_profiles_owner_all" on public.workshop_profiles
   for all to authenticated
-  using (auth.uid() = owner_id)
-  with check (auth.uid() = owner_id);
+  using (auth.uid() = owner_id and id = auth.uid()::text)
+  with check (auth.uid() = owner_id and id = auth.uid()::text);
 
 drop policy if exists "clients_owner_all" on public.clients;
 create policy "clients_owner_all" on public.clients
@@ -281,11 +281,13 @@ create policy "purchases_owner_all" on public.purchases
   using (auth.uid() = owner_id)
   with check (auth.uid() = owner_id);
 
--- Public tickets: lectura pública para clientes, escritura solo del taller dueño
+-- Public tickets: evitar listado masivo por otros talleres/anónimos; lectura directa solo al dueño
+-- y consulta pública puntual únicamente por código exacto vía función RPC.
 drop policy if exists "public_tickets_public_read" on public.public_tickets;
-create policy "public_tickets_public_read" on public.public_tickets
-  for select to anon, authenticated
-  using (true);
+drop policy if exists "public_tickets_owner_read" on public.public_tickets;
+create policy "public_tickets_owner_read" on public.public_tickets
+  for select to authenticated
+  using (auth.uid() = owner_id);
 
 drop policy if exists "public_tickets_owner_write" on public.public_tickets;
 create policy "public_tickets_owner_write" on public.public_tickets
@@ -302,6 +304,60 @@ drop policy if exists "public_tickets_owner_delete" on public.public_tickets;
 create policy "public_tickets_owner_delete" on public.public_tickets
   for delete to authenticated
   using (auth.uid() = owner_id);
+
+create or replace function public.get_public_ticket_by_code(p_tracking_code text)
+returns table (
+  id text,
+  repair_id text,
+  tracking_code text,
+  repair_code text,
+  business_name text,
+  business_phone text,
+  device_type text,
+  brand text,
+  model text,
+  status text,
+  progress integer,
+  date_in text,
+  date_est text,
+  problem_summary text,
+  work_detail text,
+  price numeric,
+  deposit numeric,
+  updated_at timestamptz
+)
+language sql
+security definer
+set search_path = public, pg_temp
+as $$
+  select
+    t.id,
+    t.repair_id,
+    t.tracking_code,
+    t.repair_code,
+    t.business_name,
+    t.business_phone,
+    t.device_type,
+    t.brand,
+    t.model,
+    t.status,
+    t.progress,
+    t.date_in,
+    t.date_est,
+    t.problem_summary,
+    t.work_detail,
+    t.price,
+    t.deposit,
+    t.updated_at
+  from public.public_tickets t
+  where p_tracking_code is not null
+    and upper(trim(p_tracking_code)) ~ '^[A-Z0-9_-]{1,40}$'
+    and t.id = upper(trim(p_tracking_code))
+  limit 1;
+$$;
+
+revoke all on function public.get_public_ticket_by_code(text) from public;
+grant execute on function public.get_public_ticket_by_code(text) to anon, authenticated;
 
 -- Validaciones de integridad a nivel base de datos (idempotente)
 alter table public.repairs

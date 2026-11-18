@@ -226,51 +226,115 @@ export function subscribeTableChanges(table: TableName, callback: () => void): (
   };
 }
 
+const VALID_TABLES: ReadonlySet<TableName> = new Set<TableName>([
+  'workshop_profiles',
+  'clients',
+  'repairs',
+  'public_tickets',
+  'products',
+  'tasks',
+  'suppliers',
+  'sales',
+  'purchases',
+]);
+
+function assertValidTable(table: TableName): void {
+  if (!VALID_TABLES.has(table)) {
+    throw new Error('Operación de tabla no permitida.');
+  }
+}
+
+async function requireAuthenticatedOwnerId(
+  operationType: OperationType,
+  path: string
+): Promise<string> {
+  const authOwnerId = await getAuthenticatedOwnerId();
+  if (!authOwnerId || !isSafeId(authOwnerId)) {
+    await handleDbError(new Error('permission denied'), operationType, path);
+  }
+  return authOwnerId;
+}
+
 export async function fetchOwnerRows<T>(table: TableName, ownerId: string): Promise<T[]> {
+  assertValidTable(table);
   if (!isSafeId(ownerId)) {
     throw new Error('Identificador de sesión inválido.');
+  }
+  const authOwnerId = await requireAuthenticatedOwnerId(OperationType.LIST, table);
+  if (ownerId !== authOwnerId) {
+    await handleDbError(new Error('permission denied'), OperationType.LIST, table);
   }
   const { data, error } = await supabase
     .from(table)
     .select('*')
-    .eq('owner_id', ownerId);
+    .eq('owner_id', authOwnerId);
   if (error) {
     throw error;
   }
-  const rows = (data || []).map((row) => fromDbRow<Record<string, unknown>>(row as Record<string, unknown>));
+  const rows = (data || []).map((row) =>
+    fromDbRow<Record<string, unknown>>(row as Record<string, unknown>)
+  );
   const decrypted = await Promise.all(
-    rows.map((row) => decryptRecordFields<Record<string, unknown>>(table, row, ownerId))
+    rows.map((row) => decryptRecordFields<Record<string, unknown>>(table, row, authOwnerId))
   );
   return decrypted as unknown as T[];
 }
 
 export async function fetchSingleById<T>(table: TableName, id: string): Promise<T | null> {
+  assertValidTable(table);
   if (!isSafeId(id)) return null;
-  let query = supabase.from(table).select('*').eq('id', id);
-  const authOwnerId = table !== 'public_tickets' ? await getAuthenticatedOwnerId() : '';
-  if (authOwnerId && table !== 'public_tickets') {
-    query = query.eq('owner_id', authOwnerId);
+  if (table === 'public_tickets') {
+    return fetchPublicTicketByCode<T>(id);
   }
-  const { data, error } = await query.maybeSingle();
+  const authOwnerId = await requireAuthenticatedOwnerId(OperationType.GET, `${table}/${id}`);
+  if (table === 'workshop_profiles' && id !== authOwnerId) {
+    await handleDbError(new Error('permission denied'), OperationType.GET, `${table}/${id}`);
+  }
+  const { data, error } = await supabase
+    .from(table)
+    .select('*')
+    .eq('id', id)
+    .eq('owner_id', authOwnerId)
+    .maybeSingle();
   if (error) {
     throw error;
   }
   if (!data) return null;
   const mapped = fromDbRow<Record<string, unknown>>(data as Record<string, unknown>);
-  const decrypted = await decryptRecordFields<Record<string, unknown>>(
-    table,
-    mapped,
-    authOwnerId || undefined
-  );
+  const decrypted = await decryptRecordFields<Record<string, unknown>>(table, mapped, authOwnerId);
   return decrypted as unknown as T;
 }
 
 export async function fetchPublicTicketByCode<T>(trackingCode: string): Promise<T | null> {
   const cleaned = (trackingCode || '').trim().toUpperCase();
   if (!TRACKING_CODE_RE.test(cleaned)) return null;
+
+  const rpcRes = await supabase
+    .rpc('get_public_ticket_by_code', { p_tracking_code: cleaned })
+    .maybeSingle();
+
+  if (!rpcRes.error) {
+    if (!rpcRes.data) return null;
+    return fromDbRow<T>(rpcRes.data as Record<string, unknown>);
+  }
+
+  const code = String((rpcRes.error as { code?: unknown }).code || '');
+  const msg = String(rpcRes.error.message || '');
+  const isMissingRpc =
+    code === 'PGRST202' ||
+    code === '42883' ||
+    msg.includes('Could not find the function') ||
+    msg.includes('does not exist');
+
+  if (!isMissingRpc) {
+    throw rpcRes.error;
+  }
+
   const { data, error } = await supabase
     .from('public_tickets')
-    .select('*')
+    .select(
+      'id, repair_id, tracking_code, repair_code, business_name, business_phone, device_type, brand, model, status, progress, date_in, date_est, problem_summary, work_detail, price, deposit, updated_at'
+    )
     .eq('id', cleaned)
     .maybeSingle();
   if (error) {
@@ -284,17 +348,28 @@ export async function upsertRow(
   table: TableName,
   record: Record<string, unknown>
 ): Promise<void> {
-  const authOwnerId = await getAuthenticatedOwnerId();
-  const recordOwnerId =
-    typeof record.ownerId === 'string' && record.ownerId ? record.ownerId : authOwnerId;
-  if (authOwnerId && recordOwnerId && recordOwnerId !== authOwnerId) {
+  assertValidTable(table);
+  const authOwnerId = await requireAuthenticatedOwnerId(OperationType.WRITE, table);
+  if (typeof record.ownerId === 'string' && record.ownerId && record.ownerId !== authOwnerId) {
+    await handleDbError(new Error('permission denied'), OperationType.WRITE, table);
+  }
+  if (typeof record.owner_id === 'string' && record.owner_id && record.owner_id !== authOwnerId) {
     await handleDbError(new Error('permission denied'), OperationType.WRITE, table);
   }
   if (record.id !== undefined && !isSafeId(record.id)) {
     await handleDbError(new Error('invalid input syntax'), OperationType.WRITE, table);
   }
-  const prepared = await encryptRecordFields(table, record, recordOwnerId || authOwnerId);
+  if (table === 'workshop_profiles' && record.id !== undefined && record.id !== authOwnerId) {
+    await handleDbError(new Error('permission denied'), OperationType.WRITE, table);
+  }
+  const scopedRecord: Record<string, unknown> = {
+    ...stripPrototypeKeys(record),
+    ownerId: authOwnerId,
+  };
+  delete scopedRecord.owner_id;
+  const prepared = await encryptRecordFields(table, scopedRecord, authOwnerId);
   const payload = toSnakeRecord(prepared, false);
+  payload.owner_id = authOwnerId;
   const { error } = await supabase.from(table).upsert(payload, { onConflict: 'id' });
   if (error) {
     await handleDbError(error, OperationType.WRITE, `${table}/${String(record.id ?? '')}`);
@@ -306,20 +381,32 @@ export async function insertRows(
   table: TableName,
   records: Array<Record<string, unknown>>
 ): Promise<void> {
+  assertValidTable(table);
   if (records.length === 0) return;
-  const authOwnerId = await getAuthenticatedOwnerId();
+  const authOwnerId = await requireAuthenticatedOwnerId(OperationType.CREATE, table);
   const payload = await Promise.all(
     records.map(async (r) => {
-      const recordOwnerId =
-        typeof r.ownerId === 'string' && r.ownerId ? r.ownerId : authOwnerId;
-      if (authOwnerId && recordOwnerId && recordOwnerId !== authOwnerId) {
+      if (typeof r.ownerId === 'string' && r.ownerId && r.ownerId !== authOwnerId) {
+        throw new Error('permission denied');
+      }
+      if (typeof r.owner_id === 'string' && r.owner_id && r.owner_id !== authOwnerId) {
         throw new Error('permission denied');
       }
       if (r.id !== undefined && !isSafeId(r.id)) {
         throw new Error('invalid input syntax');
       }
-      const prepared = await encryptRecordFields(table, r, recordOwnerId || authOwnerId);
-      return toSnakeRecord(prepared, false);
+      if (table === 'workshop_profiles' && r.id !== undefined && r.id !== authOwnerId) {
+        throw new Error('permission denied');
+      }
+      const scopedRecord: Record<string, unknown> = {
+        ...stripPrototypeKeys(r),
+        ownerId: authOwnerId,
+      };
+      delete scopedRecord.owner_id;
+      const prepared = await encryptRecordFields(table, scopedRecord, authOwnerId);
+      const snake = toSnakeRecord(prepared, false);
+      snake.owner_id = authOwnerId;
+      return snake;
     })
   );
   const { error } = await supabase.from(table).insert(payload);
@@ -335,23 +422,30 @@ export async function updateRow(
   patch: Record<string, unknown>,
   keepNull = false
 ): Promise<void> {
+  assertValidTable(table);
   if (!isSafeId(id)) {
     await handleDbError(new Error('invalid input syntax'), OperationType.UPDATE, table);
   }
-  const authOwnerId = await getAuthenticatedOwnerId();
+  const authOwnerId = await requireAuthenticatedOwnerId(OperationType.UPDATE, `${table}/${id}`);
+  if (table === 'workshop_profiles' && id !== authOwnerId) {
+    await handleDbError(new Error('permission denied'), OperationType.UPDATE, `${table}/${id}`);
+  }
   const cleanPatch = stripPrototypeKeys(patch);
-  // Prevent client-side owner_id hijacking on update
+  // Prevent client-side id / owner_id hijacking on update
+  delete cleanPatch.id;
   delete cleanPatch.ownerId;
   delete cleanPatch.owner_id;
 
   const prepared = await encryptRecordFields(table, cleanPatch, authOwnerId);
   const payload = toSnakeRecord(prepared, keepNull);
+  delete payload.id;
+  delete payload.owner_id;
 
-  let query = supabase.from(table).update(payload).eq('id', id);
-  if (authOwnerId) {
-    query = query.eq('owner_id', authOwnerId);
-  }
-  const { error } = await query;
+  const { error } = await supabase
+    .from(table)
+    .update(payload)
+    .eq('id', id)
+    .eq('owner_id', authOwnerId);
   if (error) {
     await handleDbError(error, OperationType.UPDATE, `${table}/${id}`);
   }
@@ -359,18 +453,23 @@ export async function updateRow(
 }
 
 export async function deleteRow(table: TableName, id: string): Promise<void> {
+  assertValidTable(table);
   if (!isSafeId(id)) {
     await handleDbError(new Error('invalid input syntax'), OperationType.DELETE, table);
   }
-  const authOwnerId = await getAuthenticatedOwnerId();
-  let query = supabase.from(table).delete().eq('id', id);
-  if (authOwnerId) {
-    query = query.eq('owner_id', authOwnerId);
+  const authOwnerId = await requireAuthenticatedOwnerId(OperationType.DELETE, `${table}/${id}`);
+  if (table === 'workshop_profiles' && id !== authOwnerId) {
+    await handleDbError(new Error('permission denied'), OperationType.DELETE, `${table}/${id}`);
   }
-  const { error } = await query;
+  const { error } = await supabase
+    .from(table)
+    .delete()
+    .eq('id', id)
+    .eq('owner_id', authOwnerId);
   if (error) {
     await handleDbError(error, OperationType.DELETE, `${table}/${id}`);
   }
   notifyTableChanged(table);
 }
+
 
