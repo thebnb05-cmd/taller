@@ -16,6 +16,7 @@ import { resetLoginGuard } from './utils/loginGuard';
 import { sanitizeDbErrorMessage } from './utils/validation';
 import { parseWorkshopMeta } from './utils/workshopMeta';
 import { AuthScreen, WorkshopOnboarding } from './components/AuthGate';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { PublicTrackingView } from './components/PublicTrackingView';
 import { ToastProvider } from './components/ToastProvider';
 import { WorkshopApp } from './components/WorkshopApp';
@@ -164,7 +165,11 @@ function AppContent() {
     if (fromCookie === 'dark' || fromCookie === 'light') {
       return fromCookie === 'dark';
     }
-    return localStorage.getItem('th3bnb-theme') === 'dark';
+    try {
+      return localStorage.getItem('th3bnb-theme') === 'dark';
+    } catch {
+      return false;
+    }
   });
 
   const [trackingCode, setTrackingCode] = useState<string | null>(() => {
@@ -223,11 +228,18 @@ function AuthRouter({
 
   useEffect(() => {
     let active = true;
-    supabase.auth.getSession().then(({ data }) => {
-      if (!active) return;
-      setUser(data.session?.user ?? null);
-      setAuthReady(true);
-    });
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!active) return;
+        setUser(data.session?.user ?? null);
+        setAuthReady(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        setUser(null);
+        setAuthReady(true);
+      });
 
     const {
       data: { subscription },
@@ -270,8 +282,10 @@ function AuthRouter({
 
 export default function App() {
   return (
-    <ToastProvider>
-      <AppContent />
-    </ToastProvider>
+    <ErrorBoundary>
+      <ToastProvider>
+        <AppContent />
+      </ToastProvider>
+    </ErrorBoundary>
   );
 }
