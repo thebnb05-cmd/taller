@@ -1,15 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
-  ArrowLeft,
   Building2,
-  Clock,
   Coins,
   Image as ImageIcon,
-  KeyRound,
   LogIn,
   Mail,
-  Send,
   ShieldCheck,
   Smartphone,
   Store,
@@ -59,26 +55,16 @@ import {
 } from '../utils/loginGuard';
 import { BrandMark } from './BrandMark';
 import { useToast } from './ToastProvider';
+import { VerificationCodeModal } from './VerificationCodeModal';
 
 interface AuthScreenProps {
   onOpenTrackingLookup?: () => void;
 }
 
-interface OtpChallengeState {
+interface OtpLockState {
   email: string;
   lockedUntil: number;
-  lockRemainingSec: number;
-  codeSent: boolean;
-  sending: boolean;
-  verifying: boolean;
-  cooldownSec: number;
-}
-
-function formatLockCountdown(totalSeconds: number): string {
-  const clamped = Math.max(0, Math.floor(totalSeconds));
-  const mins = Math.floor(clamped / 60);
-  const secs = clamped % 60;
-  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  initialError?: string;
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) => {
@@ -91,10 +77,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
   const [errorMsg, setErrorMsg] = useState('');
   const [infoMsg, setInfoMsg] = useState('');
   const [remainingAttempts, setRemainingAttempts] = useState<number | null>(null);
-  const [otpChallenge, setOtpChallenge] = useState<OtpChallengeState | null>(null);
-  const [otpCode, setOtpCode] = useState('');
+  const [otpLock, setOtpLock] = useState<OtpLockState | null>(null);
 
-  // Restore active 5-minute lockout if user refreshes during lockout
+  // Restore active 5-minute lockout modal if user refreshes during lockout
   useEffect(() => {
     const lastLockedEmail = getRememberedLockedEmail();
     if (!lastLockedEmail) return;
@@ -102,20 +87,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
     void getLoginGuardStatus(lastLockedEmail).then((status) => {
       if (!active) return;
       if (status.requiresOtp && status.lockedUntil && status.lockRemainingSec > 0) {
+        const msg = `Bloqueo temporal de 5 minutos activo para ${lastLockedEmail}. Solicitá e ingresá el código de 6 dígitos enviado a tu correo para desbloquear antes.`;
         setEmail(lastLockedEmail);
         setRemainingAttempts(0);
-        setOtpChallenge({
+        setErrorMsg(msg);
+        setOtpLock({
           email: lastLockedEmail,
           lockedUntil: status.lockedUntil,
-          lockRemainingSec: status.lockRemainingSec,
-          codeSent: false,
-          sending: false,
-          verifying: false,
-          cooldownSec: 0,
+          initialError: msg,
         });
-        setErrorMsg(
-          `Bloqueo temporal de 5 minutos activo para ${lastLockedEmail}. Ingresá el código de 6 dígitos enviado a tu correo para desbloquear antes.`
-        );
       } else {
         rememberLockedEmail(null);
       }
@@ -124,36 +104,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
       active = false;
     };
   }, []);
-
-  // Tick OTP resend cooldown and 5-minute temporary lockout timer
-  useEffect(() => {
-    if (!otpChallenge) return;
-    const timer = window.setInterval(() => {
-      const now = Date.now();
-      const nextLockSec = Math.max(0, Math.ceil((otpChallenge.lockedUntil - now) / 1000));
-      if (nextLockSec <= 0) {
-        const unlockedEmail = otpChallenge.email;
-        rememberLockedEmail(null);
-        setOtpChallenge(null);
-        setOtpCode('');
-        setRemainingAttempts(null);
-        setErrorMsg('');
-        setInfoMsg(
-          `El bloqueo temporal de 5 minutos para ${unlockedEmail} finalizó. Ya podés volver a intentar con tu contraseña.`
-        );
-        return;
-      }
-      setOtpChallenge((prev) => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          lockRemainingSec: nextLockSec,
-          cooldownSec: prev.cooldownSec > 0 ? Math.max(0, prev.cooldownSec - 1) : 0,
-        };
-      });
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [otpChallenge !== null, otpChallenge?.lockedUntil]);
 
   const handleGoogleAuth = async () => {
     setErrorMsg('');
@@ -185,80 +135,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
       } else {
         setErrorMsg('No se pudo iniciar sesión con Google. Intentá nuevamente.');
       }
+    } finally {
       setGoogleLoading(false);
-    }
-  };
-
-  const handleSendOtpCode = async () => {
-    if (!otpChallenge || otpChallenge.sending || otpChallenge.cooldownSec > 0) return;
-    setErrorMsg('');
-    setInfoMsg('');
-    setOtpChallenge((prev) => (prev ? { ...prev, sending: true } : prev));
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email: otpChallenge.email,
-        options: {
-          shouldCreateUser: false,
-          emailRedirectTo: window.location.origin,
-        },
-      });
-      if (error) throw error;
-      setOtpChallenge((prev) =>
-        prev ? { ...prev, sending: false, codeSent: true, cooldownSec: 60 } : prev
-      );
-      setInfoMsg(
-        `Enviamos un código de verificación de 6 dígitos a ${otpChallenge.email}. Revisá tu correo (y spam) e ingresalo abajo.`
-      );
-    } catch (err: unknown) {
-      const msg =
-        err && typeof err === 'object' && 'message' in err
-          ? String((err as { message?: unknown }).message).toLowerCase()
-          : '';
-      setOtpChallenge((prev) => (prev ? { ...prev, sending: false } : prev));
-      if (msg.includes('signups not allowed')) {
-        setErrorMsg(
-          'No existe una cuenta registrada con ese correo. Revisá si lo escribiste bien o usá otro correo.'
-        );
-      } else if (msg.includes('rate limit') || msg.includes('too many') || msg.includes('seconds')) {
-        setErrorMsg('Esperá unos segundos antes de solicitar un nuevo código por correo.');
-      } else {
-        setErrorMsg('No se pudo enviar el código de 6 dígitos. Intentá nuevamente en unos instantes.');
-      }
-    }
-  };
-
-  const handleVerifyOtpCode = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!otpChallenge) return;
-    const cleanToken = otpCode.replace(/\D/g, '').slice(0, 6);
-    if (cleanToken.length !== 6) {
-      setErrorMsg('Ingresá el código numérico de 6 dígitos que recibiste por correo.');
-      return;
-    }
-
-    setErrorMsg('');
-    setInfoMsg('');
-    setOtpChallenge((prev) => (prev ? { ...prev, verifying: true } : prev));
-    try {
-      const { data, error } = await supabase.auth.verifyOtp({
-        email: otpChallenge.email,
-        token: cleanToken,
-        type: 'email',
-      });
-      if (error) throw error;
-      await resetLoginGuard(otpChallenge.email, data.session?.access_token);
-      notify('Código verificado. Sesión iniciada correctamente.');
-    } catch (err: unknown) {
-      const msg =
-        err && typeof err === 'object' && 'message' in err
-          ? String((err as { message?: unknown }).message).toLowerCase()
-          : '';
-      setOtpChallenge((prev) => (prev ? { ...prev, verifying: false } : prev));
-      if (msg.includes('expired') || msg.includes('invalid') || msg.includes('token')) {
-        setErrorMsg('El código de 6 dígitos es incorrecto o venció. Pedí uno nuevo e intentá otra vez.');
-      } else {
-        setErrorMsg('No se pudo validar el código. Verificá los 6 dígitos e intentá nuevamente.');
-      }
     }
   };
 
@@ -289,22 +167,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
       if (mode === 'login') {
         const guard = await getLoginGuardStatus(cleanEmail);
         if (guard.requiresOtp && guard.lockedUntil) {
+          const lockMessage = `Cuenta bloqueada temporalmente por 5 minutos tras ${MAX_LOGIN_ATTEMPTS} intentos fallidos. Solicitá e ingresá un código de 6 dígitos enviado a tu correo para desbloquear.`;
           rememberLockedEmail(cleanEmail);
           setRemainingAttempts(0);
           setPassword('');
-          setOtpCode('');
-          setOtpChallenge({
+          setErrorMsg(lockMessage);
+          setOtpLock({
             email: cleanEmail,
             lockedUntil: guard.lockedUntil,
-            lockRemainingSec: guard.lockRemainingSec,
-            codeSent: false,
-            sending: false,
-            verifying: false,
-            cooldownSec: 0,
+            initialError: lockMessage,
           });
-          setErrorMsg(
-            `Cuenta bloqueada temporalmente por 5 minutos tras ${MAX_LOGIN_ATTEMPTS} intentos fallidos. Solicitá e ingresá un código de 6 dígitos enviado a tu correo para desbloquear.`
-          );
           return;
         }
 
@@ -343,21 +215,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
         if (mode === 'login') {
           const nextGuard = await recordFailedPasswordAttempt(cleanEmail);
           if (nextGuard.requiresOtp && nextGuard.lockedUntil) {
+            const lockMessage = `Superaste los ${MAX_LOGIN_ATTEMPTS} errores de contraseña. Bloqueamos el acceso por 5 minutos; pedí un código de 6 dígitos a tu correo para desbloquear antes.`;
             setRemainingAttempts(0);
             setPassword('');
-            setOtpCode('');
-            setOtpChallenge({
+            setErrorMsg(lockMessage);
+            setOtpLock({
               email: cleanEmail,
               lockedUntil: nextGuard.lockedUntil,
-              lockRemainingSec: nextGuard.lockRemainingSec,
-              codeSent: false,
-              sending: false,
-              verifying: false,
-              cooldownSec: 0,
+              initialError: lockMessage,
             });
-            setErrorMsg(
-              `Superaste los ${MAX_LOGIN_ATTEMPTS} errores de contraseña. Bloqueamos el acceso por 5 minutos; pedí un código de 6 dígitos a tu correo para desbloquear antes.`
-            );
           } else {
             setRemainingAttempts(nextGuard.remainingAttempts);
             setErrorMsg(
@@ -431,113 +297,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
         </div>
 
         <div className="flex flex-col justify-center p-8 sm:p-10">
-          {otpChallenge ? (
-            <div className="space-y-5">
-              <div>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">
-                    <KeyRound className="h-5 w-5" />
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-1.5 font-mono-num text-xs font-bold text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-200">
-                    <Clock className="h-3.5 w-3.5" />
-                    <span>Bloqueo: {formatLockCountdown(otpChallenge.lockRemainingSec)}</span>
-                  </span>
-                </div>
-                <h2 className="mt-3 text-xl font-bold text-slate-900 dark:text-white font-display">
-                  Acceso bloqueado temporalmente (5 min)
-                </h2>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                  Alcanzaste los {MAX_LOGIN_ATTEMPTS} intentos fallidos para{' '}
-                  <strong className="text-slate-800 dark:text-slate-200">{otpChallenge.email}</strong>.
-                  Esperá {formatLockCountdown(otpChallenge.lockRemainingSec)} o desbloqueá ahora mismo con un
-                  código de 6 dígitos enviado a tu correo.
-                </p>
-              </div>
-
-              {errorMsg && (
-                <div className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs font-medium text-red-700 dark:border-red-900/60 dark:bg-red-950/50 dark:text-red-300">
-                  {errorMsg}
-                </div>
-              )}
-
-              {infoMsg && (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs font-medium text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-200">
-                  {infoMsg}
-                </div>
-              )}
-
-              <button
-                type="button"
-                onClick={() => void handleSendOtpCode()}
-                disabled={otpChallenge.sending || otpChallenge.cooldownSec > 0}
-                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 text-sm font-semibold text-[#0072BB] transition hover:bg-sky-100 disabled:opacity-60 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-300 dark:hover:bg-sky-950/70"
-              >
-                <Send className="h-4 w-4" />
-                <span>
-                  {otpChallenge.sending
-                    ? 'Enviando código...'
-                    : otpChallenge.cooldownSec > 0
-                    ? `Reenviar código en ${otpChallenge.cooldownSec}s`
-                    : otpChallenge.codeSent
-                    ? 'Reenviar código de 6 dígitos'
-                    : 'Enviar código de 6 dígitos al correo'}
-                </span>
-              </button>
-
-              <form onSubmit={handleVerifyOtpCode} className="space-y-3.5">
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    Código de desbloqueo (6 dígitos)
-                  </label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]{6}"
-                    maxLength={6}
-                    autoComplete="one-time-code"
-                    value={otpCode}
-                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    placeholder="000000"
-                    className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-center font-mono text-xl font-bold tracking-[0.45em] text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={otpChallenge.verifying || otpCode.length !== 6}
-                  className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0072BB] px-4 text-sm font-semibold text-white transition hover:bg-[#005f9c] disabled:opacity-60"
-                >
-                  <ShieldCheck className="h-4 w-4" />
-                  <span>
-                    {otpChallenge.verifying ? 'Verificando...' : 'Verificar código y desbloquear'}
-                  </span>
-                </button>
-              </form>
-
-              <p className="rounded-xl bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
-                Tip: si tu correo llega con un enlace de acceso directo en vez del número de 6 dígitos,
-                podés tocar ese enlace para entrar igual o agregar{' '}
-                <code className="font-mono text-slate-700 dark:text-slate-200">{'{{ .Token }}'}</code> en la
-                plantilla Magic Link de Supabase.
-              </p>
-
-              <button
-                type="button"
-                onClick={() => {
-                  rememberLockedEmail(null);
-                  setOtpChallenge(null);
-                  setOtpCode('');
-                  setErrorMsg('');
-                  setInfoMsg('');
-                }}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
-              >
-                <ArrowLeft className="h-3.5 w-3.5" />
-                <span>Volver / Usar otro correo</span>
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-5">
+          <div className="space-y-5">
               <div>
                 <h2 className="text-xl font-bold text-slate-900 dark:text-white font-display">
                   {mode === 'login' ? 'Ingresar al sistema' : 'Crear cuenta de taller'}
@@ -699,9 +459,34 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
                 Cada taller mantiene sus órdenes, clientes, inventario y finanzas aislados bajo su cuenta.
               </p>
             </div>
-          )}
         </div>
       </div>
+
+      <VerificationCodeModal
+        open={Boolean(otpLock)}
+        email={otpLock?.email || ''}
+        lockedUntil={otpLock?.lockedUntil ?? null}
+        initialError={otpLock?.initialError}
+        onClose={() => {
+          rememberLockedEmail(null);
+          setOtpLock(null);
+        }}
+        onVerified={() => {
+          setOtpLock(null);
+          setRemainingAttempts(null);
+          setErrorMsg('');
+          setInfoMsg('');
+        }}
+        onLockExpired={(unlockedEmail) => {
+          rememberLockedEmail(null);
+          setOtpLock(null);
+          setRemainingAttempts(null);
+          setErrorMsg('');
+          setInfoMsg(
+            `El bloqueo temporal de 5 minutos para ${unlockedEmail} finalizó. Ya podés volver a intentar con tu contraseña.`
+          );
+        }}
+      />
     </div>
   );
 };

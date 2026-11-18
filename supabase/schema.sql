@@ -305,6 +305,30 @@ create policy "public_tickets_owner_delete" on public.public_tickets
   for delete to authenticated
   using (auth.uid() = owner_id);
 
+revoke all on table
+  public.workshop_profiles,
+  public.clients,
+  public.repairs,
+  public.public_tickets,
+  public.products,
+  public.tasks,
+  public.suppliers,
+  public.sales,
+  public.purchases
+from anon, public;
+
+grant select, insert, update, delete on table
+  public.workshop_profiles,
+  public.clients,
+  public.repairs,
+  public.public_tickets,
+  public.products,
+  public.tasks,
+  public.suppliers,
+  public.sales,
+  public.purchases
+to authenticated;
+
 create or replace function public.get_public_ticket_by_code(p_tracking_code text)
 returns table (
   id text,
@@ -327,6 +351,7 @@ returns table (
   updated_at timestamptz
 )
 language sql
+stable
 security definer
 set search_path = public, pg_temp
 as $$

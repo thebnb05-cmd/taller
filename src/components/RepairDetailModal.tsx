@@ -29,7 +29,7 @@ import {
 import {
   clampStr,
   deleteRow,
-  fetchPublicTicketByCode,
+  fetchSingleById,
   stripUndefined,
   updateRow,
   upsertRow,
@@ -545,7 +545,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       );
 
       if (repair.trackingCode) {
-        const ticket = await fetchPublicTicketByCode<{ id: string }>(repair.trackingCode);
+        const ticket = await fetchSingleById<{ id: string }>('public_tickets', repair.trackingCode);
         if (ticket) {
           await updateRow(
             'public_tickets',
@@ -620,7 +620,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
         updatedAt: nowIso,
       });
       if (repair.trackingCode) {
-        const ticket = await fetchPublicTicketByCode<{ id: string }>(repair.trackingCode);
+        const ticket = await fetchSingleById<{ id: string }>('public_tickets', repair.trackingCode);
         if (ticket) {
           await updateRow('public_tickets', repair.trackingCode, {
             workDetail: combinedWorkDetail,
@@ -810,7 +810,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       });
 
       if (repair.trackingCode) {
-        const ticket = await fetchPublicTicketByCode<{ id: string }>(repair.trackingCode);
+        const ticket = await fetchSingleById<{ id: string }>('public_tickets', repair.trackingCode);
         if (ticket) {
           await updateRow('public_tickets', repair.trackingCode, {
             deposit: budget,
@@ -891,7 +891,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       await deleteRow('repairs', repair.id);
 
       if (repair.trackingCode) {
-        const ticket = await fetchPublicTicketByCode<{ id: string }>(repair.trackingCode);
+        const ticket = await fetchSingleById<{ id: string }>('public_tickets', repair.trackingCode);
         if (ticket) {
           await deleteRow('public_tickets', repair.trackingCode);
         }

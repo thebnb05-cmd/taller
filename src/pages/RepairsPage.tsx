@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
 import { STATUS_META } from '../data/catalog';
-import { fetchPublicTicketByCode, stripUndefined, updateRow } from '../lib/db';
+import { fetchSingleById, stripUndefined, updateRow } from '../lib/db';
 import type { RepairRecord, RepairStatus, WorkshopProfile } from '../types/workshop';
 import { extractBatchRef } from '../utils/batchRef';
 import { convertFromBaseCurrency } from '../utils/currency';
@@ -243,7 +243,10 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
       );
 
       if (repair.trackingCode) {
-        const ticket = await fetchPublicTicketByCode<{ id: string }>(repair.trackingCode);
+        const ticket = await fetchSingleById<{ id: string }>(
+          'public_tickets',
+          repair.trackingCode
+        );
         if (ticket) {
           await updateRow(
             'public_tickets',

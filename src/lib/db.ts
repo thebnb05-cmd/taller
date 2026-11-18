@@ -7,10 +7,10 @@ import {
   stripPrototypeKeys,
 } from '../utils/validation';
 
-export const SUPABASE_URL =
+const SUPABASE_URL =
   import.meta.env.VITE_SUPABASE_URL || 'https://fjkxnvqqmhxfycqbkmqy.supabase.co';
 
-export const SUPABASE_ANON_KEY =
+const SUPABASE_ANON_KEY =
   import.meta.env.VITE_SUPABASE_ANON_KEY ||
   'sb_publishable_ZDUlk1JOyzUt-VpYIcnM2Q_5Vdqyyrz';
 
@@ -44,7 +44,7 @@ export enum OperationType {
   WRITE = 'write',
 }
 
-export interface DbErrorInfo {
+interface DbErrorInfo {
   error: string;
   operationType: OperationType;
   path: string | null;
@@ -108,7 +108,7 @@ export function generateDocId(_tableName?: string): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function toMillis(value: unknown): number {
+function toMillis(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string') {
     const parsed = Date.parse(value);
@@ -171,7 +171,7 @@ const NUMERIC_FIELDS = new Set([
   'logoScale',
 ]);
 
-export function toSnakeRecord(obj: Record<string, unknown>, keepNull = false): Record<string, unknown> {
+function toSnakeRecord(obj: Record<string, unknown>, keepNull = false): Record<string, unknown> {
   const cleanSource = stripPrototypeKeys(obj);
   const out: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(cleanSource)) {
@@ -183,7 +183,7 @@ export function toSnakeRecord(obj: Record<string, unknown>, keepNull = false): R
   return out;
 }
 
-export function fromDbRow<T>(row: Record<string, unknown>): T {
+function fromDbRow<T>(row: Record<string, unknown>): T {
   const out: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(stripPrototypeKeys(row))) {
     const camel = snakeToCamel(key);
@@ -202,7 +202,7 @@ export function fromDbRow<T>(row: Record<string, unknown>): T {
 // Local pub/sub so mutations inside this tab update active views immediately
 const tableListeners = new Map<TableName, Set<() => void>>();
 
-export function notifyTableChanged(table: TableName): void {
+function notifyTableChanged(table: TableName): void {
   const set = tableListeners.get(table);
   if (!set) return;
   for (const cb of set) {
@@ -264,10 +264,11 @@ export async function fetchOwnerRows<T>(table: TableName, ownerId: string): Prom
   if (ownerId !== authOwnerId) {
     await handleDbError(new Error('permission denied'), OperationType.LIST, table);
   }
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .eq('owner_id', authOwnerId);
+  let query = supabase.from(table).select('*').eq('owner_id', authOwnerId);
+  if (table === 'workshop_profiles') {
+    query = query.eq('id', authOwnerId);
+  }
+  const { data, error } = await query;
   if (error) {
     throw error;
   }
@@ -283,9 +284,6 @@ export async function fetchOwnerRows<T>(table: TableName, ownerId: string): Prom
 export async function fetchSingleById<T>(table: TableName, id: string): Promise<T | null> {
   assertValidTable(table);
   if (!isSafeId(id)) return null;
-  if (table === 'public_tickets') {
-    return fetchPublicTicketByCode<T>(id);
-  }
   const authOwnerId = await requireAuthenticatedOwnerId(OperationType.GET, `${table}/${id}`);
   if (table === 'workshop_profiles' && id !== authOwnerId) {
     await handleDbError(new Error('permission denied'), OperationType.GET, `${table}/${id}`);
@@ -330,13 +328,17 @@ export async function fetchPublicTicketByCode<T>(trackingCode: string): Promise<
     throw rpcRes.error;
   }
 
-  const { data, error } = await supabase
+  const authOwnerId = await getAuthenticatedOwnerId();
+  let query = supabase
     .from('public_tickets')
     .select(
       'id, repair_id, tracking_code, repair_code, business_name, business_phone, device_type, brand, model, status, progress, date_in, date_est, problem_summary, work_detail, price, deposit, updated_at'
     )
-    .eq('id', cleaned)
-    .maybeSingle();
+    .eq('id', cleaned);
+  if (authOwnerId && isSafeId(authOwnerId)) {
+    query = query.eq('owner_id', authOwnerId);
+  }
+  const { data, error } = await query.maybeSingle();
   if (error) {
     throw error;
   }
@@ -356,10 +358,10 @@ export async function upsertRow(
   if (typeof record.owner_id === 'string' && record.owner_id && record.owner_id !== authOwnerId) {
     await handleDbError(new Error('permission denied'), OperationType.WRITE, table);
   }
-  if (record.id !== undefined && !isSafeId(record.id)) {
+  if (!isSafeId(record.id)) {
     await handleDbError(new Error('invalid input syntax'), OperationType.WRITE, table);
   }
-  if (table === 'workshop_profiles' && record.id !== undefined && record.id !== authOwnerId) {
+  if (table === 'workshop_profiles' && record.id !== authOwnerId) {
     await handleDbError(new Error('permission denied'), OperationType.WRITE, table);
   }
   const scopedRecord: Record<string, unknown> = {
@@ -392,10 +394,10 @@ export async function insertRows(
       if (typeof r.owner_id === 'string' && r.owner_id && r.owner_id !== authOwnerId) {
         throw new Error('permission denied');
       }
-      if (r.id !== undefined && !isSafeId(r.id)) {
+      if (!isSafeId(r.id)) {
         throw new Error('invalid input syntax');
       }
-      if (table === 'workshop_profiles' && r.id !== undefined && r.id !== authOwnerId) {
+      if (table === 'workshop_profiles' && r.id !== authOwnerId) {
         throw new Error('permission denied');
       }
       const scopedRecord: Record<string, unknown> = {
