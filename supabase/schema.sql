@@ -329,7 +329,8 @@ grant select, insert, update, delete on table
   public.purchases
 to authenticated;
 
-create or replace function public.get_public_ticket_by_code(p_tracking_code text)
+drop function if exists public.get_public_ticket_by_code(text);
+create function public.get_public_ticket_by_code(p_tracking_code text)
 returns table (
   id text,
   repair_id text,
