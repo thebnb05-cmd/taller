@@ -687,8 +687,8 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
 
       {/* Main Layout */}
       <div className="lg:pl-64">
-        <header className="no-print sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur-md sm:h-16 sm:gap-4 sm:px-6 dark:border-slate-800 dark:bg-slate-900/90">
-          <div className="flex shrink-0 items-center gap-3">
+        <header className="no-print sticky top-0 z-20 flex h-14 items-center justify-between gap-2 border-b border-slate-200 bg-white/90 px-2.5 backdrop-blur-md sm:h-16 sm:gap-3 sm:px-4 lg:px-6 dark:border-slate-800 dark:bg-slate-900/90">
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             <div className="lg:hidden">
               <BrandMark
                 profile={profile}
@@ -712,42 +712,56 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
             onSelectProduct={(p) => setSelectedProductId(p.id)}
           />
 
-          <div data-tour="header-actions" className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-            {subscriptionRecord && (
-              <button
-                type="button"
-                data-tour="subscription-badge"
-                onClick={() => setShowSubscriptionModal(true)}
-                title={`${getPlanDisplayName(
-                  subscriptionRecord.payload.planId,
-                  subscriptionRecord.payload.isExemptAnnual
-                )} · ${subscriptionRemaining.detailLabel}`}
-                className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-2.5 text-xs font-semibold transition ${
-                  subscriptionRecord.payload.isExemptAnnual
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-200'
-                    : subscriptionRemaining.isExpired
-                      ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-950/50 dark:text-red-200'
-                      : subscriptionRemaining.days <= 5
-                        ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-200'
-                        : 'border-sky-200 bg-sky-50/80 text-[#0072BB] hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300'
-                }`}
-              >
-                <span className="hidden md:inline">
-                  {getPlanDisplayName(
+          <div data-tour="header-actions" className="flex shrink-0 items-center gap-1 sm:gap-1.5">
+            {subscriptionRecord && (() => {
+              const shortPlanLabel = subscriptionRemaining.isExpired
+                ? 'Vencida'
+                : subscriptionRecord.payload.isExemptAnnual ||
+                    subscriptionRecord.payload.planId === 'anual'
+                  ? 'Anual'
+                  : subscriptionRecord.payload.planId === 'semestral'
+                    ? '6 Meses'
+                    : subscriptionRecord.payload.planId === 'mensual'
+                      ? 'Mensual'
+                      : 'Prueba';
+
+              return (
+                <button
+                  type="button"
+                  data-tour="subscription-badge"
+                  onClick={() => setShowSubscriptionModal(true)}
+                  title={`${getPlanDisplayName(
                     subscriptionRecord.payload.planId,
                     subscriptionRecord.payload.isExemptAnnual
-                  )}
-                  {' · '}
-                </span>
-                <span className="font-mono-num">
-                  {subscriptionRemaining.isExpired
-                    ? 'Vencida'
-                    : subscriptionRemaining.days >= 1
-                      ? `Faltan ${subscriptionRemaining.days}d`
-                      : subscriptionRemaining.shortLabel}
-                </span>
-              </button>
-            )}
+                  )} · ${subscriptionRemaining.detailLabel}`}
+                  className={`hidden sm:inline-flex h-8 sm:h-9 shrink-0 items-center gap-1 rounded-xl border px-2 xl:px-2.5 text-[11px] xl:text-xs font-semibold transition whitespace-nowrap ${
+                    subscriptionRecord.payload.isExemptAnnual
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-200'
+                      : subscriptionRemaining.isExpired
+                        ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-950/50 dark:text-red-200'
+                        : subscriptionRemaining.days <= 5
+                          ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-200'
+                          : 'border-sky-200 bg-sky-50/80 text-[#0072BB] hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300'
+                  }`}
+                >
+                  <span className="xl:hidden">{shortPlanLabel}</span>
+                  <span className="hidden xl:inline">
+                    {getPlanDisplayName(
+                      subscriptionRecord.payload.planId,
+                      subscriptionRecord.payload.isExemptAnnual
+                    )}
+                    {' · '}
+                    <span className="font-mono-num">
+                      {subscriptionRemaining.isExpired
+                        ? 'Vencida'
+                        : subscriptionRemaining.days >= 1
+                          ? `Faltan ${subscriptionRemaining.days}d`
+                          : subscriptionRemaining.shortLabel}
+                    </span>
+                  </span>
+                </button>
+              );
+            })()}
             <PWAInstallButton />
 
             <button
@@ -755,7 +769,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               onClick={() => setShowSupportModal(true)}
               aria-label="Soporte y sugerencias"
               title="Soporte y sugerencias"
-              className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="hidden lg:flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <MessageSquarePlus className="h-4 w-4" />
             </button>
@@ -765,7 +779,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               onClick={() => setWelcomeTourOpen(true)}
               aria-label="Ver tour guiado"
               title="Tour guiado"
-              className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="hidden lg:flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <HelpCircle className="h-4 w-4" />
             </button>
@@ -780,11 +794,11 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               }}
               aria-label="Alertas de stock bajo"
               title="Stock bajo"
-              className="relative flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="relative flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <Bell className="h-4 w-4" />
               {lowStockCount > 0 && (
-                <span className="absolute right-1.5 top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 font-mono-num text-[10px] font-bold text-white">
+                <span className="absolute right-1 top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 font-mono-num text-[10px] font-bold text-white">
                   {lowStockCount}
                 </span>
               )}
@@ -795,7 +809,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               onClick={() => setShowBrandSettings(true)}
               aria-label="Configuración"
               title="Configuración"
-              className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <Settings className="h-4 w-4" />
             </button>
@@ -804,7 +818,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               type="button"
               onClick={onToggleDark}
               aria-label={darkMode ? 'Activar modo claro' : 'Activar modo oscuro'}
-              className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
@@ -818,10 +832,10 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               }}
               aria-label="Cerrar sesión"
               title="Salir"
-              className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              className="inline-flex h-9 sm:h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-2.5 lg:px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               <LogOut className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Salir</span>
+              <span className="hidden lg:inline">Salir</span>
             </button>
           </div>
         </header>
@@ -1103,6 +1117,52 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                 </button>
               )}
             </div>
+            <div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setMoreMenuOpen(false);
+                  setShowSupportModal(true);
+                }}
+                className="flex h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 dark:border-slate-800 dark:text-slate-200"
+              >
+                <MessageSquarePlus className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
+                <span>Soporte</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMoreMenuOpen(false);
+                  setWelcomeTourOpen(true);
+                }}
+                className="flex h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 dark:border-slate-800 dark:text-slate-200"
+              >
+                <HelpCircle className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
+                <span>Tour guiado</span>
+              </button>
+            </div>
+            {subscriptionRecord && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMoreMenuOpen(false);
+                  setShowSubscriptionModal(true);
+                }}
+                className="mt-2 flex w-full items-center justify-between rounded-xl border border-sky-200 bg-sky-50/70 px-3 py-2 text-left text-xs font-semibold text-[#0072BB] dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-300"
+              >
+                <span>
+                  {getPlanDisplayName(
+                    subscriptionRecord.payload.planId,
+                    subscriptionRecord.payload.isExemptAnnual
+                  )}
+                </span>
+                <span className="font-mono-num">
+                  {subscriptionRemaining.isExpired
+                    ? 'Vencida · Renovar'
+                    : subscriptionRemaining.shortLabel}
+                </span>
+              </button>
+            )}
           </div>
         </div>
       )}

@@ -472,8 +472,8 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
   };
 
   return (
-    <div ref={containerRef} className="relative flex flex-1 items-center justify-end sm:justify-center">
-      {/* Mobile trigger button */}
+    <div ref={containerRef} className="relative flex min-w-0 flex-1 items-center justify-center">
+      {/* Mobile trigger bar */}
       <button
         type="button"
         data-tour="global-search-mobile"
@@ -484,13 +484,14 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
         }}
         aria-label="Abrir búsqueda global"
         title="Buscar clientes, equipos o productos"
-        className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 sm:hidden dark:text-slate-300 dark:hover:bg-slate-800"
+        className="flex h-9 w-full min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-2.5 text-left text-xs text-slate-400 transition hover:bg-slate-100 sm:hidden dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-400 dark:hover:bg-slate-800"
       >
-        <Search className="h-4 w-4" />
+        <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+        <span className="truncate">{query || 'Buscar...'}</span>
       </button>
 
       {/* Desktop / Tablet inline search bar */}
-      <div data-tour="global-search" className="relative hidden w-full max-w-md sm:block">
+      <div data-tour="global-search" className="relative hidden min-w-0 w-full max-w-md sm:block">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <input
           ref={desktopInputRef}
@@ -504,7 +505,7 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
           onKeyDown={handleInputKeyDown}
           placeholder="Buscar clientes, equipos o productos..."
           aria-label="Búsqueda global entre clientes, equipos y productos"
-          className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-16 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#0072BB] focus:bg-white dark:border-slate-700 dark:bg-slate-800/70 dark:text-white dark:focus:border-sky-500 dark:focus:bg-slate-800"
+          className="h-9 sm:h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-9 lg:pr-16 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#0072BB] focus:bg-white dark:border-slate-700 dark:bg-slate-800/70 dark:text-white dark:focus:border-sky-500 dark:focus:bg-slate-800"
         />
         {query ? (
           <button
@@ -519,7 +520,7 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
             <X className="h-3.5 w-3.5" />
           </button>
         ) : (
-          <kbd className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 font-mono-num text-[10px] font-semibold text-slate-400 md:inline-block dark:border-slate-700 dark:bg-slate-900">
+          <kbd className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 font-mono-num text-[10px] font-semibold text-slate-400 lg:inline-block dark:border-slate-700 dark:bg-slate-900">
             Ctrl K
           </kbd>
         )}
