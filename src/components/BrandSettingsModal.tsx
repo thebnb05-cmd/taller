@@ -19,7 +19,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { clampStr, handleDbError, OperationType, stripUndefined, updateRow } from '../lib/db';
+import { clampStr, handleDbError, OperationType, stripUndefined, supabase, updateRow } from '../lib/db';
 import { DEFAULT_RECEIPT_TERMS } from '../data/catalog';
 import {
   CURRENCY_OPTIONS,
@@ -54,6 +54,7 @@ import {
 } from '../utils/validation';
 import type { WorkshopProfile } from '../types/workshop';
 import {
+  clearMercadoPagoConfigCache,
   diagnosePlatformMercadoPagoToken,
   testPlatformSubscriptionCheckout,
   verifyPlatformMercadoPagoToken,
@@ -61,6 +62,7 @@ import {
   type MpPlatformTokenVerificationResult,
   type MpTestCheckoutResult,
 } from '../utils/mercadoPago';
+import { clearTransferConfigCache } from '../utils/payment';
 import {
   getPlanDisplayName,
   getSubscriptionRemaining,
@@ -137,6 +139,10 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
   const [runningDiagnostic, setRunningDiagnostic] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [deleteAccountError, setDeleteAccountError] = useState('');
 
   const isPlatformAdmin = Boolean(
     subscriptionRecord?.payload?.isExemptAnnual ||
@@ -234,6 +240,10 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
     setLatestMpConfig(meta.mercadoPago);
     setTestCheckout(null);
     setDiagnosticResult(null);
+    setShowDeleteAccountConfirm(false);
+    setDeleteConfirmText('');
+    setDeleteAccountError('');
+    setDeletingAccount(false);
     if (isPlatformAdmin) {
       void runPlatformTokenCheck(false);
     }
@@ -413,6 +423,61 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
       void handleDbError(err, OperationType.UPDATE, path).catch(() => {});
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText.trim().toUpperCase() !== 'ELIMINAR' || deletingAccount) return;
+    setDeletingAccount(true);
+    setDeleteAccountError('');
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        setDeleteAccountError('Tu sesión expiró. Volvé a iniciar sesión e intentá de nuevo.');
+        setDeletingAccount(false);
+        return;
+      }
+
+      const res = await fetch('/api/account/delete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ confirmation: 'ELIMINAR' }),
+      });
+
+      const payload = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !payload.ok) {
+        setDeleteAccountError(
+          payload.error || 'No se pudo eliminar la cuenta en este momento.'
+        );
+        setDeletingAccount(false);
+        return;
+      }
+
+      const ownerKey = profile.ownerId || profile.id;
+      clearTransferConfigCache(ownerKey);
+      clearMercadoPagoConfigCache(ownerKey);
+      try {
+        window.localStorage.removeItem(`th3bnb_onboarding_v1_${ownerKey}`);
+        window.localStorage.removeItem(`th3bnb_mp_cfg_v1_${ownerKey}`);
+        window.localStorage.removeItem(`th3bnb_transfer_cfg_v1_${ownerKey}`);
+        window.localStorage.removeItem('th3bnb_install_ping_ts');
+        window.sessionStorage.removeItem('th3bnb_pending_sub_v1');
+      } catch {
+        // Ignorar restricciones de almacenamiento
+      }
+
+      await supabase.auth.signOut().catch(() => {});
+      notify('Tu cuenta y todos los datos del taller fueron eliminados.');
+      onClose();
+    } catch (err) {
+      setDeleteAccountError(
+        err instanceof Error ? err.message : 'Error de red al eliminar la cuenta.'
+      );
+      setDeletingAccount(false);
     }
   };
 
@@ -1337,17 +1402,116 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
           />
         </div>
 
+        <div className="rounded-2xl border border-red-200 bg-red-50/50 p-4 dark:border-red-900/60 dark:bg-red-950/20">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-2.5">
+              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-red-100 text-red-600 dark:bg-red-950/70 dark:text-red-400">
+                <Trash2 className="h-4 w-4" />
+              </span>
+              <div>
+                <h4 className="text-xs font-bold text-red-900 dark:text-red-200">
+                  Eliminar cuenta y todos los datos
+                </h4>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-red-800/85 dark:text-red-300/85">
+                  Borra de forma permanente tu usuario{(userEmail || profile.email) ? ` (${userEmail || profile.email})` : ''}, perfil del taller, reparaciones, clientes, inventario, ventas, compras, agenda, proveedores y links de seguimiento.
+                </p>
+              </div>
+            </div>
+
+            {!showDeleteAccountConfirm && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeleteAccountConfirm(true);
+                  setDeleteConfirmText('');
+                  setDeleteAccountError('');
+                }}
+                className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-red-300 bg-white px-3.5 text-xs font-semibold text-red-600 transition hover:bg-red-50 dark:border-red-800 dark:bg-slate-900 dark:text-red-400 dark:hover:bg-red-950/50"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Eliminar cuenta
+              </button>
+            )}
+          </div>
+
+          {showDeleteAccountConfirm && (
+            <div className="mt-3 space-y-3 border-t border-red-200/80 pt-3 dark:border-red-900/50">
+              <div className="flex items-start gap-2 text-xs text-red-800 dark:text-red-200">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                <span>
+                  Esta acción es <strong>irreversible</strong>. Para confirmar, escribí{' '}
+                  <strong className="font-mono">ELIMINAR</strong> debajo:
+                </span>
+              </div>
+
+              <input
+                type="text"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (deleteConfirmText.trim().toUpperCase() === 'ELIMINAR') {
+                      void handleDeleteAccount();
+                    }
+                  }
+                }}
+                placeholder="Escribí ELIMINAR"
+                disabled={deletingAccount}
+                className="h-10 w-full rounded-xl border border-red-300 bg-white px-3 font-mono text-xs font-semibold uppercase text-slate-900 outline-none focus:border-red-600 dark:border-red-800 dark:bg-slate-900 dark:text-white"
+              />
+
+              {deleteAccountError && (
+                <div className="rounded-xl border border-red-300 bg-white px-3 py-2 text-xs text-red-700 dark:border-red-800 dark:bg-slate-900 dark:text-red-300">
+                  {deleteAccountError}
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={deletingAccount}
+                  onClick={() => {
+                    setShowDeleteAccountConfirm(false);
+                    setDeleteConfirmText('');
+                    setDeleteAccountError('');
+                  }}
+                  className="h-9 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    deletingAccount || deleteConfirmText.trim().toUpperCase() !== 'ELIMINAR'
+                  }
+                  onClick={() => void handleDeleteAccount()}
+                  className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl bg-red-600 px-3 text-xs font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {deletingAccount ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" />
+                  )}
+                  {deletingAccount ? 'Eliminando todo...' : 'Confirmar eliminación'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
         <div className="flex gap-3 pt-2">
           <button
             type="button"
             onClick={onClose}
-            className="h-11 flex-1 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            disabled={deletingAccount}
+            className="h-11 flex-1 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
           >
             Cancelar
           </button>
           <button
             type="submit"
-            disabled={saving}
+            disabled={saving || deletingAccount}
             className="h-11 flex-1 rounded-xl bg-[#0072BB] text-sm font-semibold text-white transition hover:bg-[#005f9c] disabled:opacity-60"
           >
             {saving ? 'Guardando...' : 'Guardar configuración'}

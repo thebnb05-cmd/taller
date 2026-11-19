@@ -2755,6 +2755,109 @@ export async function handleApiRequest(
     }
   }
 
+  if (apiPath === '/api/account/delete') {
+    const user = await verifySupabaseSessionUser(req);
+    if (!user) {
+      sendJson(res, 401, { ok: false, error: 'Sesión inválida o expirada.' });
+      return true;
+    }
+
+    const confirmation = String(body.confirmation || '').trim().toUpperCase();
+    if (confirmation !== 'ELIMINAR') {
+      sendJson(res, 400, {
+        ok: false,
+        error: 'Escribí ELIMINAR para confirmar el borrado definitivo de la cuenta.',
+      });
+      return true;
+    }
+
+    const serviceKey = resolveServiceRoleKey();
+    if (!serviceKey) {
+      sendJson(res, 503, {
+        ok: false,
+        error:
+          'Falta configurar SUPABASE_SERVICE_ROLE_KEY en el servidor para eliminar cuentas definitivamente.',
+      });
+      return true;
+    }
+
+    const ownerTables = [
+      'public_tickets',
+      'repairs',
+      'clients',
+      'products',
+      'tasks',
+      'suppliers',
+      'sales',
+      'purchases',
+      'workshop_profiles',
+    ];
+
+    try {
+      for (const tableName of ownerTables) {
+        const delRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/${tableName}?owner_id=eq.${encodeURIComponent(user.userId)}`,
+          {
+            method: 'DELETE',
+            headers: buildSupabaseServiceHeaders(serviceKey, {
+              Prefer: 'return=minimal',
+            }),
+          }
+        );
+        if (!delRes.ok) {
+          const errTxt = await delRes.text().catch(() => '');
+          sendJson(res, 502, {
+            ok: false,
+            error: `No se pudieron borrar los datos de ${tableName}. ${errTxt.slice(0, 120)}`.trim(),
+          });
+          return true;
+        }
+      }
+
+      // Borrar vínculo de instalaciones PWA si la tabla existe (ignorar si no fue creada)
+      await fetch(
+        `${SUPABASE_URL}/rest/v1/app_installs?user_id=eq.${encodeURIComponent(user.userId)}`,
+        {
+          method: 'DELETE',
+          headers: buildSupabaseServiceHeaders(serviceKey, {
+            Prefer: 'return=minimal',
+          }),
+        }
+      ).catch(() => {});
+
+      const authDelRes = await fetch(
+        `${SUPABASE_URL}/auth/v1/admin/users/${encodeURIComponent(user.userId)}`,
+        {
+          method: 'DELETE',
+          headers: buildSupabaseServiceHeaders(serviceKey, {
+            'Content-Type': 'application/json',
+          }),
+        }
+      );
+
+      if (!authDelRes.ok && authDelRes.status !== 404) {
+        const authErr = await authDelRes.text().catch(() => '');
+        sendJson(res, 502, {
+          ok: false,
+          error: `Se borraron tus datos del taller, pero no se pudo eliminar el usuario de acceso. ${authErr.slice(0, 120)}`.trim(),
+        });
+        return true;
+      }
+
+      sendJson(res, 200, { ok: true, deleted: true });
+      return true;
+    } catch (err) {
+      sendJson(res, 502, {
+        ok: false,
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Error de red al eliminar la cuenta en Supabase.',
+      });
+      return true;
+    }
+  }
+
   sendJson(res, 404, { ok: false, error: 'Ruta de API no encontrada.' });
   return true;
 }
