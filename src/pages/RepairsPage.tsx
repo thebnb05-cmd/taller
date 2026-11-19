@@ -206,7 +206,9 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
         if (!q) return true;
         return (
           r.code.toLowerCase().includes(q) ||
+          (r.trackingCode || '').toLowerCase().includes(q) ||
           r.clientName.toLowerCase().includes(q) ||
+          (r.clientPhone || '').toLowerCase().includes(q) ||
           r.brand.toLowerCase().includes(q) ||
           r.model.toLowerCase().includes(q) ||
           (r.imei || '').toLowerCase().includes(q) ||
@@ -586,11 +588,21 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
                     ) : (
                       colRepairs.map((r) => {
                         const meta = getStatusMeta(r.status);
-                        const balance = Math.max(
-                          0,
-                          Number(r.price || 0) - Number(r.deposit || 0)
-                        );
+                        const balance =
+                          Math.round(
+                            Math.max(0, Number(r.price || 0) - Number(r.deposit || 0)) * 100
+                          ) / 100;
                         const paymentInfo = parsePaymentInfo(r);
+                        const hasForeignCurrency = Boolean(
+                          paymentInfo.currency &&
+                            paymentInfo.currency !== baseCurrency &&
+                            paymentInfo.rate &&
+                            paymentInfo.rate > 0
+                        );
+                        const foreignPrice =
+                          hasForeignCurrency && paymentInfo.rate
+                            ? convertFromBaseCurrency(Number(r.price || 0), paymentInfo.rate)
+                            : 0;
                         const batchRef = extractBatchRef(r.notes);
                         const rmeta = parseRepairPublicMeta(r.workDetail);
                         const warranty = computeWarrantyInfo(r);
@@ -686,10 +698,15 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
                             <div className="mt-2.5 space-y-1.5 border-t border-slate-100 pt-2 dark:border-slate-800">
                               <div className="flex items-center justify-between gap-2 text-[11px]">
                                 <span className="font-mono-num font-bold text-slate-900 dark:text-white">
-                                  {formatCurrency(r.price)}
+                                  {formatCurrency(r.price, baseCurrency)}
+                                  {hasForeignCurrency && paymentInfo.currency && (
+                                    <span className="ml-1 rounded bg-sky-50 px-1 py-0.5 text-[9px] font-semibold text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300">
+                                      {formatCurrency(foreignPrice, paymentInfo.currency)}
+                                    </span>
+                                  )}
                                   {balance > 0 && (
                                     <span className="ml-1 text-[10px] font-medium text-amber-600 dark:text-amber-400">
-                                      (Resta {formatCurrency(balance)})
+                                      (Resta {formatCurrency(balance, baseCurrency)})
                                     </span>
                                   )}
                                 </span>
@@ -783,7 +800,8 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
         <div className="grid gap-3 md:grid-cols-2">
           {filtered.map((r) => {
             const meta = getStatusMeta(r.status);
-            const balance = Math.max(0, Number(r.price || 0) - Number(r.deposit || 0));
+            const balance =
+              Math.round(Math.max(0, Number(r.price || 0) - Number(r.deposit || 0)) * 100) / 100;
             const batchRef = extractBatchRef(r.notes);
             const paymentInfo = parsePaymentInfo(r);
             const rmeta = parseRepairPublicMeta(r.workDetail);
@@ -880,7 +898,7 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
                       Progreso <strong className="font-mono-num">{r.progress}%</strong>
                     </span>
                     <span className="font-mono-num font-bold text-slate-900 dark:text-white">
-                      {formatCurrency(r.price)}
+                      {formatCurrency(r.price, baseCurrency)}
                       {hasForeignCurrency && paymentInfo.currency && (
                         <span className="ml-1.5 rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300">
                           {formatCurrency(foreignPrice, paymentInfo.currency)}
@@ -888,7 +906,7 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
                       )}
                       {balance > 0 && (
                         <span className="ml-1.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
-                          (Resta {formatCurrency(balance)})
+                          (Resta {formatCurrency(balance, baseCurrency)})
                         </span>
                       )}
                     </span>

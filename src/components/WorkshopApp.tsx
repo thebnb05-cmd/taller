@@ -982,6 +982,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               {page === 'purchases' && (
                 <PurchasesPage
                   purchases={purchases}
+                  products={products}
                   profile={profile}
                   onNewPurchase={() => setShowNewPurchase(true)}
                 />

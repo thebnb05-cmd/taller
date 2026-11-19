@@ -110,9 +110,9 @@ export const HomePage: React.FC<HomePageProps> = ({
     };
 
     const monthlyRepairs = repairs.filter((r) => isCurrentMonth(r.createdAt, r.dateIn));
-    const monthlySales = sales.filter((s) => isCurrentMonth(s.createdAt));
-    const prevMonthSales = sales.filter((s) => isPrevMonth(s.createdAt));
-    const monthlyPurchases = purchases.filter((p) => isCurrentMonth(p.createdAt));
+    const monthlySales = sales.filter((s) => isCurrentMonth(s.createdAt, s.dueDate));
+    const prevMonthSales = sales.filter((s) => isPrevMonth(s.createdAt, s.dueDate));
+    const monthlyPurchases = purchases.filter((p) => isCurrentMonth(p.createdAt, p.dueDate));
 
     const monthlyRepairIncome = monthlyRepairs.reduce((sum, r) => sum + Number(r.price || 0), 0);
     const monthlySalesTotal = monthlySales.reduce((sum, s) => sum + Number(s.amount || 0), 0);
@@ -134,7 +134,7 @@ export const HomePage: React.FC<HomePageProps> = ({
       { key: 3, label: 'Sem 4', rangeLabel: 'Días 22–31', amount: 0, count: 0 },
     ];
     monthlySales.forEach((s) => {
-      const d = new Date(s.createdAt || Date.now());
+      const d = resolveDate(s.createdAt, s.dueDate);
       const dom = d.getDate();
       const idx = dom <= 7 ? 0 : dom <= 14 ? 1 : dom <= 21 ? 2 : 3;
       salesWeeklyBuckets[idx].amount += Number(s.amount || 0);

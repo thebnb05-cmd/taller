@@ -573,6 +573,57 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
         }
       }
 
+      const prevDeposit = Math.max(0, Number(repair.deposit || 0));
+      let nextCheckoutState = serializeCheckoutAndSignature(
+        checkoutState,
+        parseCheckoutAndSignature(repair.checkoutState).signatureDataUrl,
+        repair.checkoutState
+      );
+      if (Math.abs(advance - prevDeposit) > 0.01) {
+        const existingLedger = parseRepairPaymentLedger(nextCheckoutState);
+        const fallbackMethod: PaymentMethod = paymentInfo.method || 'efectivo';
+        if (advance <= 0.001) {
+          nextCheckoutState = mergeCheckoutPaymentLedger(nextCheckoutState, []);
+        } else if (advance > prevDeposit + 0.01) {
+          const deltaAmt = Math.round((advance - prevDeposit) * 100) / 100;
+          nextCheckoutState = mergeCheckoutPaymentLedger(nextCheckoutState, [
+            ...existingLedger,
+            {
+              id: createRepairMetaId('pay'),
+              amount: deltaAmt,
+              method: fallbackMethod,
+              date: nowIso,
+              note: prevDeposit > 0 ? 'Ajuste de seña / pago' : 'Seña registrada en edición',
+            },
+          ]);
+        } else {
+          const trimmed: typeof existingLedger = [];
+          let remaining = Math.round(advance * 100) / 100;
+          for (const entry of existingLedger) {
+            if (remaining <= 0.001) break;
+            const take = Math.min(remaining, Math.max(0, Number(entry.amount || 0)));
+            if (take > 0.001) {
+              trimmed.push({ ...entry, amount: Math.round(take * 100) / 100 });
+              remaining = Math.round((remaining - take) * 100) / 100;
+            }
+          }
+          nextCheckoutState = mergeCheckoutPaymentLedger(
+            nextCheckoutState,
+            trimmed.length > 0
+              ? trimmed
+              : [
+                  {
+                    id: createRepairMetaId('pay'),
+                    amount: Math.round(advance * 100) / 100,
+                    method: fallbackMethod,
+                    date: nowIso,
+                    note: 'Ajuste de seña / pago',
+                  },
+                ]
+          );
+        }
+      }
+
       await updateRow(
         'repairs',
         repair.id,
@@ -592,11 +643,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
           partIds: nextPartIds,
           partNames: nextPartNames,
           workDetail: combinedWorkDetail,
-          checkoutState: serializeCheckoutAndSignature(
-            checkoutState,
-            parseCheckoutAndSignature(repair.checkoutState).signatureDataUrl,
-            repair.checkoutState
-          ),
+          checkoutState: nextCheckoutState,
           physicalCheck,
           functionalCheck,
           updatedAt: nowIso,

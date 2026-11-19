@@ -40,7 +40,8 @@ import {
 } from '../utils/formatters';
 import { parsePaymentInfo } from '../utils/payment';
 import { downloadInventorySummaryPdf, downloadSalesSummaryPdf } from '../utils/pdfReport';
-import { parseSalePaymentInfo } from '../utils/saleMeta';
+import { parseRepairPaymentLedger } from '../utils/repairMeta';
+import { parseSaleDetails, parseSalePaymentInfo } from '../utils/saleMeta';
 
 interface ReportsPageProps {
   profile?: WorkshopProfile | null;
@@ -305,15 +306,52 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
     rFiltered.forEach((r) => {
       const collected = Math.min(Number(r.price || 0) || Number(r.deposit || 0), Number(r.deposit || 0));
       if (collected <= 0) return;
-      const method = parsePaymentInfo(r).method;
-      if (method) payTotals[method] += collected;
-      else payTotals.sin_metodo += collected;
+      const ledger = parseRepairPaymentLedger(r.checkoutState);
+      if (ledger.length > 0) {
+        let allocated = 0;
+        for (const entry of ledger) {
+          if (allocated >= collected) break;
+          const take = Math.min(collected - allocated, Math.max(0, Number(entry.amount || 0)));
+          if (take > 0) {
+            payTotals[entry.method] += take;
+            allocated += take;
+          }
+        }
+        const remainder = Math.round((collected - allocated) * 100) / 100;
+        if (remainder > 0.01) {
+          const fallbackMethod = parsePaymentInfo(r).method;
+          if (fallbackMethod) payTotals[fallbackMethod] += remainder;
+          else payTotals.sin_metodo += remainder;
+        }
+      } else {
+        const method = parsePaymentInfo(r).method;
+        if (method) payTotals[method] += collected;
+        else payTotals.sin_metodo += collected;
+      }
     });
     sFiltered.forEach((s) => {
       const info = parseSalePaymentInfo(s);
       if (info.deposit <= 0) return;
-      if (info.method) payTotals[info.method] += info.deposit;
-      else payTotals.sin_metodo += info.deposit;
+      const details = parseSaleDetails(s);
+      if (details.payments.length > 0) {
+        let allocated = 0;
+        for (const entry of details.payments) {
+          if (allocated >= info.deposit) break;
+          const take = Math.min(info.deposit - allocated, Math.max(0, Number(entry.amount || 0)));
+          if (take > 0) {
+            payTotals[entry.method] += take;
+            allocated += take;
+          }
+        }
+        const remainder = Math.round((info.deposit - allocated) * 100) / 100;
+        if (remainder > 0.01) {
+          if (info.method) payTotals[info.method] += remainder;
+          else payTotals.sin_metodo += remainder;
+        }
+      } else {
+        if (info.method) payTotals[info.method] += info.deposit;
+        else payTotals.sin_metodo += info.deposit;
+      }
     });
 
     const paymentBreakdown = [

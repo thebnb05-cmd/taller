@@ -83,7 +83,6 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
       const startMs = Date.parse(activeShift.openedAt) || Date.now();
       return {
         startMs,
-        endMs: Date.now(),
         openingCash: activeShift.openingCash,
         movements: activeShift.movements,
       };
@@ -92,7 +91,6 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
     todayStart.setHours(0, 0, 0, 0);
     return {
       startMs: todayStart.getTime(),
-      endMs: Date.now(),
       openingCash: 0,
       movements: [] as CashMovement[],
     };
@@ -102,7 +100,7 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
     () =>
       computeShiftFinancials({
         startMs: windowBounds.startMs,
-        endMs: windowBounds.endMs,
+        endMs: Date.now(),
         openingCash: windowBounds.openingCash,
         movements: windowBounds.movements,
         sales,
@@ -110,6 +108,25 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
       }),
     [windowBounds, sales, repairs]
   );
+
+  const manualCashStats = useMemo(() => {
+    let cashIn = 0;
+    let cashOut = 0;
+    for (const m of windowBounds.movements) {
+      if (m.method !== 'efectivo') continue;
+      if (m.type === 'ingreso') cashIn += m.amount;
+      else cashOut += m.amount;
+    }
+    const cashCollections = Math.max(
+      0,
+      Math.round((financials.totalsByMethod.efectivo - cashIn) * 100) / 100
+    );
+    return {
+      cashIn: Math.round(cashIn * 100) / 100,
+      cashOut: Math.round(cashOut * 100) / 100,
+      cashCollections,
+    };
+  }, [windowBounds.movements, financials.totalsByMethod.efectivo]);
 
   const [showOpenModal, setShowOpenModal] = useState(false);
   const [openingCashInput, setOpeningCashInput] = useState('0');
@@ -181,7 +198,7 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
     }
 
     const mv: CashMovement = {
-      id: `mv-${Date.now().toString(36)}`,
+      id: `mv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       type: movementType,
       amount: Math.round(cleanAmt * 100) / 100,
       method: movementMethod,
@@ -703,11 +720,27 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
               </span>
             </div>
             <div className="flex justify-between text-slate-600 dark:text-slate-300">
-              <span>Cobros en efectivo</span>
+              <span>Cobros en efectivo (ventas y reparaciones)</span>
               <span className="font-mono-num font-semibold text-emerald-600 dark:text-emerald-400">
-                +{formatCurrency(financials.totalsByMethod.efectivo, baseCurrency)}
+                +{formatCurrency(manualCashStats.cashCollections, baseCurrency)}
               </span>
             </div>
+            {manualCashStats.cashIn > 0 && (
+              <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                <span>Ingresos manuales en efectivo</span>
+                <span className="font-mono-num font-semibold text-emerald-600 dark:text-emerald-400">
+                  +{formatCurrency(manualCashStats.cashIn, baseCurrency)}
+                </span>
+              </div>
+            )}
+            {manualCashStats.cashOut > 0 && (
+              <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                <span>Retiros / egresos en efectivo</span>
+                <span className="font-mono-num font-semibold text-rose-600 dark:text-rose-400">
+                  -{formatCurrency(manualCashStats.cashOut, baseCurrency)}
+                </span>
+              </div>
+            )}
             <div className="flex justify-between border-t border-slate-200 pt-2 text-sm font-bold text-slate-900 dark:border-slate-700 dark:text-white">
               <span>Efectivo esperado en cajón</span>
               <span className="font-mono-num">

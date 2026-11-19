@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Download, Plus, Search, Trash2, X } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
 import { deleteRow, updateRow } from '../lib/db';
-import type { PurchaseRecord, WorkshopProfile } from '../types/workshop';
+import type { ProductRecord, PurchaseRecord, WorkshopProfile } from '../types/workshop';
 import { downloadCsvFile } from '../utils/csvExport';
 import { convertFromBaseCurrency } from '../utils/currency';
 import {
@@ -22,6 +22,7 @@ import { parseWorkshopMeta } from '../utils/workshopMeta';
 
 interface PurchasesPageProps {
   purchases: PurchaseRecord[];
+  products?: ProductRecord[];
   profile?: WorkshopProfile | null;
   onNewPurchase: () => void;
 }
@@ -31,6 +32,7 @@ type CategoryFilter = 'all' | PurchaseCategory;
 
 export const PurchasesPage: React.FC<PurchasesPageProps> = ({
   purchases,
+  products = [],
   profile,
   onNewPurchase,
 }) => {
@@ -97,9 +99,27 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
   const deletePurchase = async (p: PurchaseRecord) => {
     setBusyId(p.id);
     try {
+      const info = parsePurchaseInfo(p);
       await deleteRow('purchases', p.id);
+
+      let revertedStock = false;
+      for (const line of info.stockItems) {
+        if (!line.productId || line.qty <= 0) continue;
+        const matched = products.find((prod) => prod.id === line.productId);
+        if (matched && matched.trackStock) {
+          revertedStock = true;
+          await updateRow('products', matched.id, {
+            stock: Math.max(0, Number(matched.stock || 0) - line.qty),
+          });
+        }
+      }
+
       setConfirmDeleteId(null);
-      notify('Compra / gasto eliminado.');
+      notify(
+        revertedStock
+          ? 'Compra eliminada y stock ingresado revertido en inventario.'
+          : 'Compra / gasto eliminado.'
+      );
     } catch (err) {
       notify(sanitizeDbErrorMessage(err, 'No se pudo eliminar la compra.'), 'error');
     } finally {
@@ -174,19 +194,19 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
       <div className="grid grid-cols-3 gap-3">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="font-mono-num text-xl font-bold text-slate-900 sm:text-2xl dark:text-white">
-            {formatCompactCurrency(total)}
+            {formatCompactCurrency(total, baseCurrency)}
           </div>
           <div className="text-xs text-slate-500">Total compras</div>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="font-mono-num text-xl font-bold text-amber-600 sm:text-2xl dark:text-amber-400">
-            {formatCompactCurrency(pending)}
+            {formatCompactCurrency(pending, baseCurrency)}
           </div>
           <div className="text-xs text-slate-500">Pendiente</div>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="font-mono-num text-xl font-bold text-emerald-600 sm:text-2xl dark:text-emerald-400">
-            {formatCompactCurrency(paid)}
+            {formatCompactCurrency(paid, baseCurrency)}
           </div>
           <div className="text-xs text-slate-500">Pagado</div>
         </div>
@@ -319,7 +339,7 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
 
                 <div className="flex items-center gap-2">
                   <span className="font-mono-num text-sm font-bold text-slate-900 dark:text-white">
-                    {formatCurrency(p.amount)}
+                    {formatCurrency(p.amount, baseCurrency)}
                   </span>
                   <button
                     type="button"

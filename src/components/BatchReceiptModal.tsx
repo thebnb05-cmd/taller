@@ -235,7 +235,11 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
         repairs.map((r) => {
           const parsed = parseCheckoutAndSignature(r.checkoutState);
           return updateRow('repairs', r.id, {
-            checkoutState: serializeCheckoutAndSignature(parsed.text, nextSignatureUrl),
+            checkoutState: serializeCheckoutAndSignature(
+              parsed.text,
+              nextSignatureUrl,
+              r.checkoutState
+            ),
             updatedAt: nowIso,
           });
         })

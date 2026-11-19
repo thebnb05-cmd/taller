@@ -10,6 +10,7 @@ import {
 import type { ProductRecord, SupplierRecord, WorkshopProfile } from '../types/workshop';
 import {
   convertBetweenCurrencies,
+  convertFromBaseCurrency,
   convertToBaseCurrency,
   getCurrencyOption,
   getCurrencyRateFromBase,
@@ -110,18 +111,28 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
   const handleCurrencyChange = (nextRaw: string) => {
     const nextCode = sanitizeCurrencyCode(nextRaw);
     if (nextCode === selectedCurrency) return;
-    if (amount.trim() && Number(amount) > 0) {
-      const converted = roundCurrencyValue(
+    const convertVal = (val: number) =>
+      roundCurrencyValue(
         convertBetweenCurrencies(
-          Number(amount),
+          val,
           selectedCurrency,
           nextCode,
           baseCurrency,
           secondaryCurrencies
         )
       );
-      setAmount(String(converted));
+    if (amount.trim() && Number(amount) > 0) {
+      setAmount(String(convertVal(Number(amount))));
     }
+    if (pickedCost.trim() && Number(pickedCost) > 0) {
+      setPickedCost(String(convertVal(Number(pickedCost))));
+    }
+    setStockLines((prev) =>
+      prev.map((l) => ({
+        ...l,
+        unitCost: l.unitCost > 0 ? convertVal(l.unitCost) : l.unitCost,
+      }))
+    );
     setSelectedCurrency(nextCode);
   };
 
@@ -132,7 +143,13 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
       return;
     }
     const qty = Math.max(1, Math.round(parseSafePositiveNumber(pickedQty, 1)));
-    const unitCost = parseSafePositiveNumber(pickedCost, prod.cost || 0);
+    const fallbackCostDisplay =
+      prod.cost > 0
+        ? isSecondaryCurrency
+          ? roundCurrencyValue(convertFromBaseCurrency(prod.cost, activeRate))
+          : prod.cost
+        : 0;
+    const unitCost = parseSafePositiveNumber(pickedCost, fallbackCostDisplay);
 
     const nextLines = [...stockLines];
     const existingIdx = nextLines.findIndex((l) => l.productId === prod.id);
@@ -405,7 +422,14 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
                     const id = e.target.value;
                     setPickedProductId(id);
                     const p = products.find((item) => item.id === id);
-                    if (p && p.cost > 0) setPickedCost(String(p.cost));
+                    if (p && p.cost > 0) {
+                      const costDisplay = isSecondaryCurrency
+                        ? roundCurrencyValue(convertFromBaseCurrency(p.cost, activeRate))
+                        : p.cost;
+                      setPickedCost(String(costDisplay));
+                    } else {
+                      setPickedCost('');
+                    }
                   }}
                   className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                 >

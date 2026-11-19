@@ -278,7 +278,7 @@ export const PAGE_GUIDES: Record<Exclude<PageId, 'admin_taller'>, ContextualGuid
       },
       {
         id: 'cash_auto_movements',
-        text: 'Los cobros de Ventas, señas/pagos de Reparaciones y compras en efectivo se suman automáticamente por medio de pago.',
+        text: 'Los cobros de Ventas y las señas/pagos de Reparaciones se suman automáticamente por medio de pago.',
       },
       {
         id: 'cash_manual_entries',

@@ -903,11 +903,13 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     const prevDepositBase = editSale ? parseSalePaymentInfo(editSale).deposit : 0;
     let nextPayments = [...existingPayments];
     const nowIso = new Date().toISOString();
+    const makePayId = () =>
+      `sp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     if (!editSale) {
       if (cleanDeposit > 0) {
         nextPayments = [
           {
-            id: `sp-${Date.now().toString(36)}`,
+            id: makePayId(),
             amount: cleanDeposit,
             method: paymentMethod,
             date: nowIso,
@@ -915,14 +917,39 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           },
         ];
       }
+    } else if (cleanDeposit <= 0.001) {
+      nextPayments = [];
     } else if (cleanDeposit > prevDepositBase + 0.01) {
       nextPayments.push({
-        id: `sp-${Date.now().toString(36)}`,
+        id: makePayId(),
         amount: roundCurrencyValue(cleanDeposit - prevDepositBase),
         method: paymentMethod,
         date: nowIso,
         note: 'Actualización de cobro',
       });
+    } else if (cleanDeposit < prevDepositBase - 0.01) {
+      const trimmed: SalePaymentEntry[] = [];
+      let remaining = cleanDeposit;
+      for (const entry of nextPayments) {
+        if (remaining <= 0.001) break;
+        const take = Math.min(remaining, Math.max(0, Number(entry.amount || 0)));
+        if (take > 0.001) {
+          trimmed.push({ ...entry, amount: roundCurrencyValue(take) });
+          remaining = roundCurrencyValue(remaining - take);
+        }
+      }
+      nextPayments =
+        trimmed.length > 0
+          ? trimmed
+          : [
+              {
+                id: makePayId(),
+                amount: cleanDeposit,
+                method: paymentMethod,
+                date: nowIso,
+                note: 'Ajuste de cobro',
+              },
+            ];
     }
 
     const serializedStatus = serializeSaleStatus({

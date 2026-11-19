@@ -130,15 +130,16 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       status: 'cobrado' | 'pendiente';
       method: PaymentMethod;
       deposit: number;
+      clearPayments?: boolean;
       appendPayment?: { amount: number; method: PaymentMethod; note?: string };
     }
   ) => {
     const info = parseSalePaymentInfo(s);
     const details = parseSaleDetails(s);
-    const payments = [...details.payments];
-    if (overrides.appendPayment && overrides.appendPayment.amount > 0) {
+    const payments = overrides.clearPayments ? [] : [...details.payments];
+    if (!overrides.clearPayments && overrides.appendPayment && overrides.appendPayment.amount > 0) {
       payments.push({
-        id: `sp-${Date.now().toString(36)}`,
+        id: `sp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
         amount: Math.round(overrides.appendPayment.amount * 100) / 100,
         method: overrides.appendPayment.method,
         date: new Date().toISOString(),
@@ -250,6 +251,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       status: info.isPaid ? 'pendiente' : 'cobrado',
       method: info.method || 'efectivo',
       deposit: info.isPaid ? 0 : totalSale,
+      clearPayments: info.isPaid,
       appendPayment:
         !info.isPaid && diff > 0
           ? {
@@ -394,19 +396,19 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       <div className="grid grid-cols-3 gap-3">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="font-mono-num text-xl font-bold text-slate-900 sm:text-2xl dark:text-white">
-            {formatCompactCurrency(total)}
+            {formatCompactCurrency(total, baseCurrency)}
           </div>
           <div className="text-xs text-slate-500">Total ventas</div>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="font-mono-num text-xl font-bold text-amber-600 sm:text-2xl dark:text-amber-400">
-            {formatCompactCurrency(pending)}
+            {formatCompactCurrency(pending, baseCurrency)}
           </div>
           <div className="text-xs text-slate-500">Pendiente</div>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="font-mono-num text-xl font-bold text-emerald-600 sm:text-2xl dark:text-emerald-400">
-            {formatCompactCurrency(collected)}
+            {formatCompactCurrency(collected, baseCurrency)}
           </div>
           <div className="text-xs text-slate-500">Cobrado</div>
         </div>
@@ -563,12 +565,12 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500 dark:text-slate-400">
                         {details.discountAmount > 0 && (
                           <span className="text-emerald-600 dark:text-emerald-400">
-                            Desc: -{formatCurrency(details.discountAmount)}
+                            Desc: -{formatCurrency(details.discountAmount, baseCurrency)}
                           </span>
                         )}
                         {details.surchargeAmount > 0 && (
                           <span className="text-amber-600 dark:text-amber-400">
-                            Recargo: +{formatCurrency(details.surchargeAmount)}
+                            Recargo: +{formatCurrency(details.surchargeAmount, baseCurrency)}
                           </span>
                         )}
                         {details.note && <span className="italic">{details.note}</span>}
@@ -579,11 +581,11 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                       <div className="mt-0.5 text-[11px] font-medium text-slate-600 dark:text-slate-300">
                         Abonado:{' '}
                         <span className="font-mono-num font-semibold text-emerald-600 dark:text-emerald-400">
-                          {formatCurrency(info.deposit)}
+                          {formatCurrency(info.deposit, baseCurrency)}
                         </span>{' '}
                         · Saldo:{' '}
                         <span className="font-mono-num font-semibold text-amber-600 dark:text-amber-400">
-                          {formatCurrency(info.pending)}
+                          {formatCurrency(info.pending, baseCurrency)}
                         </span>
                       </div>
                     )}
@@ -591,7 +593,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
 
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="mr-1 font-mono-num text-sm font-bold text-slate-900 dark:text-white">
-                      {formatCurrency(s.amount)}
+                      {formatCurrency(s.amount, baseCurrency)}
                     </span>
 
                     {!info.isPaid && (
