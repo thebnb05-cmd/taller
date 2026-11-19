@@ -1,5 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, ChevronLeft, Coins, Layers, Plus, Trash2, UserCheck } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  ChevronLeft,
+  Coins,
+  Layers,
+  Plus,
+  Trash2,
+  UserCheck,
+} from 'lucide-react';
 import {
   clampStr,
   generateDocId,
@@ -38,7 +47,11 @@ import {
   generateTrackingCode,
   todayISO,
 } from '../utils/formatters';
-import { serializeRepairPaymentStatus } from '../utils/payment';
+import {
+  PAYMENT_METHOD_LABELS,
+  serializeRepairPaymentStatus,
+  type PaymentMethod,
+} from '../utils/payment';
 import {
   appendTimelineEntry,
   createRepairMetaId,
@@ -99,6 +112,7 @@ interface DraftRepairItem {
   selectedPartIds: string[];
   budget: number;
   deposit: number;
+  depositMethod: PaymentMethod;
   currency: CurrencyCode;
   rate: number;
   status: RepairStatus;
@@ -421,6 +435,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   const [selectedPartIds, setSelectedPartIds] = useState<string[]>([]);
   const [price, setPrice] = useState('');
   const [deposit, setDeposit] = useState('');
+  const [depositMethod, setDepositMethod] = useState<PaymentMethod>('efectivo');
   const [status, setStatus] = useState<RepairStatus>('recibido');
   const [technician, setTechnician] = useState('');
   const [warrantyDays, setWarrantyDays] = useState<number>(0);
@@ -464,6 +479,17 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     [isSecondaryCurrency, selectedPartsTotalBase, activeRate]
   );
 
+  const selectedOutOfStockParts = useMemo(
+    () =>
+      spareParts.filter(
+        (p) =>
+          selectedPartIds.includes(p.id) &&
+          Boolean(p.trackStock) &&
+          Number(p.stock || 0) <= 0
+      ),
+    [spareParts, selectedPartIds]
+  );
+
   useEffect(() => {
     if (!open) return;
     setSelectedCurrency(baseCurrency);
@@ -471,6 +497,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     setSelectedPartIds([]);
     setPrice('');
     setDeposit('');
+    setDepositMethod('efectivo');
     setStatus('recibido');
     setTechnician('');
     setWarrantyDays(0);
@@ -589,6 +616,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     setSelectedPartIds([]);
     setPrice('');
     setDeposit('');
+    setDepositMethod('efectivo');
     setSelectedCurrency(baseCurrency);
     setStatus('recibido');
     setTechnician('');
@@ -768,6 +796,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
       selectedPartIds: [...selectedPartIds],
       budget: baseBudget,
       deposit: baseDeposit,
+      depositMethod,
       currency: selectedCurrency,
       rate: activeRate,
       status,
@@ -893,6 +922,10 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
         const useSecondaryForItem = item.currency !== baseCurrency && item.rate !== 1;
         const paymentStatus = serializeRepairPaymentStatus({
           base: basePaymentStatus,
+          method:
+            basePaymentStatus === 'pagado' || item.deposit > 0
+              ? item.depositMethod || 'efectivo'
+              : null,
           currency: useSecondaryForItem ? item.currency : undefined,
           rate: useSecondaryForItem ? item.rate : undefined,
           technician: item.technician || undefined,
@@ -929,7 +962,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                 {
                   id: createRepairMetaId('pay'),
                   amount: item.deposit,
-                  method: 'efectivo',
+                  method: item.depositMethod || 'efectivo',
                   date: nowIso,
                   note: 'Seña inicial al ingreso',
                 },
@@ -1846,8 +1879,8 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
             )}
 
             {spareParts.length > 0 && (
-              <div>
-                <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
                   <span>Repuestos asociados del inventario</span>
                   {selectedPartIds.length > 0 && (
                     <span className="font-mono-num text-[#0072BB] dark:text-sky-300">
@@ -1857,26 +1890,52 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                     </span>
                   )}
                 </div>
-                <div className="grid max-h-36 gap-2 overflow-y-auto rounded-xl border border-slate-200 p-2.5 sm:grid-cols-2 dark:border-slate-800">
+                <div className="grid max-h-40 gap-2 overflow-y-auto rounded-xl border border-slate-200 p-2.5 sm:grid-cols-2 dark:border-slate-800">
                   {spareParts.map((part) => {
                     const checked = selectedPartIds.includes(part.id);
                     const partDisplayPrice = isSecondaryCurrency
                       ? Math.round(convertFromBaseCurrency(Number(part.price || 0), activeRate) * 100) /
                         100
                       : Number(part.price || 0);
+                    const outOfStock = Boolean(part.trackStock && Number(part.stock || 0) <= 0);
+                    const lowStock = Boolean(
+                      part.trackStock &&
+                        !outOfStock &&
+                        Number(part.minStock || 0) > 0 &&
+                        Number(part.stock || 0) <= Number(part.minStock || 0)
+                    );
                     return (
                       <button
                         key={part.id}
                         type="button"
                         onClick={() => togglePart(part)}
-                        className={`flex items-center justify-between rounded-lg border px-3 py-2 text-left text-xs transition ${
+                        className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-xs transition ${
                           checked
                             ? 'border-[#0072BB] bg-sky-50 text-[#0072BB] dark:border-sky-400 dark:bg-sky-950/40 dark:text-sky-300'
                             : 'border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800'
                         }`}
                       >
-                        <span className="truncate font-medium">{part.name}</span>
-                        <span className="ml-2 flex shrink-0 items-center gap-1.5 font-mono-num">
+                        <div className="min-w-0">
+                          <div className="truncate font-medium">{part.name}</div>
+                          <div
+                            className={`text-[10px] ${
+                              outOfStock
+                                ? 'font-semibold text-red-600 dark:text-red-400'
+                                : lowStock
+                                  ? 'font-semibold text-amber-600 dark:text-amber-400'
+                                  : 'text-slate-500 dark:text-slate-400'
+                            }`}
+                          >
+                            {part.trackStock
+                              ? outOfStock
+                                ? 'Sin stock (no descontará)'
+                                : lowStock
+                                  ? `Stock bajo: ${part.stock} u.`
+                                  : `Stock: ${part.stock} u.`
+                              : 'Sin control de stock'}
+                          </div>
+                        </div>
+                        <span className="flex shrink-0 items-center gap-1.5 font-mono-num font-semibold">
                           <span>{formatCurrency(partDisplayPrice, selectedCurrency)}</span>
                           {checked && <Check className="h-3.5 w-3.5" />}
                         </span>
@@ -1884,6 +1943,28 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                     );
                   })}
                 </div>
+
+                {selectedOutOfStockParts.length > 0 && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300/80 bg-amber-50/80 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                      <span>
+                        Sin stock en inventario para:{' '}
+                        <strong>{selectedOutOfStockParts.map((p) => p.name).join(', ')}</strong>. No
+                        se descontará unidad hasta reponer.
+                      </span>
+                    </div>
+                    {status !== 'espera_repuesto' && (
+                      <button
+                        type="button"
+                        onClick={() => setStatus('espera_repuesto')}
+                        className="h-8 shrink-0 rounded-lg border border-amber-400 bg-white px-2.5 text-[11px] font-bold text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:bg-slate-900 dark:text-amber-200 dark:hover:bg-amber-950/60"
+                      >
+                        Pasar a Espera repuesto
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -1944,6 +2025,33 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                 </select>
               </div>
             </div>
+
+            {depositDisplay > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200/80 bg-emerald-50/50 px-3 py-2.5 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+                <span className="text-xs font-semibold text-emerald-900 dark:text-emerald-200">
+                  Medio de pago de la seña ({formatCurrency(depositDisplay, selectedCurrency)}):
+                </span>
+                <div className="grid grid-cols-3 gap-1 rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900">
+                  {(['efectivo', 'transferencia', 'tarjeta'] as const).map((methodKey) => {
+                    const active = depositMethod === methodKey;
+                    return (
+                      <button
+                        key={methodKey}
+                        type="button"
+                        onClick={() => setDepositMethod(methodKey)}
+                        className={`h-8 rounded-lg px-2.5 text-xs font-semibold transition ${
+                          active
+                            ? 'bg-[#0072BB] text-white'
+                            : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        {PAYMENT_METHOD_LABELS[methodKey]}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {isSecondaryCurrency && (
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200/80 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">

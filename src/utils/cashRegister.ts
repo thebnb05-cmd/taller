@@ -1,3 +1,4 @@
+import { upsertRow } from '../lib/db';
 import type { RepairRecord, SaleRecord, TaskRecord } from '../types/workshop';
 import type { PaymentMethod } from './payment';
 import { parsePaymentInfo } from './payment';
@@ -277,4 +278,50 @@ export function computeShiftFinancials(params: {
     expectedCashInDrawer,
     entries,
   };
+}
+
+export function findOpenCashShift(tasks: TaskRecord[]): CashShiftData | null {
+  const shifts = tasks
+    .map(parseCashShiftFromTask)
+    .filter((s): s is CashShiftData => s !== null && s.status === 'abierta')
+    .sort((a, b) => Date.parse(b.openedAt) - Date.parse(a.openedAt));
+  return shifts[0] || null;
+}
+
+export async function appendMovementToOpenCashShift(params: {
+  ownerId: string;
+  tasks: TaskRecord[];
+  movement: {
+    type: CashMovementType;
+    amount: number;
+    method: PaymentMethod;
+    concept: string;
+    at?: string;
+  };
+}): Promise<{ ok: boolean; shift?: CashShiftData; noOpenShift?: boolean }> {
+  const openShift = findOpenCashShift(params.tasks);
+  if (!openShift) {
+    return { ok: false, noOpenShift: true };
+  }
+  const cleanAmount = Math.max(0, Math.round(Number(params.movement.amount || 0) * 100) / 100);
+  if (cleanAmount <= 0) {
+    return { ok: false };
+  }
+  const nextMovement: CashMovement = {
+    id: `mv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    type: params.movement.type === 'egreso' ? 'egreso' : 'ingreso',
+    amount: cleanAmount,
+    method: params.movement.method,
+    concept: sanitizePlainLine(params.movement.concept, 140) || 'Movimiento',
+    at: params.movement.at || new Date().toISOString(),
+  };
+  const updatedShift: CashShiftData = {
+    ...openShift,
+    movements: [...openShift.movements, nextMovement],
+  };
+  await upsertRow(
+    'tasks',
+    serializeCashShiftToTask({ ownerId: params.ownerId, shift: updatedShift })
+  );
+  return { ok: true, shift: updatedShift };
 }

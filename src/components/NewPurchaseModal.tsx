@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Coins, PackagePlus, Plus, Trash2 } from 'lucide-react';
+import { Banknote, Coins, PackagePlus, Plus, Trash2 } from 'lucide-react';
 import {
   clampStr,
   generateDocId,
@@ -7,7 +7,17 @@ import {
   updateRow,
   upsertRow,
 } from '../lib/db';
-import type { ProductRecord, SupplierRecord, WorkshopProfile } from '../types/workshop';
+import type {
+  ProductRecord,
+  PurchaseRecord,
+  SupplierRecord,
+  TaskRecord,
+  WorkshopProfile,
+} from '../types/workshop';
+import {
+  appendMovementToOpenCashShift,
+  findOpenCashShift,
+} from '../utils/cashRegister';
 import {
   convertBetweenCurrencies,
   convertFromBaseCurrency,
@@ -19,7 +29,9 @@ import {
   type CurrencyCode,
 } from '../utils/currency';
 import { formatCurrency, todayISO } from '../utils/formatters';
+import { PAYMENT_METHOD_LABELS, type PaymentMethod } from '../utils/payment';
 import {
+  parsePurchaseInfo,
   PURCHASE_CATEGORY_LABELS,
   serializePurchaseStatus,
   type PurchaseCategory,
@@ -41,7 +53,9 @@ interface NewPurchaseModalProps {
   ownerId: string;
   suppliers: SupplierRecord[];
   products?: ProductRecord[];
+  tasks?: TaskRecord[];
   profile?: WorkshopProfile | null;
+  editPurchase?: PurchaseRecord | null;
 }
 
 function roundCurrencyValue(value: number): number {
@@ -55,7 +69,9 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
   ownerId,
   suppliers,
   products = [],
+  tasks = [],
   profile,
+  editPurchase = null,
 }) => {
   const { notify } = useToast();
   const activeCurrency = useActiveCurrency();
@@ -78,49 +94,139 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
   const [pickedQty, setPickedQty] = useState('1');
   const [pickedCost, setPickedCost] = useState('');
 
+  // Optional cash register egreso when marking as paid
+  const [deductFromCash, setDeductFromCash] = useState(false);
+  const [cashMethod, setCashMethod] = useState<PaymentMethod>('efectivo');
+
   const [saving, setSaving] = useState(false);
+
+  const openShift = useMemo(() => findOpenCashShift(tasks), [tasks]);
+  const editParsedInfo = useMemo(
+    () => (editPurchase ? parsePurchaseInfo(editPurchase) : null),
+    [editPurchase]
+  );
+
+  const selectableCurrencies: CurrencyCode[] = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          baseCurrency,
+          ...secondaryCurrencies.map((c) => c.code),
+          ...(editParsedInfo?.currency ? [editParsedInfo.currency] : []),
+        ])
+      ),
+    [baseCurrency, secondaryCurrencies, editParsedInfo?.currency]
+  );
 
   const selectedCurrencyOption = getCurrencyOption(selectedCurrency);
   const baseCurrencyOption = getCurrencyOption(baseCurrency);
   const currencySymbol = selectedCurrencyOption.symbol;
   const activeRate =
-    getCurrencyRateFromBase(selectedCurrency, baseCurrency, secondaryCurrencies) ?? 1;
+    getCurrencyRateFromBase(selectedCurrency, baseCurrency, secondaryCurrencies) ??
+    (editParsedInfo?.currency === selectedCurrency && editParsedInfo.rate
+      ? editParsedInfo.rate
+      : 1);
   const isSecondaryCurrency = selectedCurrency !== baseCurrency && activeRate !== 1;
 
   useEffect(() => {
     if (!open) return;
-    setSelectedCurrency(baseCurrency);
-    setSupplierName('');
-    setInvoice(`FC-${Math.floor(100 + Math.random() * 900)}`);
-    setAmount('');
-    setStatus('pendiente');
-    setCategory('repuestos');
-    setNote('');
-    setDueDate(todayISO());
-    setStockLines([]);
+    if (editPurchase) {
+      const info = parsePurchaseInfo(editPurchase);
+      const hasConfigured =
+        info.currency &&
+        (info.currency === baseCurrency ||
+          secondaryCurrencies.some((c) => c.code === info.currency) ||
+          Boolean(info.rate));
+      const initCur: CurrencyCode =
+        hasConfigured && info.currency ? info.currency : baseCurrency;
+      const initRate =
+        getCurrencyRateFromBase(initCur, baseCurrency, secondaryCurrencies) ??
+        (info.currency === initCur && info.rate ? info.rate : 1);
+      const initIsSec = initCur !== baseCurrency && initRate !== 1;
+
+      setSelectedCurrency(initCur);
+      setSupplierName(editPurchase.supplierName || '');
+      setInvoice(editPurchase.invoice || '');
+      setAmount(
+        String(
+          initIsSec
+            ? roundCurrencyValue(
+                convertFromBaseCurrency(Number(editPurchase.amount || 0), initRate)
+              )
+            : Number(editPurchase.amount || 0)
+        )
+      );
+      setStatus(info.isPaid ? 'pagado' : 'pendiente');
+      setCategory(info.category);
+      setNote(info.note);
+      setDueDate(editPurchase.dueDate || todayISO());
+      setStockLines(
+        info.stockItems.map((l) => ({
+          ...l,
+          unitCost:
+            initIsSec && l.unitCost > 0
+              ? roundCurrencyValue(convertFromBaseCurrency(l.unitCost, initRate))
+              : l.unitCost,
+        }))
+      );
+    } else {
+      setSelectedCurrency(baseCurrency);
+      setSupplierName('');
+      setInvoice(`FC-${Math.floor(100 + Math.random() * 900)}`);
+      setAmount('');
+      setStatus('pendiente');
+      setCategory('repuestos');
+      setNote('');
+      setDueDate(todayISO());
+      setStockLines([]);
+    }
     setPickedProductId('');
     setPickedQty('1');
     setPickedCost('');
-  }, [open, baseCurrency]);
+    setDeductFromCash(false);
+    setCashMethod('efectivo');
+  }, [open, editPurchase, baseCurrency, secondaryCurrencies]);
 
   const numericAmount = parseSafePositiveNumber(amount, 0);
   const baseEquivalentAmount = isSecondaryCurrency
     ? roundCurrencyValue(convertToBaseCurrency(numericAmount, activeRate))
     : numericAmount;
 
+  const canOfferCashDeduction = Boolean(
+    openShift &&
+      status === 'pagado' &&
+      (!editPurchase || !editParsedInfo?.isPaid)
+  );
+
   const handleCurrencyChange = (nextRaw: string) => {
     const nextCode = sanitizeCurrencyCode(nextRaw);
     if (nextCode === selectedCurrency) return;
-    const convertVal = (val: number) =>
-      roundCurrencyValue(
-        convertBetweenCurrencies(
-          val,
-          selectedCurrency,
-          nextCode,
-          baseCurrency,
-          secondaryCurrencies
-        )
-      );
+    const nextRate =
+      getCurrencyRateFromBase(nextCode, baseCurrency, secondaryCurrencies) ??
+      (editParsedInfo?.currency === nextCode && editParsedInfo.rate ? editParsedInfo.rate : 1);
+
+    const convertVal = (val: number) => {
+      if (
+        getCurrencyRateFromBase(selectedCurrency, baseCurrency, secondaryCurrencies) &&
+        getCurrencyRateFromBase(nextCode, baseCurrency, secondaryCurrencies)
+      ) {
+        return roundCurrencyValue(
+          convertBetweenCurrencies(
+            val,
+            selectedCurrency,
+            nextCode,
+            baseCurrency,
+            secondaryCurrencies
+          )
+        );
+      }
+      const inBase =
+        selectedCurrency === baseCurrency ? val : convertToBaseCurrency(val, activeRate);
+      const inNext =
+        nextCode === baseCurrency ? inBase : convertFromBaseCurrency(inBase, nextRate);
+      return roundCurrencyValue(inNext);
+    };
+
     if (amount.trim() && Number(amount) > 0) {
       setAmount(String(convertVal(Number(amount))));
     }
@@ -169,7 +275,6 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
     }
     setStockLines(nextLines);
 
-    // Suggest total amount from stock lines if user hasn't manually entered an amount
     const linesSum = nextLines.reduce((sum, l) => sum + l.qty * l.unitCost, 0);
     if (linesSum > 0 && (!amount.trim() || Number(amount) <= 0)) {
       setAmount(String(roundCurrencyValue(linesSum)));
@@ -200,6 +305,11 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
       ? roundCurrencyValue(convertToBaseCurrency(cleanTxAmount, activeRate))
       : cleanTxAmount;
 
+    const cleanInvoice = sanitizePlainLine(
+      invoice || `FC-${Date.now().toString().slice(-4)}`,
+      60
+    );
+
     const baseStockLines: PurchaseStockLine[] = stockLines.map((l) => ({
       ...l,
       unitCost: isSecondaryCurrency
@@ -217,49 +327,107 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
     });
 
     setSaving(true);
-    const purchaseId = generateDocId('purchases');
     try {
       const matched = suppliers.find(
         (s) => s.name.trim().toLowerCase() === cleanSupplier.toLowerCase()
       );
-      await upsertRow(
-        'purchases',
-        stripUndefined({
-          id: purchaseId,
-          ownerId,
-          supplierId: clampStr(matched?.id, 128),
-          supplierName: cleanSupplier,
-          invoice: sanitizePlainLine(
-            invoice || `FC-${Date.now().toString().slice(-4)}`,
-            60
-          ),
-          amount: cleanBaseAmount,
-          status: serializedStatus,
-          dueDate: clampStr(dueDate, 40),
-        })
-      );
+      const recordData = stripUndefined({
+        supplierId: clampStr(matched?.id, 128),
+        supplierName: cleanSupplier,
+        invoice: cleanInvoice,
+        amount: cleanBaseAmount,
+        status: serializedStatus,
+        dueDate: clampStr(dueDate, 40),
+      });
 
-      // Increment stock and update unit cost for linked inventory items
-      for (const line of baseStockLines) {
-        const prod = products.find((p) => p.id === line.productId);
-        if (!prod) continue;
-        const updates: Partial<ProductRecord> = {};
-        if (prod.trackStock) {
-          updates.stock = Math.max(0, Number(prod.stock || 0) + line.qty);
+      if (editPurchase) {
+        await updateRow('purchases', editPurchase.id, recordData);
+      } else {
+        const purchaseId = generateDocId('purchases');
+        await upsertRow(
+          'purchases',
+          stripUndefined({
+            id: purchaseId,
+            ownerId,
+            ...recordData,
+          })
+        );
+      }
+
+      // Reconcile stock delta and update unit cost for linked inventory items
+      const prevQtyByProduct = new Map<string, number>();
+      if (editPurchase) {
+        for (const prevLine of parsePurchaseInfo(editPurchase).stockItems) {
+          if (!prevLine.productId) continue;
+          prevQtyByProduct.set(
+            prevLine.productId,
+            (prevQtyByProduct.get(prevLine.productId) || 0) + prevLine.qty
+          );
         }
-        if (line.unitCost > 0) {
-          updates.cost = line.unitCost;
+      }
+      const nextLineByProduct = new Map<string, PurchaseStockLine>();
+      for (const nextLine of baseStockLines) {
+        if (!nextLine.productId) continue;
+        nextLineByProduct.set(nextLine.productId, nextLine);
+      }
+      const touchedIds = new Set<string>([
+        ...prevQtyByProduct.keys(),
+        ...nextLineByProduct.keys(),
+      ]);
+
+      let stockTouched = false;
+      for (const productId of touchedIds) {
+        const prod = products.find((p) => p.id === productId);
+        if (!prod) continue;
+        const prevQty = prevQtyByProduct.get(productId) || 0;
+        const nextLine = nextLineByProduct.get(productId);
+        const nextQty = nextLine?.qty || 0;
+        const delta = nextQty - prevQty;
+        const updates: Partial<ProductRecord> = {};
+        if (prod.trackStock && delta !== 0) {
+          updates.stock = Math.max(0, Number(prod.stock || 0) + delta);
+          stockTouched = true;
+        }
+        if (nextLine && nextLine.unitCost > 0) {
+          updates.cost = nextLine.unitCost;
         }
         if (Object.keys(updates).length > 0) {
           await updateRow('products', prod.id, updates);
         }
       }
 
-      notify(
-        baseStockLines.length > 0
-          ? 'Compra guardada y stock actualizado en inventario.'
-          : 'Compra / gasto registrado.'
-      );
+      let recordedCashEgreso = false;
+      if (canOfferCashDeduction && deductFromCash && cleanBaseAmount > 0) {
+        const cashRes = await appendMovementToOpenCashShift({
+          ownerId,
+          tasks,
+          movement: {
+            type: 'egreso',
+            amount: cleanBaseAmount,
+            method: cashMethod,
+            concept: `Compra: ${cleanSupplier}${cleanInvoice ? ` (${cleanInvoice})` : ''}`,
+          },
+        });
+        recordedCashEgreso = cashRes.ok;
+      }
+
+      if (editPurchase) {
+        notify(
+          recordedCashEgreso
+            ? 'Compra actualizada y egreso registrado en caja abierta.'
+            : stockTouched
+              ? 'Compra actualizada y stock ajustado en inventario.'
+              : 'Compra actualizada.'
+        );
+      } else {
+        notify(
+          recordedCashEgreso
+            ? 'Compra guardada y egreso registrado en la caja abierta.'
+            : baseStockLines.length > 0
+              ? 'Compra guardada y stock actualizado en inventario.'
+              : 'Compra / gasto registrado.'
+        );
+      }
       onClose();
     } catch (err) {
       notify(sanitizeDbErrorMessage(err, 'No se pudo guardar la compra.'), 'error');
@@ -269,9 +437,14 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
   };
 
   return (
-    <ModalShell open={open} onClose={onClose} title="Nueva compra o gasto" maxWidth="lg">
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      title={editPurchase ? 'Editar compra o gasto' : 'Nueva compra o gasto'}
+      maxWidth="lg"
+    >
       <form onSubmit={handleSubmit} className="space-y-4">
-        {secondaryCurrencies.length > 0 && (
+        {(secondaryCurrencies.length > 0 || selectableCurrencies.length > 1) && (
           <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/40">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -295,12 +468,23 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
               onChange={(e) => handleCurrencyChange(e.target.value)}
               className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
             >
-              <option value={baseCurrency}>{baseCurrencyOption.label} · Base</option>
-              {secondaryCurrencies.map((sec) => {
-                const secOpt = getCurrencyOption(sec.code);
+              {selectableCurrencies.map((code) => {
+                const opt = getCurrencyOption(code);
+                if (code === baseCurrency) {
+                  return (
+                    <option key={code} value={code}>
+                      {opt.label} · Base
+                    </option>
+                  );
+                }
+                const rate =
+                  getCurrencyRateFromBase(code, baseCurrency, secondaryCurrencies) ??
+                  (editParsedInfo?.currency === code && editParsedInfo.rate
+                    ? editParsedInfo.rate
+                    : 1);
                 return (
-                  <option key={sec.code} value={sec.code}>
-                    {secOpt.label} · 1 {secOpt.symbol} = {formatCurrency(sec.rate, baseCurrency)}
+                  <option key={code} value={code}>
+                    {opt.label} · 1 {opt.symbol} = {formatCurrency(rate, baseCurrency)}
                   </option>
                 );
               })}
@@ -405,6 +589,50 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
             </select>
           </div>
         </div>
+
+        {canOfferCashDeduction && openShift && (
+          <div className="space-y-2 rounded-2xl border border-sky-200 bg-sky-50/70 p-3 dark:border-sky-900/60 dark:bg-sky-950/30">
+            <label className="flex cursor-pointer items-center justify-between gap-2">
+              <span className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-100">
+                <Banknote className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
+                <span>
+                  Registrar egreso en la caja diaria abierta ({openShift.shiftDate})
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                checked={deductFromCash}
+                onChange={(e) => setDeductFromCash(e.target.checked)}
+                className="h-4 w-4 rounded accent-[#0072BB]"
+              />
+            </label>
+            {deductFromCash && (
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-sky-200/80 pt-2 text-xs dark:border-sky-900/50">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-slate-600 dark:text-slate-300">
+                    Medio de pago:
+                  </span>
+                  <select
+                    value={cashMethod}
+                    onChange={(e) => setCashMethod(e.target.value as PaymentMethod)}
+                    className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                  >
+                    {(Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[]).map((m) => (
+                      <option key={m} value={m}>
+                        {PAYMENT_METHOD_LABELS[m]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {baseEquivalentAmount > 0 && (
+                  <span className="font-mono-num font-bold text-red-600 dark:text-red-400">
+                    -{formatCurrency(baseEquivalentAmount, baseCurrency)}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Optional Inventory Stock Increment */}
         {products.length > 0 && (
@@ -534,10 +762,15 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
             disabled={saving}
             className="h-11 flex-1 rounded-xl bg-[#0072BB] text-sm font-semibold text-white hover:bg-[#005f9c]"
           >
-            {saving ? 'Guardando...' : 'Guardar compra'}
+            {saving
+              ? 'Guardando...'
+              : editPurchase
+                ? 'Guardar cambios'
+                : 'Guardar compra'}
           </button>
         </div>
       </form>
     </ModalShell>
   );
 };
+

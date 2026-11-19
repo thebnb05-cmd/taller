@@ -305,6 +305,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   const [editingSale, setEditingSale] = useState<SaleRecord | null>(null);
   const [selectedPrintSale, setSelectedPrintSale] = useState<SaleRecord | null>(null);
   const [showNewPurchase, setShowNewPurchase] = useState(false);
+  const [editingPurchase, setEditingPurchase] = useState<PurchaseRecord | null>(null);
 
   // Platform subscription state & live countdown
   const [subscriptionRecord, setSubscriptionRecord] = useState<SignedSubscriptionRecord | null>(
@@ -983,8 +984,17 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                 <PurchasesPage
                   purchases={purchases}
                   products={products}
+                  tasks={tasks}
+                  ownerId={userId}
                   profile={profile}
-                  onNewPurchase={() => setShowNewPurchase(true)}
+                  onNewPurchase={() => {
+                    setEditingPurchase(null);
+                    setShowNewPurchase(true);
+                  }}
+                  onEditPurchase={(p) => {
+                    setEditingPurchase(p);
+                    setShowNewPurchase(true);
+                  }}
                 />
               )}
 
@@ -1346,11 +1356,16 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
 
       <NewPurchaseModal
         open={showNewPurchase}
-        onClose={() => setShowNewPurchase(false)}
+        onClose={() => {
+          setShowNewPurchase(false);
+          setEditingPurchase(null);
+        }}
         ownerId={userId}
         suppliers={suppliers}
         products={products}
+        tasks={tasks}
         profile={profile}
+        editPurchase={editingPurchase}
       />
 
       <SubscriptionModal

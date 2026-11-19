@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
 import {
+  AlertTriangle,
   Banknote,
   Camera,
   Check,
@@ -195,6 +196,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   const [paying, setPaying] = useState(false);
   const [justPaid, setJustPaid] = useState(false);
   const [partialAmount, setPartialAmount] = useState('');
+  const [partialCurrency, setPartialCurrency] = useState<CurrencyCode>(baseCurrency);
   const [partialMethod, setPartialMethod] = useState<PaymentMethod>('efectivo');
   const [partialNote, setPartialNote] = useState('');
   const [savingPartial, setSavingPartial] = useState(false);
@@ -240,6 +242,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     const initialIsSecondary = initialCur !== baseCurrency && initialRate !== 1;
 
     setEditCurrency(initialCur);
+    setPartialCurrency(initialCur);
     setStatus((repair.status as RepairStatus) || 'recibido');
     setProgress(repair.progress ?? 15);
     setTechnician(parsedInfo.technician || '');
@@ -353,6 +356,16 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     ])
   );
 
+  const partialSelectableCurrencies = editSelectableCurrencies;
+  const partialRate =
+    getCurrencyRateFromBase(partialCurrency, baseCurrency, secondaryCurrencies) ??
+    (paymentInfo.currency === partialCurrency && paymentInfo.rate ? paymentInfo.rate : 1);
+  const isPartialSecondary = partialCurrency !== baseCurrency && partialRate !== 1;
+  const partialInputNum = parseSafePositiveNumber(partialAmount, 0);
+  const partialBaseEquivalent = isPartialSecondary
+    ? Math.round(convertToBaseCurrency(partialInputNum, partialRate) * 100) / 100
+    : partialInputNum;
+
   const detailWork = parseWorkDetailAndMedia(repair.workDetail);
   const detailMeta = parseRepairPublicMeta(repair.workDetail);
   const warrantyInfo = computeWarrantyInfo(repair);
@@ -377,6 +390,12 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     : spareParts;
   const addedPartIds = selectedPartIds.filter((id) => !initialPartIds.includes(id));
   const removedPartIds = initialPartIds.filter((id) => !selectedPartIds.includes(id));
+  const selectedOutOfStockParts = spareParts.filter(
+    (p) =>
+      selectedPartIds.includes(p.id) &&
+      Boolean(p.trackStock) &&
+      Number(p.stock || 0) <= 0
+  );
 
   const canAssignTechnician =
     (workshopMeta.techniciansEnabled && workshopMeta.technicians.length > 0) ||
@@ -954,11 +973,12 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   };
 
   const handleRegisterPartialPayment = async () => {
-    const amt = parseSafePositiveNumber(partialAmount, 0);
-    if (amt <= 0) {
+    const inputAmt = parseSafePositiveNumber(partialAmount, 0);
+    if (inputAmt <= 0 || partialBaseEquivalent <= 0) {
       notify('Ingresá un monto de seña o abono mayor a 0.', 'error');
       return;
     }
+    const amt = partialBaseEquivalent;
     setSavingPartial(true);
     try {
       const nowIso = new Date().toISOString();
@@ -968,6 +988,13 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       const nextBaseStatus: 'pendiente' | 'parcial' | 'pagado' =
         budget > 0 && nextDeposit >= budget ? 'pagado' : 'parcial';
 
+      const cleanNoteInput = sanitizePlainLine(partialNote, 90);
+      const ledgerNote = isPartialSecondary
+        ? cleanNoteInput
+          ? `${cleanNoteInput} (${formatCurrency(inputAmt, partialCurrency)})`
+          : `Seña / Abono (${formatCurrency(inputAmt, partialCurrency)})`
+        : cleanNoteInput || 'Seña / Abono parcial';
+
       const prevLedger = parseRepairPaymentLedger(repair.checkoutState);
       const nextCheckoutState = mergeCheckoutPaymentLedger(repair.checkoutState, [
         ...prevLedger,
@@ -976,7 +1003,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
           amount: amt,
           method: partialMethod,
           date: nowIso,
-          note: sanitizePlainLine(partialNote, 120) || 'Seña / Abono parcial',
+          note: ledgerNote,
         },
       ]);
 
@@ -1021,7 +1048,11 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       );
       setPartialAmount('');
       setPartialNote('');
-      notify(`Abono de ${formatCurrency(amt, baseCurrency)} (${PAYMENT_METHOD_LABELS[partialMethod]}) registrado.`);
+      notify(
+        isPartialSecondary
+          ? `Abono de ${formatCurrency(inputAmt, partialCurrency)} (${formatCurrency(amt, baseCurrency)}) · ${PAYMENT_METHOD_LABELS[partialMethod]} registrado.`
+          : `Abono de ${formatCurrency(amt, baseCurrency)} (${PAYMENT_METHOD_LABELS[partialMethod]}) registrado.`
+      );
       if (nextBaseStatus === 'pagado') {
         setJustPaid(true);
       }
@@ -1634,10 +1665,23 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
 
                   <div className="space-y-2.5 border-t border-slate-200/80 pt-3 dark:border-slate-700/60">
                     <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
-                      <div className="mb-2 text-[11px] font-bold text-slate-600 dark:text-slate-300">
-                        Registrar seña o abono parcial ({getCurrencyOption(baseCurrency).symbol})
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                        <span>
+                          Registrar seña o abono parcial ({getCurrencyOption(partialCurrency).symbol})
+                        </span>
+                        {isPartialSecondary && partialInputNum > 0 && (
+                          <span className="font-mono-num text-[#0072BB] dark:text-sky-300">
+                            Equivale a {formatCurrency(partialBaseEquivalent, baseCurrency)}
+                          </span>
+                        )}
                       </div>
-                      <div className="grid gap-2 sm:grid-cols-[120px_130px_1fr_auto]">
+                      <div
+                        className={`grid gap-2 ${
+                          partialSelectableCurrencies.length > 1
+                            ? 'sm:grid-cols-[110px_96px_125px_1fr_auto]'
+                            : 'sm:grid-cols-[120px_130px_1fr_auto]'
+                        }`}
+                      >
                         <input
                           type="number"
                           min="0"
@@ -1647,6 +1691,23 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                           placeholder="Monto"
                           className="h-9 rounded-lg border border-slate-200 bg-slate-50 px-2.5 font-mono-num text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                         />
+                        {partialSelectableCurrencies.length > 1 && (
+                          <select
+                            value={partialCurrency}
+                            onChange={(e) => setPartialCurrency(sanitizeCurrencyCode(e.target.value))}
+                            aria-label="Moneda del abono parcial"
+                            className="h-9 rounded-lg border border-slate-200 bg-slate-50 px-2 text-xs font-semibold text-slate-800 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                          >
+                            {partialSelectableCurrencies.map((code) => {
+                              const opt = getCurrencyOption(code);
+                              return (
+                                <option key={code} value={code}>
+                                  {opt.code} ({opt.symbol})
+                                </option>
+                              );
+                            })}
+                          </select>
+                        )}
                         <select
                           value={partialMethod}
                           onChange={(e) => setPartialMethod(e.target.value as PaymentMethod)}
@@ -1685,7 +1746,14 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                         <CheckCircle2 className="h-4 w-4" />
                         {paying
                           ? 'Registrando pago...'
-                          : `Cancelar saldo (${formatCurrency(pendingBalance, baseCurrency)}) · ${PAYMENT_METHOD_LABELS[paymentMethod]}`}
+                          : `Cancelar saldo (${formatCurrency(pendingBalance, baseCurrency)}${
+                              hasForeignDisplay && savedCurrency && savedRate
+                                ? ` / ${formatCurrency(
+                                    convertFromBaseCurrency(pendingBalance, savedRate),
+                                    savedCurrency
+                                  )}`
+                                : ''
+                            }) · ${PAYMENT_METHOD_LABELS[paymentMethod]}`}
                       </button>
                     </div>
                   </div>
@@ -2765,7 +2833,13 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                             convertFromBaseCurrency(Number(part.price || 0), editRate) * 100
                           ) / 100
                         : Number(part.price || 0);
-                      const outOfStock = part.trackStock && Number(part.stock || 0) <= 0;
+                      const outOfStock = Boolean(part.trackStock && Number(part.stock || 0) <= 0);
+                      const lowStock = Boolean(
+                        part.trackStock &&
+                          !outOfStock &&
+                          Number(part.minStock || 0) > 0 &&
+                          Number(part.stock || 0) <= Number(part.minStock || 0)
+                      );
                       return (
                         <button
                           key={part.id}
@@ -2779,11 +2853,21 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                         >
                           <div className="min-w-0">
                             <div className="truncate font-medium">{part.name}</div>
-                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                            <div
+                              className={`text-[10px] ${
+                                outOfStock
+                                  ? 'font-semibold text-red-600 dark:text-red-400'
+                                  : lowStock
+                                    ? 'font-semibold text-amber-600 dark:text-amber-400'
+                                    : 'text-slate-500 dark:text-slate-400'
+                              }`}
+                            >
                               {part.trackStock
                                 ? outOfStock
                                   ? 'Sin stock (no descontará)'
-                                  : `Stock: ${part.stock} u.`
+                                  : lowStock
+                                    ? `Stock bajo: ${part.stock} u.`
+                                    : `Stock: ${part.stock} u.`
                                 : 'Sin control de stock'}
                             </div>
                           </div>
@@ -2801,6 +2885,31 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                       No hay repuestos que coincidan con "{partSearch}".
                     </p>
                   )
+                )}
+
+                {selectedOutOfStockParts.length > 0 && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300/80 bg-amber-50/80 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                      <span>
+                        Sin stock en inventario para:{' '}
+                        <strong>{selectedOutOfStockParts.map((p) => p.name).join(', ')}</strong>. No
+                        se descontará unidad hasta reponer.
+                      </span>
+                    </div>
+                    {status !== 'espera_repuesto' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStatus('espera_repuesto');
+                          setProgress(STATUS_META.espera_repuesto?.defaultProgress ?? progress);
+                        }}
+                        className="h-8 shrink-0 rounded-lg border border-amber-400 bg-white px-2.5 text-[11px] font-bold text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:bg-slate-900 dark:text-amber-200 dark:hover:bg-amber-950/60"
+                      >
+                        Pasar a Espera repuesto
+                      </button>
+                    )}
+                  </div>
                 )}
 
                 {(addedPartIds.length > 0 || removedPartIds.length > 0) && (

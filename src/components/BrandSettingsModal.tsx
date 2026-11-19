@@ -6,6 +6,7 @@ import {
   Coins,
   Copy,
   Crown,
+  Download,
   ExternalLink,
   Image as ImageIcon,
   Loader2,
@@ -19,7 +20,15 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { clampStr, handleDbError, OperationType, stripUndefined, supabase, updateRow } from '../lib/db';
+import {
+  clampStr,
+  fetchOwnerRows,
+  handleDbError,
+  OperationType,
+  stripUndefined,
+  supabase,
+  updateRow,
+} from '../lib/db';
 import { DEFAULT_RECEIPT_TERMS } from '../data/catalog';
 import {
   CURRENCY_OPTIONS,
@@ -31,7 +40,7 @@ import {
   type CurrencyCode,
   type SecondaryCurrencyConfig,
 } from '../utils/currency';
-import { compressImageToDataUrl, formatCurrency } from '../utils/formatters';
+import { compressImageToDataUrl, formatCurrency, todayISO } from '../utils/formatters';
 import {
   isPrivatePreviewOrigin,
   normalizeTrackingBaseUrl,
@@ -143,6 +152,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteAccountError, setDeleteAccountError] = useState('');
+  const [exportingBackup, setExportingBackup] = useState(false);
 
   const isPlatformAdmin = Boolean(
     subscriptionRecord?.payload?.isExemptAnnual ||
@@ -478,6 +488,108 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
         err instanceof Error ? err.message : 'Error de red al eliminar la cuenta.'
       );
       setDeletingAccount(false);
+    }
+  };
+
+  const handleExportFullBackup = async () => {
+    if (exportingBackup) return;
+    const ownerKey = profile.ownerId || profile.id;
+    if (!ownerKey) {
+      notify('No se pudo identificar la sesión del taller.', 'error');
+      return;
+    }
+    setExportingBackup(true);
+    try {
+      const [clients, repairs, products, sales, purchases, suppliers, tasks, publicTickets] =
+        await Promise.all([
+          fetchOwnerRows<Record<string, unknown>>('clients', ownerKey),
+          fetchOwnerRows<Record<string, unknown>>('repairs', ownerKey),
+          fetchOwnerRows<Record<string, unknown>>('products', ownerKey),
+          fetchOwnerRows<Record<string, unknown>>('sales', ownerKey),
+          fetchOwnerRows<Record<string, unknown>>('purchases', ownerKey),
+          fetchOwnerRows<Record<string, unknown>>('suppliers', ownerKey),
+          fetchOwnerRows<Record<string, unknown>>('tasks', ownerKey),
+          fetchOwnerRows<Record<string, unknown>>('public_tickets', ownerKey),
+        ]);
+
+      const parsedMeta = parseWorkshopMeta(profile);
+      const sanitizedSubtitle = serializeWorkshopSubtitle({
+        subtitle: parsedMeta.subtitle,
+        hours: parsedMeta.hours,
+        social: parsedMeta.social,
+        taxId: parsedMeta.taxId,
+        businessEmail: parsedMeta.businessEmail,
+        footerNote: parsedMeta.footerNote,
+        currency: parsedMeta.currency,
+        secondaryCurrencies: parsedMeta.secondaryCurrencies,
+        techniciansEnabled: parsedMeta.techniciansEnabled,
+        technicians: parsedMeta.technicians,
+      });
+
+      const safeProfile = {
+        ...profile,
+        subtitle: sanitizedSubtitle,
+      };
+
+      const totalRecords =
+        clients.length +
+        repairs.length +
+        products.length +
+        sales.length +
+        purchases.length +
+        suppliers.length +
+        tasks.length +
+        publicTickets.length;
+
+      const backupPayload = {
+        app: profile.brandName || 'TH3 BNB',
+        schemaVersion: 1,
+        exportedAt: new Date().toISOString(),
+        baseCurrency: parsedMeta.currency,
+        summary: {
+          clients: clients.length,
+          repairs: repairs.length,
+          products: products.length,
+          sales: sales.length,
+          purchases: purchases.length,
+          suppliers: suppliers.length,
+          tasks: tasks.length,
+          publicTickets: publicTickets.length,
+          totalRecords,
+        },
+        profile: safeProfile,
+        data: {
+          clients,
+          repairs,
+          products,
+          sales,
+          purchases,
+          suppliers,
+          tasks,
+          publicTickets,
+        },
+      };
+
+      const blob = new Blob([JSON.stringify(backupPayload, null, 2)], {
+        type: 'application/json;charset=utf-8',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `respaldo-taller-${todayISO()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+      notify(`Copia de seguridad descargada (${totalRecords} registros).`);
+    } catch (err) {
+      notify(
+        sanitizeDbErrorMessage(err, 'No se pudo generar la copia de seguridad.'),
+        'error'
+      );
+    } finally {
+      setExportingBackup(false);
     }
   };
 
@@ -1400,6 +1512,37 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
             placeholder="https://tu-taller.vercel.app"
             className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
           />
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-800/40">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-2.5">
+              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-[#0072BB] dark:bg-sky-950/70 dark:text-sky-300">
+                <Download className="h-4 w-4" />
+              </span>
+              <div>
+                <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                  Copia de seguridad completa
+                </h4>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+                  Descargá un respaldo en formato JSON con tus reparaciones, clientes, inventario, ventas, compras, caja diaria, agenda y proveedores (sin tokens privados).
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={exportingBackup || deletingAccount}
+              onClick={() => void handleExportFullBackup()}
+              className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-800 transition hover:border-[#0072BB] hover:text-[#0072BB] disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-sky-400 dark:hover:text-sky-300"
+            >
+              {exportingBackup ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Download className="h-3.5 w-3.5" />
+              )}
+              {exportingBackup ? 'Generando...' : 'Descargar respaldo (.json)'}
+            </button>
+          </div>
         </div>
 
         <div className="rounded-2xl border border-red-200 bg-red-50/50 p-4 dark:border-red-900/60 dark:bg-red-950/20">
