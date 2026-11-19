@@ -5,10 +5,13 @@ import {
   Columns3,
   GripVertical,
   LayoutGrid,
+  MessageCircle,
   Plus,
   Search,
+  ShieldCheck,
   User,
   Wrench,
+  X,
 } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
 import { STATUS_META } from '../data/catalog';
@@ -23,7 +26,15 @@ import {
   isActiveRepairStatus,
 } from '../utils/formatters';
 import { parsePaymentInfo } from '../utils/payment';
+import {
+  appendTimelineEntry,
+  computeWarrantyInfo,
+  mergeWorkDetailPublicMeta,
+  parseRepairPublicMeta,
+} from '../utils/repairMeta';
+import { buildTrackingUrl } from '../utils/tracking';
 import { sanitizeDbErrorMessage } from '../utils/validation';
+import { buildRepairWhatsAppMessage } from '../utils/whatsappTemplates';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
 
 interface RepairsPageProps {
@@ -125,6 +136,12 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
   const [dragOverStatus, setDragOverStatus] = useState<RepairStatus | null>(null);
   const [optimisticStatuses, setOptimisticStatuses] = useState<Record<string, RepairStatus>>({});
   const [savingIds, setSavingIds] = useState<Record<string, boolean>>({});
+  const [whatsappPrompt, setWhatsappPrompt] = useState<{
+    code: string;
+    clientName: string;
+    statusLabel: string;
+    href: string;
+  } | null>(null);
   const justDraggedRef = useRef(false);
 
   const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
@@ -231,6 +248,14 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
     setOptimisticStatuses((prev) => ({ ...prev, [repair.id]: nextStatus }));
     setSavingIds((prev) => ({ ...prev, [repair.id]: true }));
 
+    const nextWorkDetail = mergeWorkDetailPublicMeta(repair.workDetail, (prev) => {
+      const withEntry = appendTimelineEntry(prev, nextStatus, undefined, nowIso);
+      if (nextStatus === 'entregado' && !withEntry.deliveredAt) {
+        return { ...withEntry, deliveredAt: nowIso };
+      }
+      return withEntry;
+    });
+
     try {
       await updateRow(
         'repairs',
@@ -238,6 +263,7 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
         stripUndefined({
           status: nextStatus,
           progress: nextProgress,
+          workDetail: nextWorkDetail,
           updatedAt: nowIso,
         })
       );
@@ -254,6 +280,7 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
             stripUndefined({
               status: nextStatus,
               progress: nextProgress,
+              workDetail: nextWorkDetail,
               updatedAt: nowIso,
             })
           );
@@ -264,6 +291,28 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
         KANBAN_COLUMNS.find((c) => c.status === nextStatus)?.title ||
         getStatusMeta(nextStatus).label;
       notify(`${repair.code} movida a "${colTitle}".`);
+
+      if (nextStatus === 'listo' || nextStatus === 'entregado') {
+        const trackingUrl = repair.trackingCode
+          ? buildTrackingUrl(repair.trackingCode, profile?.trackingBaseUrl, baseCurrency)
+          : undefined;
+        const msg = buildRepairWhatsAppMessage({
+          templateId: nextStatus === 'listo' ? 'ready' : 'delivered',
+          repair: { ...repair, status: nextStatus, workDetail: nextWorkDetail },
+          profile: profile ?? null,
+          trackingUrl,
+        });
+        const cleanPhone = (repair.clientPhone || '').replace(/[^\d]/g, '');
+        const href = cleanPhone
+          ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`
+          : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+        setWhatsappPrompt({
+          code: repair.code,
+          clientName: repair.clientName,
+          statusLabel: colTitle,
+          href,
+        });
+      }
     } catch (err) {
       setOptimisticStatuses((prev) => {
         const copy = { ...prev };
@@ -445,6 +494,35 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
         )}
       </div>
 
+      {whatsappPrompt && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-xs dark:border-emerald-900/60 dark:bg-emerald-950/30">
+          <div className="text-emerald-950 dark:text-emerald-200">
+            <strong>{whatsappPrompt.code}</strong> pasó a <strong>{whatsappPrompt.statusLabel}</strong> · ¿Querés avisarle a{' '}
+            <strong>{whatsappPrompt.clientName}</strong>?
+          </div>
+          <div className="flex items-center gap-2">
+            <a
+              href={whatsappPrompt.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setWhatsappPrompt(null)}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-xs font-bold text-white hover:bg-emerald-700"
+            >
+              <MessageCircle className="h-3.5 w-3.5" />
+              Avisar por WhatsApp
+            </a>
+            <button
+              type="button"
+              onClick={() => setWhatsappPrompt(null)}
+              aria-label="Cerrar aviso"
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-emerald-700 hover:bg-emerald-100 dark:text-emerald-300 dark:hover:bg-emerald-900/40"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {viewMode === 'kanban' ? (
         <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-slate-500 dark:text-slate-400">
@@ -514,6 +592,8 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
                         );
                         const paymentInfo = parsePaymentInfo(r);
                         const batchRef = extractBatchRef(r.notes);
+                        const rmeta = parseRepairPublicMeta(r.workDetail);
+                        const warranty = computeWarrantyInfo(r);
                         const priorityBadge =
                           PRIORITY_BADGE[r.priority] || PRIORITY_BADGE.media;
                         const isDragging = draggedRepairId === r.id;
@@ -563,10 +643,43 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
                               {r.problem}
                             </p>
 
-                            {paymentInfo.technician && (
-                              <div className="mt-1.5 inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                                <User className="h-2.5 w-2.5 text-[#0072BB] dark:text-sky-400" />
-                                {paymentInfo.technician}
+                            {(paymentInfo.technician ||
+                              rmeta.quote.status !== 'none' ||
+                              rmeta.parentRepairCode ||
+                              warranty.isActive) && (
+                              <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                                {paymentInfo.technician && (
+                                  <div className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                                    <User className="h-2.5 w-2.5 text-[#0072BB] dark:text-sky-400" />
+                                    {paymentInfo.technician}
+                                  </div>
+                                )}
+                                {rmeta.quote.status === 'pending' && (
+                                  <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
+                                    Presup. enviado
+                                  </span>
+                                )}
+                                {rmeta.quote.status === 'approved' && (
+                                  <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+                                    Presup. aprobado
+                                  </span>
+                                )}
+                                {rmeta.quote.status === 'rejected' && (
+                                  <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 dark:bg-rose-950/50 dark:text-rose-300">
+                                    Presup. rechazado
+                                  </span>
+                                )}
+                                {rmeta.parentRepairCode ? (
+                                  <span className="inline-flex items-center gap-0.5 rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-[#0072BB] dark:bg-sky-950/50 dark:text-sky-300">
+                                    <ShieldCheck className="h-2.5 w-2.5" />
+                                    Gtía {rmeta.parentRepairCode}
+                                  </span>
+                                ) : warranty.isActive ? (
+                                  <span className="inline-flex items-center gap-0.5 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+                                    <ShieldCheck className="h-2.5 w-2.5" />
+                                    {warranty.daysLeft}d
+                                  </span>
+                                ) : null}
                               </div>
                             )}
 
@@ -673,6 +786,8 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
             const balance = Math.max(0, Number(r.price || 0) - Number(r.deposit || 0));
             const batchRef = extractBatchRef(r.notes);
             const paymentInfo = parsePaymentInfo(r);
+            const rmeta = parseRepairPublicMeta(r.workDetail);
+            const warranty = computeWarrantyInfo(r);
             const hasForeignCurrency = Boolean(
               paymentInfo.currency &&
                 paymentInfo.currency !== baseCurrency &&
@@ -708,6 +823,32 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
                           {paymentInfo.technician}
                         </span>
                       )}
+                      {rmeta.quote.status === 'pending' && (
+                        <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
+                          Presup. pendiente
+                        </span>
+                      )}
+                      {rmeta.quote.status === 'approved' && (
+                        <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+                          Presup. aprobado
+                        </span>
+                      )}
+                      {rmeta.quote.status === 'rejected' && (
+                        <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 dark:bg-rose-950/50 dark:text-rose-300">
+                          Presup. rechazado
+                        </span>
+                      )}
+                      {rmeta.parentRepairCode ? (
+                        <span className="inline-flex items-center gap-0.5 rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-[#0072BB] dark:bg-sky-950/50 dark:text-sky-300">
+                          <ShieldCheck className="h-2.5 w-2.5" />
+                          Garantía {rmeta.parentRepairCode}
+                        </span>
+                      ) : warranty.isActive ? (
+                        <span className="inline-flex items-center gap-0.5 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+                          <ShieldCheck className="h-2.5 w-2.5" />
+                          Gtía {warranty.daysLeft}d
+                        </span>
+                      ) : null}
                       <span>·</span>
                       <span>{formatDateShort(r.dateIn)}</span>
                       <span>·</span>

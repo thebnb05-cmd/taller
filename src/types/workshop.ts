@@ -7,6 +7,7 @@ export type PageId =
   | 'suppliers'
   | 'sales'
   | 'purchases'
+  | 'cash'
   | 'reports'
   | 'admin_taller';
 

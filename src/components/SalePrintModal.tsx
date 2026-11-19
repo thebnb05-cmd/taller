@@ -18,7 +18,7 @@ import {
   loadTransferConfig,
   type TransferConfig,
 } from '../utils/payment';
-import { parseSalePaymentInfo } from '../utils/saleMeta';
+import { parseSaleDetails, parseSalePaymentInfo } from '../utils/saleMeta';
 import { BrandMark } from './BrandMark';
 import { ModalShell } from './ModalShell';
 import type { PrintFormat } from './RepairPrintDocuments';
@@ -182,18 +182,25 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
     };
   }, [sale, paymentInfo, transferCfg, profile?.brandName, isConvertedCurrency, activeRate]);
 
-  if (!sale || !paymentInfo) return null;
+  const saleDetails = useMemo(
+    () => (sale ? parseSaleDetails(sale) : null),
+    [sale]
+  );
 
-  const qty = Math.max(1, Number(sale.quantity || 1));
+  if (!sale || !paymentInfo || !saleDetails) return null;
+
   const roundDisplay = (val: number) => Math.round(val * 100) / 100;
-  const displayAmount = isConvertedCurrency
-    ? roundDisplay(convertFromBaseCurrency(sale.amount, activeRate))
-    : Number(sale.amount || 0);
-  const displayDeposit = isConvertedCurrency
-    ? roundDisplay(convertFromBaseCurrency(paymentInfo.deposit, activeRate))
-    : paymentInfo.deposit;
+  const toDisplayMoney = (val: number) =>
+    isConvertedCurrency
+      ? roundDisplay(convertFromBaseCurrency(val, activeRate))
+      : roundDisplay(val);
+
+  const displayAmount = toDisplayMoney(Number(sale.amount || 0));
+  const displaySubtotal = toDisplayMoney(saleDetails.subtotal);
+  const displayDiscount = toDisplayMoney(saleDetails.discountAmount);
+  const displaySurcharge = toDisplayMoney(saleDetails.surchargeAmount);
+  const displayDeposit = toDisplayMoney(paymentInfo.deposit);
   const displayPending = Math.max(0, roundDisplay(displayAmount - displayDeposit));
-  const displayUnitPrice = qty > 0 ? displayAmount / qty : displayAmount;
   const statusLabel = paymentInfo.isPaid
     ? 'Cobrado'
     : paymentInfo.deposit > 0
@@ -323,22 +330,65 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
               <th className="px-3 py-2 text-right">Subtotal</th>
             </tr>
           </thead>
-          <tbody>
-            <tr className="text-slate-900">
-              <td className="px-3 py-2.5 font-semibold">
-                {sale.productName || 'Venta de mostrador / servicio'}
-              </td>
-              <td className="px-3 py-2.5 text-center font-mono-num">{qty}</td>
-              <td className="px-3 py-2.5 text-right font-mono-num">
-                {formatCurrency(displayUnitPrice, selectedCurrency)}
-              </td>
-              <td className="px-3 py-2.5 text-right font-mono-num font-bold">
-                {formatCurrency(displayAmount, selectedCurrency)}
-              </td>
-            </tr>
+          <tbody className="divide-y divide-slate-100">
+            {saleDetails.items.map((item) => (
+              <tr key={item.id} className="text-slate-900">
+                <td className="px-3 py-2.5 font-semibold">
+                  <div>{item.name}</div>
+                  {item.sku && (
+                    <div className="font-mono-num text-[10px] font-normal text-slate-500">
+                      SKU: {item.sku}
+                    </div>
+                  )}
+                </td>
+                <td className="px-3 py-2.5 text-center font-mono-num">{item.quantity}</td>
+                <td className="px-3 py-2.5 text-right font-mono-num">
+                  {formatCurrency(toDisplayMoney(item.unitPrice), selectedCurrency)}
+                </td>
+                <td className="px-3 py-2.5 text-right font-mono-num font-bold">
+                  {formatCurrency(toDisplayMoney(item.subtotal), selectedCurrency)}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
+
+      {(displayDiscount > 0 || displaySurcharge > 0 || saleDetails.note) && (
+        <div className="mt-3 space-y-1 rounded-xl border border-slate-200/80 bg-slate-50/70 px-3 py-2.5 text-xs text-slate-700">
+          {(displayDiscount > 0 || displaySurcharge > 0) && (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span>
+                Subtotal:{' '}
+                <strong className="font-mono-num">
+                  {formatCurrency(displaySubtotal, selectedCurrency)}
+                </strong>
+              </span>
+              {displayDiscount > 0 && (
+                <span className="text-emerald-700">
+                  Descuento: -
+                  <strong className="font-mono-num">
+                    {formatCurrency(displayDiscount, selectedCurrency)}
+                  </strong>
+                </span>
+              )}
+              {displaySurcharge > 0 && (
+                <span className="text-amber-700">
+                  Recargo: +
+                  <strong className="font-mono-num">
+                    {formatCurrency(displaySurcharge, selectedCurrency)}
+                  </strong>
+                </span>
+              )}
+            </div>
+          )}
+          {saleDetails.note && (
+            <div className="text-[11px] text-slate-600">
+              <strong>Observaciones:</strong> {saleDetails.note}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="mt-4 border-y border-slate-200 py-3">
         <div className="grid grid-cols-3 gap-2 text-center text-xs">
@@ -598,16 +648,37 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
       </div>
 
       <div className="border-b border-dashed border-black py-2 text-[10.5px]">
-        <div className="font-bold uppercase">Detalle</div>
-        <div className="mt-0.5 font-bold">
-          {sale.productName || 'Venta de mostrador / servicio'}
+        <div className="font-bold uppercase">Detalle ({saleDetails.items.length})</div>
+        <div className="mt-1 space-y-1.5">
+          {saleDetails.items.map((item) => (
+            <div key={item.id}>
+              <div className="font-bold">{item.name}</div>
+              <div className="flex justify-between text-[10px]">
+                <span>
+                  {item.quantity} × {formatCurrency(toDisplayMoney(item.unitPrice), selectedCurrency)}
+                </span>
+                <strong>{formatCurrency(toDisplayMoney(item.subtotal), selectedCurrency)}</strong>
+              </div>
+            </div>
+          ))}
         </div>
-        <div className="mt-0.5 flex justify-between text-[10px]">
-          <span>
-            {qty} × {formatCurrency(displayUnitPrice, selectedCurrency)}
-          </span>
-          <strong>{formatCurrency(displayAmount, selectedCurrency)}</strong>
-        </div>
+        {displayDiscount > 0 && (
+          <div className="mt-1 flex justify-between text-[10px]">
+            <span>Descuento:</span>
+            <span>-{formatCurrency(displayDiscount, selectedCurrency)}</span>
+          </div>
+        )}
+        {displaySurcharge > 0 && (
+          <div className="mt-0.5 flex justify-between text-[10px]">
+            <span>Recargo:</span>
+            <span>+{formatCurrency(displaySurcharge, selectedCurrency)}</span>
+          </div>
+        )}
+        {saleDetails.note && (
+          <div className="mt-1 border-t border-dotted border-black pt-1 text-[9.5px]">
+            Obs: {saleDetails.note}
+          </div>
+        )}
       </div>
 
       <div className="border-b border-dashed border-black py-2 text-[11px]">

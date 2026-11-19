@@ -39,6 +39,12 @@ import {
   todayISO,
 } from '../utils/formatters';
 import { serializeRepairPaymentStatus } from '../utils/payment';
+import {
+  appendTimelineEntry,
+  createRepairMetaId,
+  mergeCheckoutPaymentLedger,
+  mergeWorkDetailPublicMeta,
+} from '../utils/repairMeta';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
 import { appendBatchRefToNotes, generateBatchRef } from '../utils/batchRef';
 import { getFunctionalCheckFields, getPhysicalCheckFields } from '../utils/checkFields';
@@ -74,6 +80,7 @@ interface NewRepairModalProps {
   repairs: RepairRecord[];
   products: ProductRecord[];
   preselectedClient?: ClientRecord | null;
+  warrantyFromRepair?: RepairRecord | null;
 }
 
 interface DraftRepairItem {
@@ -96,6 +103,7 @@ interface DraftRepairItem {
   rate: number;
   status: RepairStatus;
   technician: string;
+  warrantyDays: number;
   accessories: string[];
   consoleAcc: Record<string, string>;
   physicalCheck: Record<string, string>;
@@ -366,6 +374,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   repairs,
   products,
   preselectedClient,
+  warrantyFromRepair,
 }) => {
   const { notify } = useToast();
   const activeCurrency = useActiveCurrency();
@@ -414,6 +423,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   const [deposit, setDeposit] = useState('');
   const [status, setStatus] = useState<RepairStatus>('recibido');
   const [technician, setTechnician] = useState('');
+  const [warrantyDays, setWarrantyDays] = useState<number>(0);
 
   const [accessories, setAccessories] = useState<string[]>([]);
   const [consoleAcc, setConsoleAcc] = useState<Record<string, string>>({
@@ -457,10 +467,79 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   useEffect(() => {
     if (!open) return;
     setSelectedCurrency(baseCurrency);
+    setQueuedItems([]);
+    setSelectedPartIds([]);
+    setPrice('');
+    setDeposit('');
+    setStatus('recibido');
+    setTechnician('');
+    setWarrantyDays(0);
+    setDateIn(todayISO());
+    setDateEst('');
+    setAccessories([]);
+    setConsoleAcc({
+      'Joystick 1': 'No',
+      'Joystick 2': 'No',
+      'Cable HDMI': 'No',
+      'Cable de poder': 'No',
+      'Cable USB / Carga': 'No',
+      'Fuente / Transformador': 'No',
+    });
+    setPhysicalCheck({});
+    setFunctionalCheck({});
+    setNotes('');
+    setSecurityTab('pin');
+    setSecurityPin('');
+    setSecurityPattern([]);
+
+    if (warrantyFromRepair) {
+      const matchedClient = warrantyFromRepair.clientId
+        ? clients.find((c) => c.id === warrantyFromRepair.clientId)
+        : undefined;
+      const cMeta = matchedClient ? parseClientMeta(matchedClient) : null;
+      const devType = (warrantyFromRepair.deviceType as DeviceType) || 'Celular';
+      const iconMatch = DEVICE_OPTIONS.find((d) => d.type === devType)?.icon || warrantyFromRepair.deviceIcon || '📱';
+
+      setStep('details');
+      setDeviceType(devType);
+      setDeviceIcon(iconMatch);
+      setClientId(warrantyFromRepair.clientId || '');
+      setClientName(warrantyFromRepair.clientName || '');
+      setClientPhone(warrantyFromRepair.clientPhone || '');
+      setClientAltPhone(cMeta?.altPhone || '');
+      setClientType(cMeta?.clientType || 'particular');
+      setClientDni(warrantyFromRepair.clientDni || '');
+      setClientCuit(cMeta?.cuit || '');
+      setClientEmail(warrantyFromRepair.clientEmail || '');
+      setClientAddress(warrantyFromRepair.clientAddress || '');
+      setClientNeighborhood(cMeta?.neighborhood || '');
+
+      const rawBrand = warrantyFromRepair.brand || 'Samsung';
+      const isKnownBrand = BRAND_LIST.includes(rawBrand);
+      setBrand(isKnownBrand ? rawBrand : 'Otro');
+      setCustomBrand(rawBrand);
+
+      const rawModel = warrantyFromRepair.model || '';
+      const modelOptions = isKnownBrand ? MODELS_BY_BRAND[rawBrand] || [] : [];
+      if (modelOptions.includes(rawModel)) {
+        setModelSelect(rawModel);
+        setCustomModel(rawModel);
+      } else {
+        setModelSelect('Otro modelo');
+        setCustomModel(rawModel);
+      }
+      setColor(warrantyFromRepair.color || '');
+      setCapacity(warrantyFromRepair.capacity || '128 GB');
+      setImei(warrantyFromRepair.imei || '');
+      setProblem(`Garantía s/orden ${warrantyFromRepair.code}: `);
+      setPriority('alta');
+      setNotes(`Reingreso por garantía de la orden ${warrantyFromRepair.code}.`);
+      return;
+    }
+
     setStep('device');
     setDeviceType('');
     setDeviceIcon('📱');
-    setQueuedItems([]);
     if (preselectedClient) {
       const meta = parseClientMeta(preselectedClient);
       setClientId(preselectedClient.id);
@@ -494,29 +573,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     setImei('');
     setProblem('');
     setPriority('media');
-    setDateIn(todayISO());
-    setDateEst('');
-    setSelectedPartIds([]);
-    setPrice('');
-    setDeposit('');
-    setStatus('recibido');
-    setTechnician('');
-    setAccessories([]);
-    setConsoleAcc({
-      'Joystick 1': 'No',
-      'Joystick 2': 'No',
-      'Cable HDMI': 'No',
-      'Cable de poder': 'No',
-      'Cable USB / Carga': 'No',
-      'Fuente / Transformador': 'No',
-    });
-    setPhysicalCheck({});
-    setFunctionalCheck({});
-    setNotes('');
-    setSecurityTab('pin');
-    setSecurityPin('');
-    setSecurityPattern([]);
-  }, [open, preselectedClient]);
+  }, [open, preselectedClient, warrantyFromRepair, baseCurrency, clients]);
 
   const resetEquipmentFields = () => {
     setDeviceType('');
@@ -535,6 +592,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     setSelectedCurrency(baseCurrency);
     setStatus('recibido');
     setTechnician('');
+    setWarrantyDays(0);
     setAccessories([]);
     setConsoleAcc({
       'Joystick 1': 'No',
@@ -714,6 +772,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
       rate: activeRate,
       status,
       technician: sanitizePlainLine(technician, 60),
+      warrantyDays: Math.max(0, Math.min(3650, Math.round(Number(warrantyDays) || 0))),
       accessories: isConsole ? [] : accessories.slice(0, 30),
       consoleAcc: { ...consoleAcc },
       physicalCheck: { ...physicalCheck },
@@ -842,6 +901,41 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
           ? clampStr(appendBatchRefToNotes(item.notes, batchRef, i + 1, itemsToSave.length), 2000)
           : clampStr(item.notes, 2000);
 
+        const nowIso = new Date().toISOString();
+        const initialWorkDetail = mergeWorkDetailPublicMeta('', (prev) => {
+          const withBase = {
+            ...prev,
+            ...(item.warrantyDays > 0 ? { warrantyDays: item.warrantyDays } : {}),
+            ...(warrantyFromRepair
+              ? {
+                  parentRepairId: warrantyFromRepair.id,
+                  parentRepairCode: warrantyFromRepair.code,
+                }
+              : {}),
+          };
+          return appendTimelineEntry(
+            withBase,
+            item.status,
+            warrantyFromRepair
+              ? `Reingreso por garantía de orden ${warrantyFromRepair.code}`
+              : 'Equipo recibido en el taller',
+            nowIso
+          );
+        });
+
+        const initialCheckoutState =
+          item.deposit > 0
+            ? mergeCheckoutPaymentLedger('', [
+                {
+                  id: createRepairMetaId('pay'),
+                  amount: item.deposit,
+                  method: 'efectivo',
+                  date: nowIso,
+                  note: 'Seña inicial al ingreso',
+                },
+              ])
+            : '';
+
         const repairPayload: Omit<RepairRecord, 'id' | 'createdAt' | 'updatedAt'> = {
           ownerId,
           code: repairCode,
@@ -885,11 +979,10 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
           securityPin: item.securityTab === 'pin' ? item.securityPin : '',
           securityPattern: item.securityTab === 'pattern' ? item.securityPattern : [],
           notes: finalNotes,
-          workDetail: '',
-          checkoutState: '',
+          workDetail: initialWorkDetail,
+          checkoutState: initialCheckoutState,
         };
 
-        const nowIso = new Date().toISOString();
         await upsertRow(
           'repairs',
           stripUndefined({
@@ -918,7 +1011,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
             dateIn: item.dateIn,
             dateEst: item.dateEst,
             problemSummary: item.problem,
-            workDetail: '',
+            workDetail: initialWorkDetail,
             price: item.budget,
             deposit: item.deposit,
             updatedAt: nowIso,
@@ -1037,16 +1130,20 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
       open={open}
       onClose={onClose}
       title={
-        queuedItems.length > 0
-          ? `Nueva reparación · Lote (${queuedItems.length + (step === 'details' ? 1 : 0)} equipos)`
-          : 'Nueva reparación'
+        warrantyFromRepair
+          ? `Reingreso por garantía (${warrantyFromRepair.code})`
+          : queuedItems.length > 0
+            ? `Nueva reparación · Lote (${queuedItems.length + (step === 'details' ? 1 : 0)} equipos)`
+            : 'Nueva reparación'
       }
       subtitle={
-        step === 'device'
-          ? queuedItems.length > 0
-            ? `Paso 1 de 2 · Elegí el próximo equipo para ${clientName.trim() || 'el mismo cliente'}`
-            : 'Paso 1 de 2 · Seleccioná el tipo de equipo'
-          : `Paso 2 de 2 · ${deviceIcon} ${deviceType}`
+        warrantyFromRepair
+          ? `Equipo vinculado a la orden ${warrantyFromRepair.code}`
+          : step === 'device'
+            ? queuedItems.length > 0
+              ? `Paso 1 de 2 · Elegí el próximo equipo para ${clientName.trim() || 'el mismo cliente'}`
+              : 'Paso 1 de 2 · Seleccioná el tipo de equipo'
+            : `Paso 2 de 2 · ${deviceIcon} ${deviceType}`
       }
       maxWidth="3xl"
     >
@@ -1878,6 +1975,50 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                 </span>
               </div>
             )}
+
+            <div className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  Garantía del trabajo (se activa al entregar)
+                </span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[
+                    { days: 0, label: 'Sin garantía' },
+                    { days: 30, label: '30 días' },
+                    { days: 60, label: '60 días' },
+                    { days: 90, label: '90 días' },
+                  ].map((opt) => {
+                    const active = warrantyDays === opt.days;
+                    return (
+                      <button
+                        key={opt.days}
+                        type="button"
+                        onClick={() => setWarrantyDays(opt.days)}
+                        className={`h-8 rounded-lg border px-2.5 text-xs font-semibold transition ${
+                          active
+                            ? 'border-[#0072BB] bg-[#0072BB] text-white'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                  <input
+                    type="number"
+                    min="0"
+                    max="3650"
+                    value={warrantyDays || ''}
+                    onChange={(e) =>
+                      setWarrantyDays(Math.max(0, Math.min(3650, Math.round(Number(e.target.value) || 0))))
+                    }
+                    placeholder="Días"
+                    aria-label="Días personalizados de garantía"
+                    className="h-8 w-16 rounded-lg border border-slate-200 bg-white px-2 text-center font-mono-num text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+              </div>
+            </div>
           </section>
 
           <section className="space-y-3 border-t border-slate-100 pt-5 dark:border-slate-800">

@@ -1,19 +1,25 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
   Banknote,
+  Camera,
   CheckCircle2,
   Coins,
   Copy,
   CreditCard,
   Landmark,
   Loader2,
+  Minus,
   Package,
+  Plus,
   Printer,
   QrCode,
   RefreshCw,
+  ScanBarcode,
+  Search,
   Settings2,
   Smartphone,
+  Trash2,
   Upload,
   X,
 } from 'lucide-react';
@@ -57,10 +63,17 @@ import {
   type PaymentMethod,
   type TransferConfig,
 } from '../utils/payment';
-import { serializeSaleStatus } from '../utils/saleMeta';
+import {
+  parseSaleDetails,
+  parseSalePaymentInfo,
+  serializeSaleStatus,
+  summarizeSaleItemsLabel,
+  type SaleAdjustmentType,
+  type SaleCartItem,
+  type SalePaymentEntry,
+} from '../utils/saleMeta';
 import { parseWorkshopMeta, syncMercadoPagoConfigFromProfile } from '../utils/workshopMeta';
 import {
-  parseSafeNonNegativeInt,
   parseSafePositiveNumber,
   sanitizeAlias,
   sanitizeCbu,
@@ -68,6 +81,7 @@ import {
   sanitizeImageDataUrl,
   sanitizePlainLine,
   sanitizeSafeUrl,
+  sanitizeText,
 } from '../utils/validation';
 import { ModalShell } from './ModalShell';
 import { PaymentSettingsModal } from './PaymentSettingsPanel';
@@ -80,14 +94,20 @@ interface NewSaleModalProps {
   clients: ClientRecord[];
   products?: ProductRecord[];
   preselectedProduct?: ProductRecord | null;
+  editSale?: SaleRecord | null;
   profile?: WorkshopProfile | null;
   brandName?: string;
   onCreated?: (sale: SaleRecord) => void;
+  onSaved?: (sale: SaleRecord) => void;
 }
 
 function roundCurrencyValue(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.round(value * 100) / 100;
+}
+
+function makeCartItemId(): string {
+  return `ci-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
 interface ActiveMpOrder {
@@ -108,9 +128,11 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   clients,
   products = [],
   preselectedProduct,
+  editSale,
   profile,
   brandName,
   onCreated,
+  onSaved,
 }) => {
   const { notify } = useToast();
   const activeCurrency = useActiveCurrency();
@@ -118,17 +140,36 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const baseCurrency: CurrencyCode = profile ? workshopMeta.currency : activeCurrency;
   const secondaryCurrencies = workshopMeta.secondaryCurrencies;
 
-  const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [selectedCurrency, setSelectedCurrency] = useState<CurrencyCode>(baseCurrency);
   const [clientName, setClientName] = useState('');
   const [invoice, setInvoice] = useState('');
-  const [quantity, setQuantity] = useState(1);
-  const [amount, setAmount] = useState('');
+  const [cartItems, setCartItems] = useState<SaleCartItem[]>([]);
+  const [productQuery, setProductQuery] = useState('');
+  const [manualName, setManualName] = useState('');
+  const [manualQty, setManualQty] = useState('1');
+  const [manualPrice, setManualPrice] = useState('');
+  const [showManualForm, setShowManualForm] = useState(false);
+
+  const [discountType, setDiscountType] = useState<SaleAdjustmentType>('percent');
+  const [discountValue, setDiscountValue] = useState('');
+  const [surchargeType, setSurchargeType] = useState<SaleAdjustmentType>('percent');
+  const [surchargeValue, setSurchargeValue] = useState('');
+  const [saleNote, setSaleNote] = useState('');
+
   const [deposit, setDeposit] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo');
   const [status, setStatus] = useState<'pendiente' | 'cobrado'>('cobrado');
   const [dueDate, setDueDate] = useState(todayISO());
+  const [existingPayments, setExistingPayments] = useState<SalePaymentEntry[]>([]);
   const [saving, setSaving] = useState(false);
+
+  // Camera barcode scanner state
+  const [scanning, setScanning] = useState(false);
+  const [scannerStatus, setScannerStatus] = useState('');
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const scanTimerRef = useRef<number | null>(null);
+
   const [transferQrDataUrl, setTransferQrDataUrl] = useState('');
   const [transferCfg, setTransferCfg] = useState<TransferConfig>(() => loadTransferConfig(ownerId));
   const [editingTransferCfg, setEditingTransferCfg] = useState(false);
@@ -137,12 +178,6 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const [mpOrder, setMpOrder] = useState<ActiveMpOrder | null>(null);
   const [mpBusy, setMpBusy] = useState(false);
 
-  const selectedProduct = useMemo(() => {
-    if (preselectedProduct) return preselectedProduct;
-    if (!selectedProductId) return null;
-    return products.find((p) => p.id === selectedProductId) || null;
-  }, [preselectedProduct, selectedProductId, products]);
-
   const selectedCurrencyOption = getCurrencyOption(selectedCurrency);
   const baseCurrencyOption = getCurrencyOption(baseCurrency);
   const currencySymbol = selectedCurrencyOption.symbol;
@@ -150,30 +185,139 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     getCurrencyRateFromBase(selectedCurrency, baseCurrency, secondaryCurrencies) ?? 1;
   const isSecondaryCurrency = selectedCurrency !== baseCurrency && activeRate !== 1;
 
+  const stopScanner = () => {
+    if (scanTimerRef.current !== null) {
+      window.clearInterval(scanTimerRef.current);
+      scanTimerRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    setScanning(false);
+  };
+
   useEffect(() => {
-    if (!open) return;
-    const initialAmount = preselectedProduct ? String(preselectedProduct.price) : '';
+    if (!open) {
+      stopScanner();
+      return;
+    }
+
     const loadedCfg = loadTransferConfig(ownerId);
-    setSelectedProductId(preselectedProduct?.id || '');
-    setSelectedCurrency(baseCurrency);
-    setClientName('');
-    setInvoice(`FV-${Math.floor(1000 + Math.random() * 9000)}`);
-    setQuantity(1);
-    setAmount(initialAmount);
-    setDeposit(initialAmount);
-    setPaymentMethod('efectivo');
-    setStatus('cobrado');
-    setDueDate(todayISO());
     setTransferCfg(loadedCfg);
     setMpConfig(loadMercadoPagoConfig(ownerId));
     setMpOrder(null);
     setMpBusy(false);
+    setProductQuery('');
+    setManualName('');
+    setManualQty('1');
+    setManualPrice('');
+    setScannerStatus('');
     setEditingTransferCfg(
       !loadedCfg.alias.trim() &&
         !loadedCfg.cbu.trim() &&
         !loadedCfg.paymentLink.trim() &&
         !loadedCfg.qrImageDataUrl
     );
+
+    if (editSale) {
+      const payInfo = parseSalePaymentInfo(editSale);
+      const details = parseSaleDetails(editSale);
+      const editCur = payInfo.currency || baseCurrency;
+      const editRate =
+        getCurrencyRateFromBase(editCur, baseCurrency, secondaryCurrencies) ??
+        payInfo.rate ??
+        1;
+      const convertForDisplay = editCur !== baseCurrency && editRate > 0 && editRate !== 1;
+      const toDisplay = (baseVal: number) =>
+        convertForDisplay
+          ? roundCurrencyValue(convertFromBaseCurrency(baseVal, editRate))
+          : roundCurrencyValue(baseVal);
+
+      setSelectedCurrency(editCur);
+      setClientName(editSale.clientName || '');
+      setInvoice(editSale.invoice || '');
+      setDueDate(editSale.dueDate || todayISO());
+      setPaymentMethod(payInfo.method || 'efectivo');
+      setStatus(payInfo.isPaid ? 'cobrado' : 'pendiente');
+      setExistingPayments(details.payments);
+      setSaleNote(details.note || '');
+      setDiscountType(details.discountType);
+      setDiscountValue(
+        details.discountValue > 0
+          ? String(
+              details.discountType === 'fixed'
+                ? toDisplay(details.discountValue)
+                : details.discountValue
+            )
+          : ''
+      );
+      setSurchargeType(details.surchargeType);
+      setSurchargeValue(
+        details.surchargeValue > 0
+          ? String(
+              details.surchargeType === 'fixed'
+                ? toDisplay(details.surchargeValue)
+                : details.surchargeValue
+            )
+          : ''
+      );
+      setCartItems(
+        details.items.map((it) => {
+          const unitDisplay = toDisplay(it.unitPrice);
+          return {
+            ...it,
+            unitPrice: unitDisplay,
+            subtotal: roundCurrencyValue(unitDisplay * it.quantity),
+          };
+        })
+      );
+      setDeposit(String(toDisplay(payInfo.deposit)));
+      setShowManualForm(false);
+    } else if (preselectedProduct) {
+      setSelectedCurrency(baseCurrency);
+      setClientName('');
+      setInvoice(`FV-${Math.floor(1000 + Math.random() * 9000)}`);
+      setDueDate(todayISO());
+      setPaymentMethod('efectivo');
+      setStatus('cobrado');
+      setExistingPayments([]);
+      setSaleNote('');
+      setDiscountType('percent');
+      setDiscountValue('');
+      setSurchargeType('percent');
+      setSurchargeValue('');
+      const unitPrice = roundCurrencyValue(Number(preselectedProduct.price || 0));
+      setCartItems([
+        {
+          id: makeCartItemId(),
+          productId: preselectedProduct.id,
+          name: preselectedProduct.name,
+          sku: preselectedProduct.sku || preselectedProduct.barcode || undefined,
+          quantity: 1,
+          unitPrice,
+          subtotal: unitPrice,
+        },
+      ]);
+      setDeposit(String(unitPrice));
+      setShowManualForm(false);
+    } else {
+      setSelectedCurrency(baseCurrency);
+      setClientName('');
+      setInvoice(`FV-${Math.floor(1000 + Math.random() * 9000)}`);
+      setDueDate(todayISO());
+      setPaymentMethod('efectivo');
+      setStatus('cobrado');
+      setExistingPayments([]);
+      setSaleNote('');
+      setDiscountType('percent');
+      setDiscountValue('');
+      setSurchargeType('percent');
+      setSurchargeValue('');
+      setCartItems([]);
+      setDeposit('');
+      setShowManualForm(products.length === 0);
+    }
 
     let cancelled = false;
     void hydrateTransferConfig(ownerId).then((hydrated) => {
@@ -197,20 +341,59 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     });
     return () => {
       cancelled = true;
+      stopScanner();
     };
-  }, [open, ownerId, preselectedProduct, baseCurrency, profile]);
+  }, [open, ownerId, preselectedProduct, editSale, baseCurrency, profile, products.length]);
 
-  const numericAmount = parseSafePositiveNumber(amount, 0);
+  const subtotalDisplay = useMemo(
+    () =>
+      roundCurrencyValue(
+        cartItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
+      ),
+    [cartItems]
+  );
+
+  const rawDiscountVal = parseSafePositiveNumber(discountValue, 0);
+  const discountAmountDisplay = useMemo(() => {
+    if (subtotalDisplay <= 0 || rawDiscountVal <= 0) return 0;
+    const raw =
+      discountType === 'percent'
+        ? (subtotalDisplay * Math.min(100, rawDiscountVal)) / 100
+        : rawDiscountVal;
+    return roundCurrencyValue(Math.min(subtotalDisplay, raw));
+  }, [subtotalDisplay, discountType, rawDiscountVal]);
+
+  const afterDiscount = Math.max(0, subtotalDisplay - discountAmountDisplay);
+
+  const rawSurchargeVal = parseSafePositiveNumber(surchargeValue, 0);
+  const surchargeAmountDisplay = useMemo(() => {
+    if (afterDiscount <= 0 || rawSurchargeVal <= 0) return 0;
+    const raw =
+      surchargeType === 'percent'
+        ? (afterDiscount * Math.min(500, rawSurchargeVal)) / 100
+        : rawSurchargeVal;
+    return roundCurrencyValue(raw);
+  }, [afterDiscount, surchargeType, rawSurchargeVal]);
+
+  const totalDisplay = roundCurrencyValue(afterDiscount + surchargeAmountDisplay);
+
+  useEffect(() => {
+    if (status === 'cobrado') {
+      setDeposit(totalDisplay > 0 ? String(totalDisplay) : '');
+    }
+  }, [totalDisplay, status]);
+
   const rawDeposit = parseSafePositiveNumber(deposit, 0);
   const numericDeposit =
     status === 'cobrado'
-      ? numericAmount
-      : Math.min(numericAmount > 0 ? numericAmount : rawDeposit, rawDeposit);
-  const pendingBalance = Math.max(0, numericAmount - numericDeposit);
-  const qrChargeAmount = status === 'cobrado' ? numericAmount : numericDeposit > 0 ? numericDeposit : numericAmount;
+      ? totalDisplay
+      : Math.min(totalDisplay > 0 ? totalDisplay : rawDeposit, rawDeposit);
+  const pendingBalance = Math.max(0, roundCurrencyValue(totalDisplay - numericDeposit));
+  const qrChargeAmount =
+    status === 'cobrado' ? totalDisplay : numericDeposit > 0 ? numericDeposit : totalDisplay;
   const baseEquivalentAmount = isSecondaryCurrency
-    ? roundCurrencyValue(convertToBaseCurrency(numericAmount, activeRate))
-    : numericAmount;
+    ? roundCurrencyValue(convertToBaseCurrency(totalDisplay, activeRate))
+    : totalDisplay;
   const effectiveBrandName = profile?.brandName || brandName || 'TH3 BNB';
 
   useEffect(() => {
@@ -278,7 +461,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
               : prev
           );
           setStatus('cobrado');
-          setDeposit(amount);
+          setDeposit(String(totalDisplay));
           notify('¡Pago aprobado en Mercado Pago!');
         } else if (res.isCanceled) {
           setMpOrder((prev) =>
@@ -302,7 +485,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           );
         }
       } catch {
-        // Keep polling on transient network error
+        // Ignore transient poll failure
       }
     };
 
@@ -314,115 +497,265 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [open, mpOrder, mpConfig.accessToken, amount, notify]);
+  }, [open, mpOrder, mpConfig.accessToken, totalDisplay, notify]);
 
-  const handleSelectProduct = (nextProdId: string) => {
-    setSelectedProductId(nextProdId);
-    const chosen = products.find((p) => p.id === nextProdId);
-    if (!chosen) return;
-    const cleanQty = Math.max(1, quantity);
-    const baseTotal = chosen.price * cleanQty;
-    const convertedTotal = isSecondaryCurrency
-      ? roundCurrencyValue(convertFromBaseCurrency(baseTotal, activeRate))
-      : roundCurrencyValue(baseTotal);
-    const nextAmtStr = String(convertedTotal);
-    setAmount(nextAmtStr);
-    if (status === 'cobrado') {
-      setDeposit(nextAmtStr);
+  const addProductToCart = (product: ProductRecord) => {
+    const unitDisplay = isSecondaryCurrency
+      ? roundCurrencyValue(convertFromBaseCurrency(product.price, activeRate))
+      : roundCurrencyValue(product.price);
+
+    setCartItems((prev) => {
+      const existing = prev.find((it) => it.productId === product.id);
+      if (existing) {
+        const nextQty = existing.quantity + 1;
+        return prev.map((it) =>
+          it.id === existing.id
+            ? {
+                ...it,
+                quantity: nextQty,
+                subtotal: roundCurrencyValue(nextQty * it.unitPrice),
+              }
+            : it
+        );
+      }
+      return [
+        ...prev,
+        {
+          id: makeCartItemId(),
+          productId: product.id,
+          name: product.name,
+          sku: product.sku || product.barcode || undefined,
+          quantity: 1,
+          unitPrice: unitDisplay,
+          subtotal: unitDisplay,
+        },
+      ];
+    });
+    setProductQuery('');
+  };
+
+  const handleAddManualItem = () => {
+    const cleanName = sanitizePlainLine(manualName, 140);
+    const cleanPrice = parseSafePositiveNumber(manualPrice, 0);
+    const cleanQty = Math.max(1, Math.round(parseSafePositiveNumber(manualQty, 1)));
+    if (!cleanName) {
+      notify('Ingresá una descripción para el ítem manual.', 'error');
+      return;
     }
+    if (cleanPrice <= 0) {
+      notify('Ingresá un precio unitario mayor a 0.', 'error');
+      return;
+    }
+    setCartItems((prev) => [
+      ...prev,
+      {
+        id: makeCartItemId(),
+        name: cleanName,
+        quantity: cleanQty,
+        unitPrice: roundCurrencyValue(cleanPrice),
+        subtotal: roundCurrencyValue(cleanQty * cleanPrice),
+      },
+    ]);
+    setManualName('');
+    setManualQty('1');
+    setManualPrice('');
+    setShowManualForm(false);
+  };
+
+  const handleUpdateCartQty = (itemId: string, nextQty: number) => {
+    const cleanQty = Math.max(1, Math.min(10_000, Math.round(nextQty || 1)));
+    setCartItems((prev) =>
+      prev.map((it) =>
+        it.id === itemId
+          ? {
+              ...it,
+              quantity: cleanQty,
+              subtotal: roundCurrencyValue(cleanQty * it.unitPrice),
+            }
+          : it
+      )
+    );
+  };
+
+  const handleUpdateCartUnitPrice = (itemId: string, rawPrice: string) => {
+    const cleanPrice = parseSafePositiveNumber(rawPrice, 0);
+    setCartItems((prev) =>
+      prev.map((it) =>
+        it.id === itemId
+          ? {
+              ...it,
+              unitPrice: roundCurrencyValue(cleanPrice),
+              subtotal: roundCurrencyValue(it.quantity * cleanPrice),
+            }
+          : it
+      )
+    );
+  };
+
+  const handleRemoveCartItem = (itemId: string) => {
+    setCartItems((prev) => prev.filter((it) => it.id !== itemId));
   };
 
   const handleCurrencyChange = (nextRaw: string) => {
     const nextCode = sanitizeCurrencyCode(nextRaw);
     if (nextCode === selectedCurrency) return;
-    const nextRate =
-      getCurrencyRateFromBase(nextCode, baseCurrency, secondaryCurrencies) ?? 1;
 
-    if (selectedProduct) {
-      const baseTotal = selectedProduct.price * Math.max(1, quantity);
-      const nextAmountNum =
-        nextCode === baseCurrency
-          ? roundCurrencyValue(baseTotal)
-          : roundCurrencyValue(convertFromBaseCurrency(baseTotal, nextRate));
-      const nextAmtStr = String(nextAmountNum);
-      setAmount(nextAmtStr);
-      if (status === 'cobrado') {
-        setDeposit(nextAmtStr);
-      } else if (deposit.trim() && Number(deposit) > 0) {
-        const convertedDep = roundCurrencyValue(
-          convertBetweenCurrencies(
-            Number(deposit),
-            selectedCurrency,
-            nextCode,
-            baseCurrency,
-            secondaryCurrencies
-          )
-        );
-        setDeposit(String(convertedDep));
-      }
-    } else {
-      if (amount.trim() && Number(amount) > 0) {
-        const convertedAmt = roundCurrencyValue(
-          convertBetweenCurrencies(
-            Number(amount),
-            selectedCurrency,
-            nextCode,
-            baseCurrency,
-            secondaryCurrencies
-          )
-        );
-        const nextAmtStr = String(convertedAmt);
-        setAmount(nextAmtStr);
-        if (status === 'cobrado') {
-          setDeposit(nextAmtStr);
-        }
-      }
-      if (status !== 'cobrado' && deposit.trim() && Number(deposit) > 0) {
-        const convertedDep = roundCurrencyValue(
-          convertBetweenCurrencies(
-            Number(deposit),
-            selectedCurrency,
-            nextCode,
-            baseCurrency,
-            secondaryCurrencies
-          )
-        );
-        setDeposit(String(convertedDep));
-      }
+    const convertVal = (val: number) =>
+      roundCurrencyValue(
+        convertBetweenCurrencies(
+          val,
+          selectedCurrency,
+          nextCode,
+          baseCurrency,
+          secondaryCurrencies
+        )
+      );
+
+    setCartItems((prev) =>
+      prev.map((it) => {
+        const product = it.productId ? products.find((p) => p.id === it.productId) : undefined;
+        const nextRate =
+          getCurrencyRateFromBase(nextCode, baseCurrency, secondaryCurrencies) ?? 1;
+        const nextUnit = product
+          ? nextCode === baseCurrency
+            ? roundCurrencyValue(product.price)
+            : roundCurrencyValue(convertFromBaseCurrency(product.price, nextRate))
+          : convertVal(it.unitPrice);
+        return {
+          ...it,
+          unitPrice: nextUnit,
+          subtotal: roundCurrencyValue(nextUnit * it.quantity),
+        };
+      })
+    );
+
+    if (discountType === 'fixed' && discountValue.trim() && Number(discountValue) > 0) {
+      setDiscountValue(String(convertVal(Number(discountValue))));
     }
-
+    if (surchargeType === 'fixed' && surchargeValue.trim() && Number(surchargeValue) > 0) {
+      setSurchargeValue(String(convertVal(Number(surchargeValue))));
+    }
+    if (status !== 'cobrado' && deposit.trim() && Number(deposit) > 0) {
+      setDeposit(String(convertVal(Number(deposit))));
+    }
     setSelectedCurrency(nextCode);
   };
 
-  const handleQtyChange = (val: number) => {
-    const clean = Math.max(1, Math.floor(val || 1));
-    setQuantity(clean);
-    if (selectedProduct) {
-      const baseTotal = selectedProduct.price * clean;
-      const convertedTotal = isSecondaryCurrency
-        ? roundCurrencyValue(convertFromBaseCurrency(baseTotal, activeRate))
-        : roundCurrencyValue(baseTotal);
-      const nextAmt = String(convertedTotal);
-      setAmount(nextAmt);
-      if (status === 'cobrado') {
-        setDeposit(nextAmt);
-      }
+  const filteredProducts = useMemo(() => {
+    const q = productQuery.trim().toLowerCase();
+    if (!q) return products.slice(0, 8);
+    return products
+      .filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          (p.sku || '').toLowerCase().includes(q) ||
+          (p.barcode || '').toLowerCase().includes(q) ||
+          (p.internalCode || '').toLowerCase().includes(q) ||
+          (p.brand || '').toLowerCase().includes(q)
+      )
+      .slice(0, 12);
+  }, [products, productQuery]);
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return;
+    const q = productQuery.trim().toLowerCase();
+    if (!q) return;
+    const exactMatch = products.find(
+      (p) =>
+        (p.barcode || '').trim().toLowerCase() === q ||
+        (p.sku || '').trim().toLowerCase() === q ||
+        (p.internalCode || '').trim().toLowerCase() === q
+    );
+    const chosen = exactMatch || (filteredProducts.length === 1 ? filteredProducts[0] : null);
+    if (chosen) {
+      e.preventDefault();
+      addProductToCart(chosen);
+      notify(`Sumado: ${chosen.name}`);
     }
   };
 
-  const handleAmountChange = (val: string) => {
-    setAmount(val);
-    if (status === 'cobrado') {
-      setDeposit(val);
+  const handleDetectedBarcode = (code: string) => {
+    const trimmed = code.trim().toLowerCase();
+    const matched = products.find(
+      (p) =>
+        (p.barcode || '').trim().toLowerCase() === trimmed ||
+        (p.sku || '').trim().toLowerCase() === trimmed ||
+        (p.internalCode || '').trim().toLowerCase() === trimmed
+    );
+    if (matched) {
+      addProductToCart(matched);
+      setScannerStatus(`Agregado al carrito: ${matched.name}`);
+      notify(`Escaneado: ${matched.name}`);
+    } else {
+      setProductQuery(code);
+      setScannerStatus(`Código ${code} leído (sin coincidencia exacta en inventario).`);
+    }
+    stopScanner();
+  };
+
+  const startScanner = async () => {
+    if (scanning) {
+      stopScanner();
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setScannerStatus('Cámara no disponible en este navegador. Usá lector USB o buscador.');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+      });
+      streamRef.current = stream;
+      setScanning(true);
+      setScannerStatus('Apuntá la cámara al código de barras...');
+
+      window.setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(() => {});
+        }
+      }, 60);
+
+      const BarcodeDetectorCtor = (
+        window as unknown as {
+          BarcodeDetector?: new (opts: { formats: string[] }) => {
+            detect: (src: HTMLVideoElement) => Promise<Array<{ rawValue: string }>>;
+          };
+        }
+      ).BarcodeDetector;
+
+      if (!BarcodeDetectorCtor) {
+        setScannerStatus('Cámara activa, pero este navegador no soporta BarcodeDetector nativo.');
+        return;
+      }
+
+      const detector = new BarcodeDetectorCtor({
+        formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'qr_code'],
+      });
+
+      scanTimerRef.current = window.setInterval(async () => {
+        if (!videoRef.current || videoRef.current.readyState < 2) return;
+        try {
+          const detected = await detector.detect(videoRef.current);
+          if (detected.length > 0 && detected[0].rawValue) {
+            handleDetectedBarcode(detected[0].rawValue);
+          }
+        } catch {
+          // Ignore single-frame detection errors
+        }
+      }, 350);
+    } catch {
+      setScannerStatus('No se pudo acceder a la cámara. Verificá los permisos.');
     }
   };
 
   const handleDepositChange = (val: string) => {
     setDeposit(val);
     const numVal = Math.max(0, Number(val || 0));
-    if (numericAmount > 0 && numVal >= numericAmount) {
+    if (totalDisplay > 0 && numVal >= totalDisplay) {
       setStatus('cobrado');
-    } else if (numericAmount > 0 && numVal < numericAmount) {
+    } else if (totalDisplay > 0 && numVal < totalDisplay) {
       setStatus('pendiente');
     }
   };
@@ -430,8 +763,8 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const handleStatusChange = (nextStatus: 'pendiente' | 'cobrado') => {
     setStatus(nextStatus);
     if (nextStatus === 'cobrado') {
-      setDeposit(amount);
-    } else if (Number(deposit || 0) >= numericAmount) {
+      setDeposit(String(totalDisplay));
+    } else if (Number(deposit || 0) >= totalDisplay) {
       setDeposit('0');
     }
   };
@@ -446,21 +779,92 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       notify('Ingresá el nombre del cliente.', 'error');
       return;
     }
-    const cleanTxAmount = parseSafePositiveNumber(amount, 0);
-    if (cleanTxAmount <= 0) {
-      notify('Ingresá un monto mayor a 0.', 'error');
+
+    // If user typed a quick manual item but didn't hit "+ Agregar", include it automatically if cart is empty
+    let resolvedItems = [...cartItems];
+    if (resolvedItems.length === 0 && manualName.trim() && parseSafePositiveNumber(manualPrice, 0) > 0) {
+      const mQty = Math.max(1, Math.round(parseSafePositiveNumber(manualQty, 1)));
+      const mPrice = roundCurrencyValue(parseSafePositiveNumber(manualPrice, 0));
+      resolvedItems = [
+        {
+          id: makeCartItemId(),
+          name: sanitizePlainLine(manualName, 140),
+          quantity: mQty,
+          unitPrice: mPrice,
+          subtotal: roundCurrencyValue(mQty * mPrice),
+        },
+      ];
+    }
+
+    if (resolvedItems.length === 0) {
+      notify('Agregá al menos un producto o ítem a la venta.', 'error');
       return;
     }
-    const cleanQty = Math.max(1, parseSafeNonNegativeInt(quantity, 1, 10_000));
 
-    if (
-      selectedProduct &&
-      selectedProduct.trackStock &&
-      !selectedProduct.allowNoStock &&
-      cleanQty > selectedProduct.stock
-    ) {
-      notify(`Stock insuficiente (disponible: ${selectedProduct.stock} u.).`, 'error');
+    const subtotal = roundCurrencyValue(
+      resolvedItems.reduce((sum, it) => sum + it.quantity * it.unitPrice, 0)
+    );
+    const discAmt =
+      rawDiscountVal > 0 && subtotal > 0
+        ? roundCurrencyValue(
+            Math.min(
+              subtotal,
+              discountType === 'percent'
+                ? (subtotal * Math.min(100, rawDiscountVal)) / 100
+                : rawDiscountVal
+            )
+          )
+        : 0;
+    const afterDisc = Math.max(0, subtotal - discAmt);
+    const surAmt =
+      rawSurchargeVal > 0 && afterDisc > 0
+        ? roundCurrencyValue(
+            surchargeType === 'percent'
+              ? (afterDisc * Math.min(500, rawSurchargeVal)) / 100
+              : rawSurchargeVal
+          )
+        : 0;
+    const cleanTxAmount = roundCurrencyValue(afterDisc + surAmt);
+
+    if (cleanTxAmount <= 0) {
+      notify('El monto total debe ser mayor a 0.', 'error');
       return;
+    }
+
+    // Stock delta validation across all inventory items
+    const prevQtyByProduct = new Map<string, number>();
+    if (editSale) {
+      const prevDetails = parseSaleDetails(editSale);
+      for (const it of prevDetails.items) {
+        if (it.productId) {
+          prevQtyByProduct.set(it.productId, (prevQtyByProduct.get(it.productId) || 0) + it.quantity);
+        }
+      }
+    }
+    const nextQtyByProduct = new Map<string, number>();
+    for (const it of resolvedItems) {
+      if (it.productId) {
+        nextQtyByProduct.set(it.productId, (nextQtyByProduct.get(it.productId) || 0) + it.quantity);
+      }
+    }
+
+    const allTouchedProductIds = new Set([
+      ...prevQtyByProduct.keys(),
+      ...nextQtyByProduct.keys(),
+    ]);
+    for (const prodId of allTouchedProductIds) {
+      const product = products.find((p) => p.id === prodId);
+      if (!product || !product.trackStock || product.allowNoStock) continue;
+      const oldQty = prevQtyByProduct.get(prodId) || 0;
+      const newQty = nextQtyByProduct.get(prodId) || 0;
+      const delta = newQty - oldQty;
+      if (delta > 0 && delta > product.stock) {
+        notify(
+          `Stock insuficiente para "${product.name}" (disponible: ${product.stock} u.).`,
+          'error'
+        );
+        return;
+      }
     }
 
     if (paymentMethod === 'transferencia' && transferCfg.paymentLink.trim()) {
@@ -470,23 +874,56 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       }
     }
 
+    const toBase = (val: number) =>
+      isSecondaryCurrency ? roundCurrencyValue(convertToBaseCurrency(val, activeRate)) : roundCurrencyValue(val);
+
+    const baseItems: SaleCartItem[] = resolvedItems.map((it) => {
+      const baseUnit = toBase(it.unitPrice);
+      return {
+        ...it,
+        unitPrice: baseUnit,
+        subtotal: roundCurrencyValue(baseUnit * it.quantity),
+      };
+    });
+    const baseSubtotal = toBase(subtotal);
+    const baseDiscountAmount = toBase(discAmt);
+    const baseDiscountValue = discountType === 'fixed' ? toBase(rawDiscountVal) : rawDiscountVal;
+    const baseSurchargeAmount = toBase(surAmt);
+    const baseSurchargeValue = surchargeType === 'fixed' ? toBase(rawSurchargeVal) : rawSurchargeVal;
+    const cleanAmount = toBase(cleanTxAmount);
+
     const cleanTxDeposit =
       status === 'cobrado'
         ? cleanTxAmount
         : Math.min(cleanTxAmount, parseSafePositiveNumber(deposit, 0));
-
-    const cleanAmount = isSecondaryCurrency
-      ? roundCurrencyValue(convertToBaseCurrency(cleanTxAmount, activeRate))
-      : cleanTxAmount;
     const cleanDeposit =
-      status === 'cobrado'
-        ? cleanAmount
-        : Math.min(
-            cleanAmount,
-            isSecondaryCurrency
-              ? roundCurrencyValue(convertToBaseCurrency(cleanTxDeposit, activeRate))
-              : cleanTxDeposit
-          );
+      status === 'cobrado' ? cleanAmount : Math.min(cleanAmount, toBase(cleanTxDeposit));
+
+    // Update payment ledger entries
+    const prevDepositBase = editSale ? parseSalePaymentInfo(editSale).deposit : 0;
+    let nextPayments = [...existingPayments];
+    const nowIso = new Date().toISOString();
+    if (!editSale) {
+      if (cleanDeposit > 0) {
+        nextPayments = [
+          {
+            id: `sp-${Date.now().toString(36)}`,
+            amount: cleanDeposit,
+            method: paymentMethod,
+            date: nowIso,
+            note: status === 'cobrado' ? 'Cobro en mostrador' : 'Seña / anticipo',
+          },
+        ];
+      }
+    } else if (cleanDeposit > prevDepositBase + 0.01) {
+      nextPayments.push({
+        id: `sp-${Date.now().toString(36)}`,
+        amount: roundCurrencyValue(cleanDeposit - prevDepositBase),
+        method: paymentMethod,
+        date: nowIso,
+        note: 'Actualización de cobro',
+      });
+    }
 
     const serializedStatus = serializeSaleStatus({
       status,
@@ -495,6 +932,26 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       amount: cleanAmount,
       currency: selectedCurrency,
       rate: isSecondaryCurrency ? activeRate : undefined,
+      meta: {
+        items: baseItems,
+        subtotal: baseSubtotal,
+        ...(baseDiscountAmount > 0
+          ? {
+              discountType,
+              discountValue: baseDiscountValue,
+              discountAmount: baseDiscountAmount,
+            }
+          : {}),
+        ...(baseSurchargeAmount > 0
+          ? {
+              surchargeType,
+              surchargeValue: baseSurchargeValue,
+              surchargeAmount: baseSurchargeAmount,
+            }
+          : {}),
+        payments: nextPayments,
+        note: sanitizeText(saleNote, 400),
+      },
     });
 
     if (paymentMethod === 'transferencia') {
@@ -507,9 +964,16 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       });
     }
 
+    const totalQuantity = Math.max(
+      1,
+      resolvedItems.reduce((sum, it) => sum + Math.max(1, it.quantity), 0)
+    );
+    const firstProductItem = resolvedItems.find((it) => Boolean(it.productId));
+    const summaryProductLabel = summarizeSaleItemsLabel(baseItems);
+
     setSaving(true);
     try {
-      let resolvedClientId = matchedClient?.id;
+      let resolvedClientId = matchedClient?.id || editSale?.clientId;
 
       if (!resolvedClientId) {
         resolvedClientId = generateDocId('clients');
@@ -523,7 +987,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         );
       }
 
-      const saleId = generateDocId('sales');
+      const saleId = editSale?.id || generateDocId('sales');
       const finalInvoice = sanitizePlainLine(
         invoice || `FV-${Date.now().toString().slice(-4)}`,
         60
@@ -535,9 +999,9 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         clientId: clampStr(resolvedClientId, 128),
         clientName: cleanClientName,
         invoice: finalInvoice,
-        productId: clampStr(selectedProduct?.id, 128),
-        productName: sanitizePlainLine(selectedProduct?.name || '', 200),
-        quantity: selectedProduct ? cleanQty : undefined,
+        productId: clampStr(firstProductItem?.productId, 128),
+        productName: summaryProductLabel,
+        quantity: totalQuantity,
         amount: cleanAmount,
         status: serializedStatus,
         dueDate: finalDueDate,
@@ -545,31 +1009,40 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
 
       await upsertRow('sales', salePayload);
 
-      if (selectedProduct && selectedProduct.trackStock) {
-        await updateRow('products', selectedProduct.id, {
-          stock: Math.max(0, selectedProduct.stock - cleanQty),
-        });
+      // Apply stock delta per inventory product
+      for (const prodId of allTouchedProductIds) {
+        const product = products.find((p) => p.id === prodId);
+        if (!product || !product.trackStock) continue;
+        const oldQty = prevQtyByProduct.get(prodId) || 0;
+        const newQty = nextQtyByProduct.get(prodId) || 0;
+        const delta = newQty - oldQty;
+        if (delta !== 0) {
+          await updateRow('products', product.id, {
+            stock: Math.max(0, Number(product.stock || 0) - delta),
+          });
+        }
       }
 
-      const createdRecord: SaleRecord = {
+      const savedRecord: SaleRecord = {
         id: saleId,
         ownerId,
         clientId: resolvedClientId,
         clientName: cleanClientName,
         invoice: finalInvoice,
-        productId: selectedProduct?.id,
-        productName: selectedProduct?.name,
-        quantity: selectedProduct ? cleanQty : undefined,
+        productId: firstProductItem?.productId,
+        productName: summaryProductLabel,
+        quantity: totalQuantity,
         amount: cleanAmount,
         status: serializedStatus,
         dueDate: finalDueDate,
-        createdAt: Date.now(),
+        createdAt: editSale?.createdAt || Date.now(),
       };
 
-      notify('Venta registrada.');
+      notify(editSale ? 'Venta actualizada.' : 'Venta registrada.');
       onClose();
+      onSaved?.(savedRecord);
       if (openPrintAfter) {
-        onCreated?.(createdRecord);
+        onCreated?.(savedRecord);
       }
     } catch (err) {
       notify(sanitizeDbErrorMessage(err, 'No se pudo guardar la venta.'), 'error');
@@ -674,10 +1147,10 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       return;
     }
 
-    const cleanQty = Math.max(1, parseSafeNonNegativeInt(quantity, 1, 10_000));
-    const description = selectedProduct
-      ? `${selectedProduct.name} x${cleanQty}`
-      : `Venta ${invoice || effectiveBrandName}`;
+    const description =
+      cartItems.length > 0
+        ? summarizeSaleItemsLabel(cartItems)
+        : `Venta ${invoice || effectiveBrandName}`;
     const extRef = `${(invoice || 'FV').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 20) || 'FV'}-${Date.now().toString().slice(-6)}`;
 
     setMpBusy(true);
@@ -762,7 +1235,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
             : prev
         );
         setStatus('cobrado');
-        setDeposit(amount);
+        setDeposit(String(totalDisplay));
         notify('¡Pago aprobado en Mercado Pago!');
       } else if (res.isCanceled) {
         setMpOrder((prev) =>
@@ -818,150 +1291,269 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   };
 
   return (
-    <ModalShell open={open} onClose={onClose} title="Nueva venta" maxWidth="lg">
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      title={editSale ? `Editar venta · ${editSale.invoice}` : 'Nueva venta de mostrador'}
+      maxWidth="2xl"
+    >
       <form onSubmit={handleSubmit} className="space-y-4">
-        {!preselectedProduct && products.length > 0 && (
-          <div>
-            <label
-              htmlFor="sale-product-select"
-              className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300"
-            >
-              Producto del inventario (opcional)
-            </label>
-            <select
-              id="sale-product-select"
-              value={selectedProductId}
-              onChange={(e) => handleSelectProduct(e.target.value)}
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            >
-              <option value="">Venta libre / concepto manual</option>
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} · {formatCurrency(p.price, baseCurrency)}
-                  {p.trackStock ? ` (Stock: ${p.stock} u.)` : ''}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {selectedProduct && (
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-sky-200 bg-sky-50/70 p-3.5 dark:border-sky-900/60 dark:bg-sky-950/30">
-            <div className="flex min-w-0 items-center gap-2.5">
-              <Package className="h-5 w-5 shrink-0 text-[#0072BB] dark:text-sky-400" />
-              <div className="min-w-0">
-                <div className="truncate text-sm font-bold text-slate-900 dark:text-white">
-                  {selectedProduct.name}
-                </div>
-                <div className="text-xs text-slate-500">
-                  {formatCurrency(
-                    isSecondaryCurrency
-                      ? roundCurrencyValue(convertFromBaseCurrency(selectedProduct.price, activeRate))
-                      : selectedProduct.price,
-                    selectedCurrency
-                  )}{' '}
-                  c/u{selectedProduct.trackStock ? ` · Stock: ${selectedProduct.stock}` : ''}
-                </div>
-              </div>
+        {/* Product Quick Search + Barcode Scanner + Manual Concept */}
+        <div className="space-y-2.5 rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-800/40">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-100">
+              <ScanBarcode className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
+              <span>Productos e ítems ({cartItems.length})</span>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <div className="w-20">
-                <label className="mb-0.5 block text-[10px] font-semibold text-slate-500">
-                  Cantidad
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  value={quantity}
-                  onChange={(e) => handleQtyChange(Number(e.target.value))}
-                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-center font-mono-num text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                />
-              </div>
-              {!preselectedProduct && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => void startScanner()}
+                className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-semibold transition whitespace-nowrap shrink-0 ${
+                  scanning
+                    ? 'border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/50 dark:text-rose-300'
+                    : 'border-slate-200 bg-white text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'
+                }`}
+              >
+                <Camera className="h-3.5 w-3.5" />
+                {scanning ? 'Detener cámara' : 'Escanear código'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowManualForm((prev) => !prev)}
+                className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Ítem manual
+              </button>
+            </div>
+          </div>
+
+          {scanning && (
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-black dark:border-slate-700">
+              <video ref={videoRef} className="h-36 w-full object-cover" muted playsInline />
+            </div>
+          )}
+          {scannerStatus && (
+            <p className="text-[11px] font-medium text-slate-600 dark:text-slate-300">
+              {scannerStatus}
+            </p>
+          )}
+
+          {products.length > 0 && (
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={productQuery}
+                onChange={(e) => setProductQuery(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                placeholder="Buscar por nombre, SKU o escanear código de barras (Enter)..."
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+              />
+              {productQuery && (
                 <button
                   type="button"
-                  onClick={() => setSelectedProductId('')}
-                  title="Quitar producto seleccionado"
-                  aria-label="Quitar producto"
-                  className="mt-3.5 flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-white hover:text-slate-700 dark:hover:bg-slate-800"
+                  onClick={() => setProductQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
                 >
                   <X className="h-4 w-4" />
                 </button>
               )}
             </div>
-          </div>
-        )}
+          )}
 
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Nombre del cliente *
-          </label>
-          <input
-            type="text"
-            required
-            list="sale-clients-datalist"
-            value={clientName}
-            onChange={(e) => setClientName(e.target.value)}
-            placeholder="Escribí o seleccioná un cliente"
-            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-          />
-          <datalist id="sale-clients-datalist">
-            {clients.map((c) => (
-              <option key={c.id} value={c.name} />
-            ))}
-          </datalist>
-          <p className="mt-1 text-[11px] text-slate-500">
-            {matchedClient
-              ? 'Cliente existente seleccionado.'
-              : 'Si es nuevo, se agregará automáticamente a Clientes.'}
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/40">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Coins className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-              <label
-                htmlFor="new-sale-currency-select"
-                className="text-xs font-bold text-slate-800 dark:text-slate-100"
-              >
-                Divisa de la transacción
-              </label>
+          {productQuery.trim().length > 0 && (
+            <div className="max-h-44 overflow-y-auto divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-700 dark:bg-slate-900">
+              {filteredProducts.length === 0 ? (
+                <div className="px-3 py-2.5 text-xs text-slate-500">
+                  No encontramos productos para &ldquo;{productQuery}&rdquo;. Podés agregarlo como ítem manual.
+                </div>
+              ) : (
+                filteredProducts.map((p) => {
+                  const displayPrice = isSecondaryCurrency
+                    ? roundCurrencyValue(convertFromBaseCurrency(p.price, activeRate))
+                    : roundCurrencyValue(p.price);
+                  const outOfStock = p.trackStock && !p.allowNoStock && p.stock <= 0;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      disabled={outOfStock}
+                      onClick={() => addProductToCart(p)}
+                      className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs transition hover:bg-sky-50/70 disabled:opacity-50 dark:hover:bg-sky-950/30"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold text-slate-900 dark:text-white">
+                          {p.name}
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {p.sku || p.barcode ? `${p.sku || p.barcode} · ` : ''}
+                          {p.trackStock ? `Stock: ${p.stock} u.` : 'Sin control de stock'}
+                          {outOfStock ? ' · Agotado' : ''}
+                        </div>
+                      </div>
+                      <span className="shrink-0 font-mono-num font-bold text-[#0072BB] dark:text-sky-400">
+                        + {formatCurrency(displayPrice, selectedCurrency)}
+                      </span>
+                    </button>
+                  );
+                })
+              )}
             </div>
-            {isSecondaryCurrency ? (
-              <span className="rounded-lg bg-emerald-50 px-2 py-0.5 font-mono-num text-[11px] font-semibold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
-                1 {currencySymbol} = {formatCurrency(activeRate, baseCurrency)}
-              </span>
-            ) : (
-              <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                Moneda base del taller
-              </span>
-            )}
-          </div>
-          <select
-            id="new-sale-currency-select"
-            value={selectedCurrency}
-            onChange={(e) => handleCurrencyChange(e.target.value)}
-            className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-          >
-            <option value={baseCurrency}>
-              {baseCurrencyOption.label} · Base
-            </option>
-            {secondaryCurrencies.map((sec) => {
-              const secOpt = getCurrencyOption(sec.code);
-              return (
-                <option key={sec.code} value={sec.code}>
-                  {secOpt.label} · 1 {secOpt.symbol} = {formatCurrency(sec.rate, baseCurrency)}
-                </option>
-              );
-            })}
-          </select>
+          )}
+
+          {showManualForm && (
+            <div className="grid gap-2 rounded-xl border border-slate-200 bg-white p-2.5 sm:grid-cols-12 dark:border-slate-700 dark:bg-slate-900">
+              <div className="sm:col-span-6">
+                <input
+                  type="text"
+                  value={manualName}
+                  onChange={(e) => setManualName(e.target.value)}
+                  placeholder="Descripción del servicio o producto..."
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <input
+                  type="number"
+                  min="1"
+                  value={manualQty}
+                  onChange={(e) => setManualQty(e.target.value)}
+                  placeholder="Cant."
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-center font-mono-num text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={manualPrice}
+                  onChange={(e) => setManualPrice(e.target.value)}
+                  placeholder={`Precio (${currencySymbol})`}
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-right font-mono-num text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <button
+                  type="button"
+                  onClick={handleAddManualItem}
+                  className="h-9 w-full rounded-lg bg-[#0072BB] px-2 text-xs font-semibold text-white hover:bg-[#005f9c]"
+                >
+                  Sumar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Cart Items List */}
+          {cartItems.length > 0 && (
+            <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-700 dark:bg-slate-900">
+              {cartItems.map((item) => {
+                const prod = item.productId
+                  ? products.find((p) => p.id === item.productId)
+                  : undefined;
+                return (
+                  <div
+                    key={item.id}
+                    className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5"
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <Package className="h-4 w-4 shrink-0 text-[#0072BB] dark:text-sky-400" />
+                      <div className="min-w-0">
+                        <div className="truncate text-xs font-bold text-slate-900 dark:text-white">
+                          {item.name}
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {prod?.trackStock ? `Stock: ${prod.stock} u.` : 'Ítem manual'}
+                          {item.sku ? ` · ${item.sku}` : ''}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="inline-flex h-8 items-center rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateCartQty(item.id, item.quantity - 1)}
+                          className="flex h-full w-7 items-center justify-center text-slate-600 hover:text-slate-900 dark:text-slate-300"
+                          aria-label="Restar cantidad"
+                        >
+                          <Minus className="h-3 w-3" />
+                        </button>
+                        <span className="min-w-[26px] text-center font-mono-num text-xs font-bold text-slate-900 dark:text-white">
+                          {item.quantity}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateCartQty(item.id, item.quantity + 1)}
+                          className="flex h-full w-7 items-center justify-center text-slate-600 hover:text-slate-900 dark:text-slate-300"
+                          aria-label="Sumar cantidad"
+                        >
+                          <Plus className="h-3 w-3" />
+                        </button>
+                      </div>
+
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={item.unitPrice}
+                        onChange={(e) => handleUpdateCartUnitPrice(item.id, e.target.value)}
+                        aria-label="Precio unitario"
+                        className="h-8 w-24 rounded-lg border border-slate-200 bg-white px-2 text-right font-mono-num text-xs font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                      />
+
+                      <span className="min-w-[78px] text-right font-mono-num text-xs font-bold text-slate-900 dark:text-white">
+                        {formatCurrency(item.quantity * item.unitPrice, selectedCurrency)}
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveCartItem(item.id)}
+                        aria-label="Quitar ítem"
+                        className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
+        {/* Client + Invoice + Date */}
+        <div className="grid gap-3 sm:grid-cols-12">
+          <div className="sm:col-span-6">
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Comprobante / Factura
+              Nombre del cliente *
+            </label>
+            <input
+              type="text"
+              required
+              list="sale-clients-datalist"
+              value={clientName}
+              onChange={(e) => setClientName(e.target.value)}
+              placeholder="Escribí o seleccioná un cliente"
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            />
+            <datalist id="sale-clients-datalist">
+              {clients.map((c) => (
+                <option key={c.id} value={c.name} />
+              ))}
+            </datalist>
+            <p className="mt-1 text-[11px] text-slate-500">
+              {matchedClient
+                ? 'Cliente existente seleccionado.'
+                : 'Si es nuevo, se guardará automáticamente.'}
+            </p>
+          </div>
+          <div className="sm:col-span-3">
+            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+              Comprobante
             </label>
             <input
               type="text"
@@ -970,9 +1562,9 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
               className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-mono-num text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
           </div>
-          <div>
+          <div className="sm:col-span-3">
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Fecha / Vencimiento
+              Fecha
             </label>
             <input
               type="date"
@@ -981,104 +1573,230 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
               className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Monto total ({currencySymbol}) *
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              required
-              value={amount}
-              onChange={(e) => handleAmountChange(e.target.value)}
-              placeholder="25000"
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-mono-num text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            />
-            {isSecondaryCurrency && numericAmount > 0 && (
-              <div className="mt-1 font-mono-num text-[11px] text-slate-500 dark:text-slate-400">
-                Equivale a {formatCurrency(baseEquivalentAmount, baseCurrency)} ({baseCurrencyOption.code})
+        </div>
+
+        {/* Currency Selector */}
+        {secondaryCurrencies.length > 0 && (
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/40">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Coins className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                <label
+                  htmlFor="new-sale-currency-select"
+                  className="text-xs font-bold text-slate-800 dark:text-slate-100"
+                >
+                  Divisa de la transacción
+                </label>
               </div>
-            )}
+              {isSecondaryCurrency && (
+                <span className="font-mono-num text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                  1 {currencySymbol} = {formatCurrency(activeRate, baseCurrency)}
+                </span>
+              )}
+            </div>
+            <select
+              id="new-sale-currency-select"
+              value={selectedCurrency}
+              onChange={(e) => handleCurrencyChange(e.target.value)}
+              className="mt-2 h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            >
+              <option value={baseCurrency}>{baseCurrencyOption.label} · Base</option>
+              {secondaryCurrencies.map((sec) => {
+                const secOpt = getCurrencyOption(sec.code);
+                return (
+                  <option key={sec.code} value={sec.code}>
+                    {secOpt.label} · 1 {secOpt.symbol} = {formatCurrency(sec.rate, baseCurrency)}
+                  </option>
+                );
+              })}
+            </select>
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Anticipo / Seña ({currencySymbol})
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={status === 'cobrado' ? amount : deposit}
-              onChange={(e) => handleDepositChange(e.target.value)}
-              placeholder="0"
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-mono-num text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            />
-            <div className="mt-1 flex items-center justify-between text-[11px]">
-              <span className="text-slate-500">Saldo pendiente:</span>
-              <span
-                className={`font-mono-num font-bold ${
-                  pendingBalance > 0
-                    ? 'text-amber-600 dark:text-amber-400'
-                    : 'text-emerald-600 dark:text-emerald-400'
-                }`}
+        )}
+
+        {/* Discount, Surcharge & Summary */}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                    Descuento
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDiscountType((t) => (t === 'percent' ? 'fixed' : 'percent'))
+                    }
+                    className="rounded border border-slate-200 px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-slate-600 hover:border-[#0072BB] dark:border-slate-700 dark:text-slate-300"
+                  >
+                    {discountType === 'percent' ? '%' : currencySymbol}
+                  </button>
+                </div>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={discountValue}
+                  onChange={(e) => setDiscountValue(e.target.value)}
+                  placeholder="0"
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 font-mono-num text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                    Recargo
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSurchargeType((t) => (t === 'percent' ? 'fixed' : 'percent'))
+                    }
+                    className="rounded border border-slate-200 px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-slate-600 hover:border-[#0072BB] dark:border-slate-700 dark:text-slate-300"
+                  >
+                    {surchargeType === 'percent' ? '%' : currencySymbol}
+                  </button>
+                </div>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={surchargeValue}
+                  onChange={(e) => setSurchargeValue(e.target.value)}
+                  placeholder="0"
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 font-mono-num text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+            </div>
+
+            <div className="mt-2.5 space-y-1 border-t border-slate-100 pt-2 text-xs dark:border-slate-800">
+              <div className="flex justify-between text-slate-500">
+                <span>Subtotal ítems</span>
+                <span className="font-mono-num">
+                  {formatCurrency(subtotalDisplay, selectedCurrency)}
+                </span>
+              </div>
+              {discountAmountDisplay > 0 && (
+                <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
+                  <span>Descuento</span>
+                  <span className="font-mono-num">
+                    -{formatCurrency(discountAmountDisplay, selectedCurrency)}
+                  </span>
+                </div>
+              )}
+              {surchargeAmountDisplay > 0 && (
+                <div className="flex justify-between text-amber-600 dark:text-amber-400">
+                  <span>Recargo</span>
+                  <span className="font-mono-num">
+                    +{formatCurrency(surchargeAmountDisplay, selectedCurrency)}
+                  </span>
+                </div>
+              )}
+              <div className="flex justify-between pt-0.5 text-sm font-extrabold text-slate-900 dark:text-white">
+                <span>Total final</span>
+                <span className="font-mono-num">
+                  {formatCurrency(totalDisplay, selectedCurrency)}
+                </span>
+              </div>
+              {isSecondaryCurrency && totalDisplay > 0 && (
+                <div className="text-right font-mono-num text-[11px] text-slate-500">
+                  Equiv. {formatCurrency(baseEquivalentAmount, baseCurrency)}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-2.5 rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                Estado del cobro
+              </label>
+              <select
+                value={status}
+                onChange={(e) => handleStatusChange(e.target.value as 'pendiente' | 'cobrado')}
+                className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               >
-                {formatCurrency(pendingBalance, selectedCurrency)}
-              </span>
+                <option value="cobrado">Cobrado (total)</option>
+                <option value="pendiente">Pendiente / Con seña</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                Importe abonado / Seña ({currencySymbol})
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={status === 'cobrado' ? String(totalDisplay || '') : deposit}
+                onChange={(e) => handleDepositChange(e.target.value)}
+                placeholder="0"
+                className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 font-mono-num text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
+              <div className="mt-1 flex items-center justify-between text-[11px]">
+                <span className="text-slate-500">Saldo pendiente:</span>
+                <span
+                  className={`font-mono-num font-bold ${
+                    pendingBalance > 0
+                      ? 'text-amber-600 dark:text-amber-400'
+                      : 'text-emerald-600 dark:text-emerald-400'
+                  }`}
+                >
+                  {formatCurrency(pendingBalance, selectedCurrency)}
+                </span>
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                Nota interna / garantía (opcional)
+              </label>
+              <input
+                type="text"
+                value={saleNote}
+                onChange={(e) => setSaleNote(e.target.value)}
+                placeholder="Ej: Garantía 30 días o detalle de entrega"
+                className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
             </div>
           </div>
         </div>
 
-        <div className="space-y-3">
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Método de pago
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {(
-                [
-                  { id: 'efectivo', label: 'Efectivo', icon: Banknote },
-                  { id: 'tarjeta', label: 'Tarjeta', icon: CreditCard },
-                  { id: 'transferencia', label: 'Transferencia', icon: Landmark },
-                ] as const
-              ).map(({ id, label, icon: Icon }) => {
-                const active = paymentMethod === id;
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => {
-                      setPaymentMethod(id);
-                      if (mpOrder && mpOrder.status !== 'paid') {
-                        setMpOrder(null);
-                      }
-                    }}
-                    className={`flex h-10 items-center justify-center gap-1.5 rounded-xl border px-2 text-xs font-semibold transition ${
-                      active
-                        ? 'border-[#0072BB] bg-[#0072BB] text-white'
-                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    <Icon className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">{label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Estado del cobro
-            </label>
-            <select
-              value={status}
-              onChange={(e) => handleStatusChange(e.target.value as 'pendiente' | 'cobrado')}
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            >
-              <option value="cobrado">Cobrado (total)</option>
-              <option value="pendiente">Pendiente / Con seña</option>
-            </select>
+        {/* Payment Method */}
+        <div>
+          <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+            Método de pago
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {(
+              [
+                { id: 'efectivo', label: 'Efectivo', icon: Banknote },
+                { id: 'tarjeta', label: 'Tarjeta', icon: CreditCard },
+                { id: 'transferencia', label: 'Transferencia', icon: Landmark },
+              ] as const
+            ).map(({ id, label, icon: Icon }) => {
+              const active = paymentMethod === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setPaymentMethod(id);
+                    if (mpOrder && mpOrder.status !== 'paid') {
+                      setMpOrder(null);
+                    }
+                  }}
+                  className={`flex h-10 items-center justify-center gap-1.5 rounded-xl border px-2 text-xs font-semibold transition whitespace-nowrap shrink-0 ${
+                    active
+                      ? 'border-[#0072BB] bg-[#0072BB] text-white'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{label}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -1292,6 +2010,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                 </div>
               </div>
             )}
+
             <div className="flex flex-wrap items-start gap-3">
               {transferQrDataUrl && (
                 <img
@@ -1475,7 +2194,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
             disabled={saving}
             className="h-11 flex-1 rounded-xl border border-[#0072BB] px-3 text-sm font-semibold text-[#0072BB] hover:bg-sky-50 dark:border-sky-500 dark:text-sky-400 dark:hover:bg-sky-950/40"
           >
-            {saving ? 'Guardando...' : 'Guardar'}
+            {saving ? 'Guardando...' : editSale ? 'Guardar cambios' : 'Guardar'}
           </button>
           <button
             type="button"
@@ -1484,7 +2203,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
             className="inline-flex h-11 flex-[1.3] items-center justify-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-sm font-semibold text-white hover:bg-[#005f9c]"
           >
             <Printer className="h-4 w-4 shrink-0" />
-            <span>{saving ? 'Guardando...' : 'Guardar e imprimir'}</span>
+            <span>{saving ? 'Guardando...' : editSale ? 'Guardar e imprimir' : 'Guardar e imprimir'}</span>
           </button>
         </div>
       </form>

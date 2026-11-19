@@ -2755,6 +2755,205 @@ export async function handleApiRequest(
     }
   }
 
+  if (apiPath === '/api/tracking/quote-decision') {
+    if ((req.method || 'GET').toUpperCase() !== 'POST') {
+      sendJson(res, 405, { ok: false, error: 'Método no permitido.' });
+      return true;
+    }
+
+    const trackingCode = String(body.trackingCode || '').trim().toUpperCase();
+    const decision = String(body.decision || '').trim().toLowerCase();
+    const clientNote = String(body.clientNote || '')
+      .replace(/<!--|-->/g, '')
+      .replace(/[\x00-\x1F\x7F]/g, ' ')
+      .trim()
+      .slice(0, 260);
+
+    if (!/^[A-Z0-9_-]{1,40}$/.test(trackingCode)) {
+      sendJson(res, 400, { ok: false, error: 'Código de seguimiento inválido.' });
+      return true;
+    }
+    if (decision !== 'approved' && decision !== 'rejected') {
+      sendJson(res, 400, { ok: false, error: 'Decisión inválida.' });
+      return true;
+    }
+
+    const serviceKey = resolveServiceRoleKey();
+    if (!serviceKey) {
+      sendJson(res, 503, {
+        ok: false,
+        error: 'Falta configurar SUPABASE_SERVICE_ROLE_KEY en el servidor para confirmar presupuestos.',
+      });
+      return true;
+    }
+
+    try {
+      const ticketRes = await fetchSupabaseAdminJson<
+        Array<{ id: string; repair_id?: string | null; work_detail?: string | null; price?: number | null }>
+      >(
+        `/rest/v1/public_tickets?id=eq.${encodeURIComponent(trackingCode)}&select=id,repair_id,work_detail,price&limit=1`,
+        serviceKey
+      );
+      if (!ticketRes.ok) {
+        sendJson(res, 502, {
+          ok: false,
+          error: ticketRes.errorText || 'No se pudo consultar el seguimiento.',
+        });
+        return true;
+      }
+
+      const ticket = Array.isArray(ticketRes.data) ? ticketRes.data[0] : null;
+      if (!ticket) {
+        sendJson(res, 404, { ok: false, error: 'No encontramos ese código de seguimiento.' });
+        return true;
+      }
+
+      const repairId = String(ticket.repair_id || '').trim();
+      let sourceWorkDetail = String(ticket.work_detail || '');
+
+      if (repairId) {
+        const repairRes = await fetchSupabaseAdminJson<Array<{ id: string; work_detail?: string | null }>>(
+          `/rest/v1/repairs?id=eq.${encodeURIComponent(repairId)}&select=id,work_detail&limit=1`,
+          serviceKey
+        );
+        const repairRow = repairRes.ok && Array.isArray(repairRes.data) ? repairRes.data[0] : null;
+        if (repairRow && typeof repairRow.work_detail === 'string' && repairRow.work_detail.trim()) {
+          sourceWorkDetail = repairRow.work_detail;
+        }
+      }
+
+      const rmetaRe = /\n?<!--TH3BNB_RMETA:([\s\S]*?)-->/;
+      const rmetaMatch = rmetaRe.exec(sourceWorkDetail);
+      let parsedMeta: {
+        timeline?: Array<{ id: string; status: string; label: string; at: string; note?: string }>;
+        quote?: {
+          status?: string;
+          amount?: number;
+          requestedAt?: string;
+          respondedAt?: string;
+          clientNote?: string;
+        };
+        warrantyDays?: number;
+        deliveredAt?: string;
+        parentRepairId?: string;
+        parentRepairCode?: string;
+      } = { timeline: [], quote: { status: 'none' } };
+
+      if (rmetaMatch?.[1]) {
+        try {
+          parsedMeta = JSON.parse(rmetaMatch[1]) as typeof parsedMeta;
+        } catch {
+          parsedMeta = { timeline: [], quote: { status: 'none' } };
+        }
+      }
+
+      const currentQuoteStatus = parsedMeta.quote?.status || 'none';
+      if (currentQuoteStatus === 'approved' || currentQuoteStatus === 'rejected') {
+        sendJson(res, 409, {
+          ok: false,
+          error: 'Este presupuesto ya fue respondido anteriormente.',
+        });
+        return true;
+      }
+      if (currentQuoteStatus !== 'pending') {
+        sendJson(res, 400, {
+          ok: false,
+          error: 'Esta orden no tiene un presupuesto pendiente de aprobación online.',
+        });
+        return true;
+      }
+
+      const nowIso = new Date().toISOString();
+      const nextQuote = {
+        ...parsedMeta.quote,
+        status: decision,
+        respondedAt: nowIso,
+        ...(clientNote ? { clientNote } : {}),
+      };
+      const prevTimeline = Array.isArray(parsedMeta.timeline) ? parsedMeta.timeline : [];
+      const nextTimeline = [
+        ...prevTimeline,
+        {
+          id: `tl-${Date.now().toString(36)}`,
+          status: decision === 'approved' ? 'quote_approved' : 'quote_rejected',
+          label:
+            decision === 'approved'
+              ? 'Presupuesto aprobado por el cliente'
+              : 'Presupuesto rechazado por el cliente',
+          at: nowIso,
+          ...(clientNote ? { note: clientNote } : {}),
+        },
+      ].slice(-40);
+
+      const nextMeta = {
+        ...parsedMeta,
+        timeline: nextTimeline,
+        quote: nextQuote,
+      };
+      const baseWithoutRmeta = sourceWorkDetail.replace(rmetaRe, '').trim();
+      const marker = `<!--TH3BNB_RMETA:${JSON.stringify(nextMeta)}-->`;
+      const nextWorkDetail = baseWithoutRmeta ? `${baseWithoutRmeta}\n${marker}` : marker;
+
+      const patchTicketRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/public_tickets?id=eq.${encodeURIComponent(trackingCode)}`,
+        {
+          method: 'PATCH',
+          headers: buildSupabaseServiceHeaders(serviceKey, {
+            'Content-Type': 'application/json',
+            Prefer: 'return=minimal',
+          }),
+          body: JSON.stringify({
+            work_detail: nextWorkDetail,
+            updated_at: nowIso,
+          }),
+        }
+      );
+
+      if (!patchTicketRes.ok) {
+        const errTxt = await patchTicketRes.text().catch(() => '');
+        sendJson(res, 502, {
+          ok: false,
+          error: `No se pudo registrar la respuesta. ${errTxt.slice(0, 120)}`.trim(),
+        });
+        return true;
+      }
+
+      if (repairId) {
+        await fetch(
+          `${SUPABASE_URL}/rest/v1/repairs?id=eq.${encodeURIComponent(repairId)}`,
+          {
+            method: 'PATCH',
+            headers: buildSupabaseServiceHeaders(serviceKey, {
+              'Content-Type': 'application/json',
+              Prefer: 'return=minimal',
+            }),
+            body: JSON.stringify({
+              work_detail: nextWorkDetail,
+              updated_at: nowIso,
+            }),
+          }
+        ).catch(() => {});
+      }
+
+      sendJson(res, 200, {
+        ok: true,
+        workDetail: nextWorkDetail,
+        quote: nextQuote,
+        timeline: nextTimeline,
+      });
+      return true;
+    } catch (err) {
+      sendJson(res, 502, {
+        ok: false,
+        error:
+          err instanceof Error
+            ? err.message
+            : 'No se pudo procesar tu respuesta del presupuesto.',
+      });
+      return true;
+    }
+  }
+
   if (apiPath === '/api/account/delete') {
     const user = await verifySupabaseSessionUser(req);
     if (!user) {

@@ -10,6 +10,7 @@ export interface TechMediaItem {
 
 const MEDIA_MARKER = '\n<!--TH3BNB_MEDIA:';
 const MEDIA_END = '-->';
+const RMETA_RE = /\n?<!--TH3BNB_RMETA:([\s\S]*?)-->/;
 const YOUTUBE_ID_RE = /^[a-zA-Z0-9_-]{6,20}$/;
 const DRIVE_ID_RE = /^[a-zA-Z0-9_-]{10,120}$/;
 
@@ -20,12 +21,13 @@ export function parseWorkDetailAndMedia(raw?: string | null): {
   media: TechMediaItem[];
 } {
   if (!raw) return { text: '', media: [] };
-  const idx = raw.lastIndexOf(MEDIA_MARKER);
+  const withoutRmeta = raw.replace(RMETA_RE, '');
+  const idx = withoutRmeta.lastIndexOf(MEDIA_MARKER);
   if (idx === -1) {
-    return { text: sanitizeText(raw, 2000), media: [] };
+    return { text: sanitizeText(withoutRmeta, 2000), media: [] };
   }
-  const text = sanitizeText(raw.slice(0, idx), 2000);
-  const after = raw.slice(idx + MEDIA_MARKER.length);
+  const text = sanitizeText(withoutRmeta.slice(0, idx), 2000);
+  const after = withoutRmeta.slice(idx + MEDIA_MARKER.length);
   const endIdx = after.lastIndexOf(MEDIA_END);
   const jsonPart = endIdx !== -1 ? after.slice(0, endIdx) : after;
   try {
@@ -64,10 +66,12 @@ export function parseWorkDetailAndMedia(raw?: string | null): {
 
 export function serializeWorkDetailAndMedia(
   text: string,
-  media: TechMediaItem[]
+  media: TechMediaItem[],
+  existingWorkDetail?: string | null
 ): string {
   const cleanText = sanitizeText(text, 2000)
     .replace(/<!--TH3BNB_MEDIA:/g, '')
+    .replace(/<!--TH3BNB_RMETA:/g, '')
     .replace(/-->/g, '')
     .trim();
   const safeMedia = (media || [])
@@ -85,10 +89,15 @@ export function serializeWorkDetailAndMedia(
     })
     .filter((item): item is NonNullable<typeof item> => item !== null);
 
-  if (safeMedia.length === 0) {
-    return cleanText;
-  }
-  return `${cleanText}${MEDIA_MARKER}${JSON.stringify(safeMedia)}${MEDIA_END}`;
+  const head =
+    safeMedia.length === 0
+      ? cleanText
+      : `${cleanText}${MEDIA_MARKER}${JSON.stringify(safeMedia)}${MEDIA_END}`;
+
+  const rmetaMatch = existingWorkDetail ? RMETA_RE.exec(existingWorkDetail) : null;
+  if (!rmetaMatch) return head;
+  const rmetaBlock = rmetaMatch[0].trim();
+  return head ? `${head}\n${rmetaBlock}` : rmetaBlock;
 }
 
 export async function compressPhotoForTracking(

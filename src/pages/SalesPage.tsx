@@ -1,5 +1,15 @@
-import React, { useMemo } from 'react';
-import { CheckCircle2, Download, Plus, Printer, Trash2 } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import {
+  CheckCircle2,
+  Coins,
+  Download,
+  Edit3,
+  Plus,
+  Printer,
+  Search,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
 import { deleteRow, updateRow } from '../lib/db';
 import type { ProductRecord, SaleRecord, WorkshopProfile } from '../types/workshop';
@@ -11,8 +21,13 @@ import {
   formatDateShort,
   todayISO,
 } from '../utils/formatters';
-import { parseSalePaymentInfo, serializeSaleStatus } from '../utils/saleMeta';
-import { sanitizeDbErrorMessage } from '../utils/validation';
+import { PAYMENT_METHOD_LABELS, type PaymentMethod } from '../utils/payment';
+import {
+  parseSaleDetails,
+  parseSalePaymentInfo,
+  serializeSaleStatus,
+} from '../utils/saleMeta';
+import { parseSafePositiveNumber, sanitizeDbErrorMessage, sanitizePlainLine } from '../utils/validation';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
 
 interface SalesPageProps {
@@ -20,133 +35,327 @@ interface SalesPageProps {
   products?: ProductRecord[];
   profile?: WorkshopProfile | null;
   onNewSale: () => void;
+  onEditSale?: (sale: SaleRecord) => void;
   onPrintSale?: (sale: SaleRecord) => void;
 }
+
+type StatusFilter = 'all' | 'cobrado' | 'sena' | 'pendiente';
+type MethodFilter = 'all' | PaymentMethod;
+type DatePreset = 'all' | 'today' | '7d' | 'month';
 
 export const SalesPage: React.FC<SalesPageProps> = ({
   sales,
   products = [],
   profile,
   onNewSale,
+  onEditSale,
   onPrintSale,
 }) => {
   const { notify } = useToast();
   const baseCurrency = useMemo(() => parseWorkshopMeta(profile).currency, [profile]);
+
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [methodFilter, setMethodFilter] = useState<MethodFilter>('all');
+  const [datePreset, setDatePreset] = useState<DatePreset>('all');
+
+  const [payingSaleId, setPayingSaleId] = useState<string | null>(null);
+  const [partialAmount, setPartialAmount] = useState('');
+  const [partialMethod, setPartialMethod] = useState<PaymentMethod>('efectivo');
+  const [partialNote, setPartialNote] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
   const total = sales.reduce((s, x) => s + Number(x.amount || 0), 0);
   const collected = sales.reduce((s, x) => s + parseSalePaymentInfo(x).deposit, 0);
   const pending = Math.max(0, total - collected);
 
-  const toggleStatus = async (s: SaleRecord) => {
+  const filteredSales = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const now = new Date();
+    const todayStr = todayISO();
+    const sevenDaysAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+
+    return [...sales]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .filter((s) => {
+        const info = parseSalePaymentInfo(s);
+        const details = parseSaleDetails(s);
+
+        if (statusFilter === 'cobrado' && !info.isPaid) return false;
+        if (statusFilter === 'sena' && (info.isPaid || info.deposit <= 0)) return false;
+        if (statusFilter === 'pendiente' && (info.isPaid || info.deposit > 0)) return false;
+
+        if (methodFilter !== 'all' && info.method !== methodFilter) return false;
+
+        if (datePreset !== 'all') {
+          const refDate = s.dueDate
+            ? new Date(s.dueDate.includes('T') ? s.dueDate : `${s.dueDate}T12:00:00`)
+            : new Date(s.createdAt || 0);
+          const refMs = refDate.getTime();
+          if (datePreset === 'today') {
+            const iso = (s.dueDate || new Date(s.createdAt).toISOString()).slice(0, 10);
+            if (iso !== todayStr) return false;
+          } else if (datePreset === '7d') {
+            if (refMs < sevenDaysAgo) return false;
+          } else if (datePreset === 'month') {
+            if (refDate.getFullYear() !== currentYear || refDate.getMonth() !== currentMonth) {
+              return false;
+            }
+          }
+        }
+
+        if (q) {
+          const hay = [
+            s.invoice,
+            s.clientName,
+            s.productName || '',
+            details.note,
+            ...details.items.map((i) => i.name),
+          ]
+            .join(' ')
+            .toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+
+        return true;
+      });
+  }, [sales, query, statusFilter, methodFilter, datePreset]);
+
+  const serializePreservingMeta = (
+    s: SaleRecord,
+    overrides: {
+      status: 'cobrado' | 'pendiente';
+      method: PaymentMethod;
+      deposit: number;
+      appendPayment?: { amount: number; method: PaymentMethod; note?: string };
+    }
+  ) => {
     const info = parseSalePaymentInfo(s);
-    const next = serializeSaleStatus({
-      status: info.isPaid ? 'pendiente' : 'cobrado',
-      method: info.method || 'efectivo',
-      deposit: info.isPaid ? 0 : Number(s.amount || 0),
+    const details = parseSaleDetails(s);
+    const payments = [...details.payments];
+    if (overrides.appendPayment && overrides.appendPayment.amount > 0) {
+      payments.push({
+        id: `sp-${Date.now().toString(36)}`,
+        amount: Math.round(overrides.appendPayment.amount * 100) / 100,
+        method: overrides.appendPayment.method,
+        date: new Date().toISOString(),
+        ...(overrides.appendPayment.note ? { note: overrides.appendPayment.note } : {}),
+      });
+    }
+    return serializeSaleStatus({
+      status: overrides.status,
+      method: overrides.method,
+      deposit: overrides.deposit,
       amount: Number(s.amount || 0),
       currency: info.currency,
       rate: info.rate,
+      meta: details.hasStructuredMeta
+        ? {
+            items: details.items,
+            subtotal: details.subtotal,
+            discountType: details.discountType,
+            discountValue: details.discountValue,
+            discountAmount: details.discountAmount,
+            surchargeType: details.surchargeType,
+            surchargeValue: details.surchargeValue,
+            surchargeAmount: details.surchargeAmount,
+            payments,
+            note: details.note,
+          }
+        : payments.length > 0
+          ? { items: details.items, subtotal: details.subtotal, payments }
+          : undefined,
     });
+  };
+
+  const openPartialPay = (s: SaleRecord) => {
+    const info = parseSalePaymentInfo(s);
+    setPayingSaleId(s.id);
+    setPartialAmount(String(Math.round(info.pending * 100) / 100));
+    setPartialMethod(info.method || 'efectivo');
+    setPartialNote('');
+  };
+
+  const handleConfirmPartialPay = async (s: SaleRecord) => {
+    const info = parseSalePaymentInfo(s);
+    const addAmt = parseSafePositiveNumber(partialAmount, 0);
+    if (addAmt <= 0) {
+      notify('Ingresá un monto mayor a 0 para registrar el abono.', 'error');
+      return;
+    }
+    const totalSale = Math.max(0, Number(s.amount || 0));
+    const cappedAdd = Math.min(info.pending > 0 ? info.pending : totalSale, addAmt);
+    const nextDeposit = Math.min(totalSale, Math.round((info.deposit + cappedAdd) * 100) / 100);
+    const nextPaid = totalSale > 0 && nextDeposit >= totalSale;
+
+    const nextStatus = serializePreservingMeta(s, {
+      status: nextPaid ? 'cobrado' : 'pendiente',
+      method: partialMethod,
+      deposit: nextDeposit,
+      appendPayment: {
+        amount: cappedAdd,
+        method: partialMethod,
+        note: sanitizePlainLine(partialNote, 100) || (nextPaid ? 'Cancelación de saldo' : 'Abono parcial'),
+      },
+    });
+
+    setBusyId(s.id);
     try {
-      await updateRow('sales', s.id, { status: next });
+      await updateRow('sales', s.id, { status: nextStatus });
+      setPayingSaleId(null);
+      notify(nextPaid ? 'Saldo cancelado en su totalidad.' : 'Abono parcial registrado.');
     } catch (err) {
-      notify(sanitizeDbErrorMessage(err, 'No se pudo actualizar la venta.'), 'error');
+      notify(sanitizeDbErrorMessage(err, 'No se pudo registrar el abono.'), 'error');
+    } finally {
+      setBusyId(null);
     }
   };
 
   const settleBalance = async (s: SaleRecord) => {
     const info = parseSalePaymentInfo(s);
-    const next = serializeSaleStatus({
+    const totalSale = Math.max(0, Number(s.amount || 0));
+    const diff = Math.max(0, totalSale - info.deposit);
+    const next = serializePreservingMeta(s, {
       status: 'cobrado',
       method: info.method || 'efectivo',
-      deposit: Number(s.amount || 0),
-      amount: Number(s.amount || 0),
-      currency: info.currency,
-      rate: info.rate,
+      deposit: totalSale,
+      appendPayment:
+        diff > 0
+          ? {
+              amount: diff,
+              method: info.method || 'efectivo',
+              note: 'Cobro de saldo',
+            }
+          : undefined,
     });
+    setBusyId(s.id);
     try {
       await updateRow('sales', s.id, { status: next });
       notify('Saldo cobrado en su totalidad.');
     } catch (err) {
       notify(sanitizeDbErrorMessage(err, 'No se pudo cobrar el saldo.'), 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const toggleStatus = async (s: SaleRecord) => {
+    const info = parseSalePaymentInfo(s);
+    const totalSale = Math.max(0, Number(s.amount || 0));
+    const diff = !info.isPaid ? Math.max(0, totalSale - info.deposit) : 0;
+    const next = serializePreservingMeta(s, {
+      status: info.isPaid ? 'pendiente' : 'cobrado',
+      method: info.method || 'efectivo',
+      deposit: info.isPaid ? 0 : totalSale,
+      appendPayment:
+        !info.isPaid && diff > 0
+          ? {
+              amount: diff,
+              method: info.method || 'efectivo',
+              note: 'Cobro total',
+            }
+          : undefined,
+    });
+    setBusyId(s.id);
+    try {
+      await updateRow('sales', s.id, { status: next });
+    } catch (err) {
+      notify(sanitizeDbErrorMessage(err, 'No se pudo actualizar la venta.'), 'error');
+    } finally {
+      setBusyId(null);
     }
   };
 
   const deleteSale = async (s: SaleRecord) => {
+    setBusyId(s.id);
     try {
+      const details = parseSaleDetails(s);
       await deleteRow('sales', s.id);
-      if (s.productId && s.quantity && s.quantity > 0) {
-        const matched = products.find((p) => p.id === s.productId);
+
+      // Restore stock for ALL inventory items in this sale
+      const qtyByProduct = new Map<string, number>();
+      if (details.hasStructuredMeta) {
+        for (const item of details.items) {
+          if (item.productId && item.quantity > 0) {
+            qtyByProduct.set(item.productId, (qtyByProduct.get(item.productId) || 0) + item.quantity);
+          }
+        }
+      } else if (s.productId && s.quantity && s.quantity > 0) {
+        qtyByProduct.set(s.productId, Number(s.quantity));
+      }
+
+      for (const [productId, restoreQty] of qtyByProduct.entries()) {
+        const matched = products.find((p) => p.id === productId);
         if (matched && matched.trackStock) {
           await updateRow('products', matched.id, {
-            stock: Math.max(0, Number(matched.stock || 0) + Number(s.quantity || 0)),
+            stock: Math.max(0, Number(matched.stock || 0) + restoreQty),
           });
         }
       }
-      notify('Venta eliminada.');
+      setConfirmDeleteId(null);
+      notify('Venta eliminada y stock restaurado.');
     } catch (err) {
       notify(sanitizeDbErrorMessage(err, 'No se pudo eliminar la venta.'), 'error');
+    } finally {
+      setBusyId(null);
     }
   };
 
-  const sortedSales = useMemo(
-    () => [...sales].sort((a, b) => b.createdAt - a.createdAt),
-    [sales]
-  );
-
   const handleExportCsv = () => {
-    if (sortedSales.length === 0) {
-      notify('No hay ventas registradas para exportar.', 'error');
+    if (filteredSales.length === 0) {
+      notify('No hay ventas para exportar con el filtro actual.', 'error');
       return;
     }
     const headers = [
       'Comprobante',
       'Fecha',
       'Cliente',
-      'Producto / Detalle',
-      'Cantidad',
+      'Detalle de ítems',
+      'Cantidad total',
       'Estado',
       'Medio de pago',
+      `Moneda base (${baseCurrency}) - Subtotal`,
+      `Moneda base (${baseCurrency}) - Descuento`,
+      `Moneda base (${baseCurrency}) - Recargo`,
       `Moneda base (${baseCurrency}) - Total`,
       `Moneda base (${baseCurrency}) - Cobrado / Seña`,
       `Moneda base (${baseCurrency}) - Saldo pendiente`,
-      'Moneda operación',
-      'Tasa de conversión',
-      'Importe moneda operación',
+      'Nota',
     ];
-    const rows = sortedSales.map((s) => {
+    const rows = filteredSales.map((s) => {
       const info = parseSalePaymentInfo(s);
+      const details = parseSaleDetails(s);
       const badgeLabel = info.isPaid
         ? 'Cobrado'
         : info.deposit > 0
           ? 'Señado'
           : 'Pendiente';
-      const opCurrency = info.currency || baseCurrency;
-      const opRate =
-        info.currency && info.currency !== baseCurrency && info.rate && info.rate > 0
-          ? info.rate
-          : 1;
-      const opAmount =
-        opRate !== 1
-          ? convertFromBaseCurrency(Number(s.amount || 0), opRate)
-          : Number(s.amount || 0);
+      const itemsText = details.items
+        .map((it) => `${it.name} x${it.quantity}`)
+        .join(' | ');
+      const totalQty = details.items.reduce((sum, it) => sum + it.quantity, 0);
       return [
         s.invoice,
         s.dueDate || new Date(s.createdAt || Date.now()).toISOString().slice(0, 10),
         s.clientName,
-        s.productName || '',
-        Number(s.quantity || 1),
+        itemsText || s.productName || '',
+        totalQty || Number(s.quantity || 1),
         badgeLabel,
         info.methodLabel || '',
+        details.subtotal,
+        details.discountAmount,
+        details.surchargeAmount,
         Number(s.amount || 0),
         info.deposit,
         info.pending,
-        opCurrency,
-        opRate,
-        opAmount,
+        details.note,
       ];
     });
     downloadCsvFile(`ventas-${todayISO()}.csv`, headers, rows);
-    notify(`Exportadas ${sortedSales.length} ventas a CSV.`);
+    notify(`Exportadas ${filteredSales.length} ventas a CSV.`);
   };
 
   return (
@@ -157,15 +366,14 @@ export const SalesPage: React.FC<SalesPageProps> = ({
             Ventas y cobranzas
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Mostrador, accesorios y seguimiento de cobros
+            Mostrador multicarrito, cobros parciales y control de saldos
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={handleExportCsv}
-            disabled={sortedSales.length === 0}
-            title="Descargar ventas en formato CSV para contabilidad"
+            disabled={filteredSales.length === 0}
             className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] disabled:opacity-50 whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-sky-400 dark:hover:text-sky-300"
           >
             <Download className="h-4 w-4" />
@@ -182,6 +390,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
         </div>
       </div>
 
+      {/* KPI Strip */}
       <div className="grid grid-cols-3 gap-3">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="font-mono-num text-xl font-bold text-slate-900 sm:text-2xl dark:text-white">
@@ -203,35 +412,118 @@ export const SalesPage: React.FC<SalesPageProps> = ({
         </div>
       </div>
 
-      <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
-        {sortedSales.length === 0 ? (
-          <div className="p-8 text-center text-sm text-slate-500">No hay ventas registradas.</div>
-        ) : (
-          sortedSales.map((s) => {
-              const info = parseSalePaymentInfo(s);
-              const badgeLabel = info.isPaid
-                ? 'Cobrado'
-                : info.deposit > 0
-                  ? 'Señado'
-                  : 'Pendiente';
-              const hasForeignCurrency = Boolean(
-                info.currency &&
-                  info.currency !== baseCurrency &&
-                  info.rate &&
-                  info.rate > 0
-              );
-              const foreignAmount =
-                hasForeignCurrency && info.rate
-                  ? convertFromBaseCurrency(Number(s.amount || 0), info.rate)
-                  : 0;
+      {/* Search & Filters */}
+      <div className="flex flex-col gap-2.5 rounded-2xl border border-slate-200 bg-white p-3.5 dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[200px] flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar cliente, comprobante o producto..."
+              className="h-9 w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-9 pr-8 text-xs text-slate-900 outline-none focus:border-[#0072BB] focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
 
-              return (
-                <div
-                  key={s.id}
-                  className="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5"
-                >
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+          <select
+            value={methodFilter}
+            onChange={(e) => setMethodFilter(e.target.value as MethodFilter)}
+            aria-label="Filtrar por medio de pago"
+            className="h-9 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+          >
+            <option value="all">Todos los medios</option>
+            <option value="efectivo">Efectivo</option>
+            <option value="transferencia">Transferencia</option>
+            <option value="tarjeta">Tarjeta</option>
+          </select>
+
+          <select
+            value={datePreset}
+            onChange={(e) => setDatePreset(e.target.value as DatePreset)}
+            aria-label="Filtrar por período"
+            className="h-9 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+          >
+            <option value="all">Todas las fechas</option>
+            <option value="today">Hoy</option>
+            <option value="7d">Últimos 7 días</option>
+            <option value="month">Este mes</option>
+          </select>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          {(
+            [
+              { id: 'all', label: 'Todas' },
+              { id: 'cobrado', label: 'Cobradas' },
+              { id: 'sena', label: 'Señadas' },
+              { id: 'pendiente', label: 'Pendientes' },
+            ] as const
+          ).map((tab) => {
+            const active = statusFilter === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setStatusFilter(tab.id)}
+                className={`h-8 rounded-lg px-3 text-xs font-semibold transition whitespace-nowrap shrink-0 ${
+                  active
+                    ? 'bg-[#0072BB] text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Sales Ledger List */}
+      <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
+        {filteredSales.length === 0 ? (
+          <div className="p-8 text-center text-sm text-slate-500">
+            {sales.length === 0
+              ? 'No hay ventas registradas.'
+              : 'No hay ventas que coincidan con el filtro seleccionado.'}
+          </div>
+        ) : (
+          filteredSales.map((s) => {
+            const info = parseSalePaymentInfo(s);
+            const details = parseSaleDetails(s);
+            const badgeLabel = info.isPaid
+              ? 'Cobrado'
+              : info.deposit > 0
+                ? 'Señado'
+                : 'Pendiente';
+            const hasForeignCurrency = Boolean(
+              info.currency &&
+                info.currency !== baseCurrency &&
+                info.rate &&
+                info.rate > 0
+            );
+            const foreignAmount =
+              hasForeignCurrency && info.rate
+                ? convertFromBaseCurrency(Number(s.amount || 0), info.rate)
+                : 0;
+            const isPaying = payingSaleId === s.id;
+            const isConfirmingDelete = confirmDeleteId === s.id;
+            const isBusy = busyId === s.id;
+
+            return (
+              <div key={s.id} className="px-4 py-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
                       <span className="font-mono-num font-semibold text-slate-700 dark:text-slate-300">
                         {s.invoice}
                       </span>
@@ -240,32 +532,56 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                       {info.methodLabel && (
                         <>
                           <span>·</span>
-                          <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                          <span className="font-medium text-slate-700 dark:text-slate-300">
                             {info.methodLabel}
                           </span>
                         </>
                       )}
                       {hasForeignCurrency && info.currency && (
-                        <span className="rounded-md bg-sky-50 px-1.5 py-0.5 font-mono-num text-[11px] font-semibold text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300">
-                          {formatCurrency(foreignAmount, info.currency)}
-                        </span>
+                        <>
+                          <span>·</span>
+                          <span className="font-mono-num font-semibold text-[#0072BB] dark:text-sky-300">
+                            {formatCurrency(foreignAmount, info.currency)}
+                          </span>
+                        </>
                       )}
                     </div>
-                    <div className="text-sm font-bold text-slate-900 dark:text-white">
+
+                    <div className="mt-0.5 text-sm font-bold text-slate-900 dark:text-white">
                       {s.clientName}
                     </div>
-                    {s.productName && (
-                      <div className="text-xs text-slate-500 dark:text-slate-400">
-                        {s.productName} {s.quantity ? `× ${s.quantity}` : ''}
+
+                    <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                      {details.hasStructuredMeta
+                        ? details.items
+                            .map((it) => `${it.name} × ${it.quantity}`)
+                            .join(' · ')
+                        : `${s.productName || 'Venta de mostrador'}${s.quantity ? ` × ${s.quantity}` : ''}`}
+                    </div>
+
+                    {(details.discountAmount > 0 || details.surchargeAmount > 0 || details.note) && (
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500 dark:text-slate-400">
+                        {details.discountAmount > 0 && (
+                          <span className="text-emerald-600 dark:text-emerald-400">
+                            Desc: -{formatCurrency(details.discountAmount)}
+                          </span>
+                        )}
+                        {details.surchargeAmount > 0 && (
+                          <span className="text-amber-600 dark:text-amber-400">
+                            Recargo: +{formatCurrency(details.surchargeAmount)}
+                          </span>
+                        )}
+                        {details.note && <span className="italic">{details.note}</span>}
                       </div>
                     )}
+
                     {!info.isPaid && info.deposit > 0 && (
                       <div className="mt-0.5 text-[11px] font-medium text-slate-600 dark:text-slate-300">
-                        Seña:{' '}
+                        Abonado:{' '}
                         <span className="font-mono-num font-semibold text-emerald-600 dark:text-emerald-400">
                           {formatCurrency(info.deposit)}
                         </span>{' '}
-                        · Pendiente:{' '}
+                        · Saldo:{' '}
                         <span className="font-mono-num font-semibold text-amber-600 dark:text-amber-400">
                           {formatCurrency(info.pending)}
                         </span>
@@ -273,24 +589,40 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                     )}
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono-num text-sm font-bold text-slate-900 dark:text-white">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="mr-1 font-mono-num text-sm font-bold text-slate-900 dark:text-white">
                       {formatCurrency(s.amount)}
                     </span>
+
+                    {!info.isPaid && (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => (isPaying ? setPayingSaleId(null) : openPartialPay(s))}
+                        className="inline-flex h-8 items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 whitespace-nowrap shrink-0 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300"
+                      >
+                        <Coins className="h-3 w-3" />
+                        Abonar
+                      </button>
+                    )}
+
                     {!info.isPaid && info.deposit > 0 && (
                       <button
                         type="button"
+                        disabled={isBusy}
                         onClick={() => void settleBalance(s)}
-                        className="inline-flex h-7 items-center gap-1 rounded-lg bg-emerald-600 px-2.5 text-[11px] font-semibold text-white hover:bg-emerald-700"
+                        className="inline-flex h-8 items-center gap-1 rounded-lg bg-emerald-600 px-2.5 text-[11px] font-semibold text-white hover:bg-emerald-700 whitespace-nowrap shrink-0"
                       >
                         <CheckCircle2 className="h-3 w-3" />
-                        Cobrar saldo
+                        Saldar
                       </button>
                     )}
+
                     <button
                       type="button"
-                      onClick={() => toggleStatus(s)}
-                      className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                      disabled={isBusy}
+                      onClick={() => void toggleStatus(s)}
+                      className={`h-8 rounded-lg px-2.5 text-xs font-semibold transition whitespace-nowrap shrink-0 ${
                         info.isPaid
                           ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
                           : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
@@ -298,29 +630,129 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                     >
                       {badgeLabel}
                     </button>
+
+                    {onEditSale && (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => onEditSale(s)}
+                        title="Editar venta"
+                        aria-label="Editar venta"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-[#0072BB] hover:text-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                      >
+                        <Edit3 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+
                     {onPrintSale && (
                       <button
                         type="button"
                         onClick={() => onPrintSale(s)}
                         title="Imprimir boleta A4 o 80mm"
-                        className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-sky-400 dark:hover:text-sky-300"
+                        className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-sky-400 dark:hover:text-sky-300"
                       >
                         <Printer className="h-3.5 w-3.5" />
                         <span>Boleta</span>
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => deleteSale(s)}
-                      aria-label="Eliminar venta"
-                      className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+
+                    {isConfirmingDelete ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => void deleteSale(s)}
+                          className="h-8 rounded-lg bg-red-600 px-2.5 text-[11px] font-semibold text-white hover:bg-red-700 whitespace-nowrap"
+                        >
+                          Confirmar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteId(null)}
+                          className="h-8 rounded-lg border border-slate-200 px-2 text-[11px] font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300"
+                        >
+                          No
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteId(s.id)}
+                        aria-label="Eliminar venta"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
-              );
-            })
+
+                {/* Inline Partial Payment Form */}
+                {isPaying && (
+                  <div className="mt-3 flex flex-wrap items-end gap-2 rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+                    <div className="w-32">
+                      <label className="mb-1 block text-[10px] font-semibold text-slate-600 dark:text-slate-300">
+                        Monto a abonar
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={partialAmount}
+                        onChange={(e) => setPartialAmount(e.target.value)}
+                        className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 font-mono-num text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                      />
+                    </div>
+                    <div className="w-36">
+                      <label className="mb-1 block text-[10px] font-semibold text-slate-600 dark:text-slate-300">
+                        Medio de pago
+                      </label>
+                      <select
+                        value={partialMethod}
+                        onChange={(e) => setPartialMethod(e.target.value as PaymentMethod)}
+                        className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                      >
+                        {(Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[]).map((m) => (
+                          <option key={m} value={m}>
+                            {PAYMENT_METHOD_LABELS[m]}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="min-w-[160px] flex-1">
+                      <label className="mb-1 block text-[10px] font-semibold text-slate-600 dark:text-slate-300">
+                        Nota (opcional)
+                      </label>
+                      <input
+                        type="text"
+                        value={partialNote}
+                        onChange={(e) => setPartialNote(e.target.value)}
+                        placeholder="Cuota / entrega parcial"
+                        className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => void handleConfirmPartialPay(s)}
+                        className="h-8 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700"
+                      >
+                        Registrar abono
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPayingSaleId(null)}
+                        className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
     </div>

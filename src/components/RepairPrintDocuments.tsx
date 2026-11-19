@@ -41,7 +41,7 @@ import { useToast } from './ToastProvider';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
 
 export type PrintDocKey = 'client' | 'workshop' | 'label';
-export type PrintFormat = 'a4' | 'thermal80';
+export type PrintFormat = 'a4' | 'thermal80' | 'label50';
 
 interface RepairPrintDocumentsProps {
   repair: RepairRecord;
@@ -230,7 +230,11 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
   const handleSaveSignature = async (nextSignatureUrl: string) => {
     setSavingSignature(true);
     try {
-      const nextCheckout = serializeCheckoutAndSignature(parsedCheckout.text, nextSignatureUrl);
+      const nextCheckout = serializeCheckoutAndSignature(
+        parsedCheckout.text,
+        nextSignatureUrl,
+        repair.checkoutState
+      );
       await updateRow('repairs', repair.id, {
         checkoutState: nextCheckout,
         updatedAt: new Date().toISOString(),
@@ -830,8 +834,8 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
         isPrintMode ? '' : 'shadow-xs'
       }`}
     >
-      <div className="flex items-center justify-between border-b border-slate-300 pb-2">
-        <div>
+      <div className="flex items-center justify-between gap-2 border-b border-slate-300 pb-2">
+        <div className="min-w-0">
           <div className="text-[9px] font-bold uppercase tracking-wider text-slate-500">
             {profile?.brandName || 'TH3 BNB'} · Etiqueta de Equipo
           </div>
@@ -839,13 +843,22 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
             {repair.code}
           </div>
         </div>
-        <div className="text-right">
-          <span className="inline-block rounded border border-slate-800 px-1.5 py-0.5 text-[10px] font-bold uppercase">
-            {repair.priority}
-          </span>
-          <div className="mt-0.5 font-mono-num text-[10px] text-slate-600">
-            {repair.trackingCode}
+        <div className="flex items-center gap-2 text-right">
+          <div>
+            <span className="inline-block rounded border border-slate-800 px-1.5 py-0.5 text-[10px] font-bold uppercase">
+              {repair.priority}
+            </span>
+            <div className="mt-0.5 font-mono-num text-[10px] text-slate-600">
+              {repair.trackingCode}
+            </div>
           </div>
+          {trackingQrDataUrl && (
+            <img
+              src={trackingQrDataUrl}
+              alt={`QR ${repair.trackingCode}`}
+              className="h-11 w-11 shrink-0 rounded border border-slate-200 bg-white p-0.5"
+            />
+          )}
         </div>
       </div>
 
@@ -1215,18 +1228,27 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
           : 'w-full max-w-[302px] rounded-xl p-3 shadow-xs'
       }`}
     >
-      <div className="flex items-center justify-between border-b border-black pb-1">
-        <div>
+      <div className="flex items-center justify-between gap-2 border-b border-black pb-1">
+        <div className="min-w-0">
           <div className="text-[8.5px] font-bold uppercase">
             {profile?.brandName || 'TH3 BNB'} · Etiqueta
           </div>
           <div className="text-lg font-black leading-none">{repair.code}</div>
         </div>
-        <div className="text-right">
-          <div className="border border-black px-1 text-[9px] font-bold uppercase">
-            {repair.priority}
+        <div className="flex items-center gap-1.5 text-right">
+          <div>
+            <div className="border border-black px-1 text-[9px] font-bold uppercase">
+              {repair.priority}
+            </div>
+            <div className="text-[9px]">{repair.trackingCode}</div>
           </div>
-          <div className="text-[9px]">{repair.trackingCode}</div>
+          {trackingQrDataUrl && (
+            <img
+              src={trackingQrDataUrl}
+              alt={`QR ${repair.trackingCode}`}
+              className="h-10 w-10 shrink-0 border border-black bg-white p-0.5"
+            />
+          )}
         </div>
       </div>
 
@@ -1270,10 +1292,57 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
     </div>
   );
 
+  const renderLabel50 = (isPrintMode: boolean) => (
+    <div
+      className={`mx-auto flex flex-col justify-between bg-white text-black font-mono leading-tight ${
+        isPrintMode
+          ? 'h-[27mm] w-[47mm] overflow-hidden p-1 text-[7.5px]'
+          : 'h-[128px] w-[212px] rounded-xl border-2 border-dashed border-slate-400 p-2.5 text-[9px] shadow-xs'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-1 border-b border-black pb-1">
+        <div className="min-w-0">
+          <div className="truncate text-[7px] font-bold uppercase opacity-75">
+            {profile?.brandName || 'TH3 BNB'}
+          </div>
+          <div className={isPrintMode ? 'text-[11px] font-black leading-none' : 'text-sm font-black leading-none'}>
+            {repair.code}
+          </div>
+          <div className="mt-0.5 truncate font-bold">
+            {repair.brand} {repair.model}
+          </div>
+        </div>
+        {trackingQrDataUrl && (
+          <img
+            src={trackingQrDataUrl}
+            alt={`QR ${repair.trackingCode}`}
+            className={isPrintMode ? 'h-9 w-9 shrink-0 bg-white' : 'h-11 w-11 shrink-0 border border-slate-200 bg-white p-0.5'}
+          />
+        )}
+      </div>
+
+      <div className="my-0.5 space-y-0.5">
+        <div className="flex justify-between gap-1">
+          <span className="truncate font-bold">{repair.clientName}</span>
+          {repair.clientPhone && <span className="shrink-0">{repair.clientPhone}</span>}
+        </div>
+        <div className="truncate font-bold">{securityText}</div>
+      </div>
+
+      <div className="flex items-center justify-between border-t border-black pt-0.5 text-[7px]">
+        <span>Ing: {formatDateShort(repair.dateIn)}</span>
+        <span className="font-bold uppercase">{repair.priority}</span>
+      </div>
+    </div>
+  );
+
   return (
     <>
       {printFormat === 'thermal80' && (
         <style>{`@media print { @page { size: 80mm auto; margin: 2mm; } }`}</style>
+      )}
+      {printFormat === 'label50' && (
+        <style>{`@media print { @page { size: 50mm 30mm; margin: 1.5mm; } }`}</style>
       )}
 
       <div className="space-y-4">
@@ -1388,6 +1457,21 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
                   <ReceiptText className="h-3.5 w-3.5" />
                   Térmico 80mm
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPrintFormat('label50');
+                    setSelectedDocs((prev) => ({ ...prev, label: true }));
+                  }}
+                  className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition ${
+                    printFormat === 'label50'
+                      ? 'bg-[#0072BB] text-white'
+                      : 'text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <Tag className="h-3.5 w-3.5" />
+                  Etiqueta 50×30mm
+                </button>
               </div>
               {availableCurrencies.length > 1 && (
                 <div className="flex items-center gap-1.5 pl-1">
@@ -1465,77 +1549,88 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
               <button
                 type="button"
                 onClick={() => window.print()}
-                disabled={selectedCount === 0}
+                disabled={printFormat !== 'label50' && selectedCount === 0}
                 className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0072BB] px-4 text-xs font-semibold text-white hover:bg-[#005f9c] disabled:opacity-50"
               >
                 <Printer className="h-4 w-4" />
-                {printFormat === 'thermal80'
-                  ? `Imprimir 80mm (${selectedCount})`
-                  : `Imprimir seleccionados (${selectedCount})`}
+                {printFormat === 'label50'
+                  ? 'Imprimir etiqueta 50×30mm'
+                  : printFormat === 'thermal80'
+                    ? `Imprimir 80mm (${selectedCount})`
+                    : `Imprimir seleccionados (${selectedCount})`}
               </button>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 border-t border-slate-200/80 pt-2.5 dark:border-slate-700/60">
-            <button
-              type="button"
-              onClick={selectAll}
-              className={`h-8 rounded-lg px-2.5 text-xs font-semibold transition ${
-                selectedCount === 3
-                  ? 'bg-[#0072BB] text-white'
-                  : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'
-              }`}
-            >
-              Todo (3)
-            </button>
+          {printFormat !== 'label50' && (
+            <div className="flex flex-wrap items-center gap-2 border-t border-slate-200/80 pt-2.5 dark:border-slate-700/60">
+              <button
+                type="button"
+                onClick={selectAll}
+                className={`h-8 rounded-lg px-2.5 text-xs font-semibold transition ${
+                  selectedCount === 3
+                    ? 'bg-[#0072BB] text-white'
+                    : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'
+                }`}
+              >
+                Todo (3)
+              </button>
 
-            {(
-              [
-                { key: 'client', label: 'Boleta Cliente', icon: FileText },
-                { key: 'workshop', label: 'Boleta Taller', icon: Wrench },
-                { key: 'label', label: 'Etiqueta Equipo', icon: Tag },
-              ] as const
-            ).map(({ key, label, icon: Icon }) => {
-              const active = selectedDocs[key];
-              return (
-                <div key={key} className="inline-flex items-center overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
-                  <button
-                    type="button"
-                    onClick={() => toggleDoc(key)}
-                    className={`inline-flex h-8 items-center gap-1.5 px-2.5 text-xs font-semibold transition ${
-                      active
-                        ? 'bg-sky-50 text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300'
-                        : 'text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800'
-                    }`}
-                    title="Incluir / quitar de la impresión"
-                  >
-                    <span
-                      className={`flex h-3.5 w-3.5 items-center justify-center rounded border text-[10px] ${
+              {(
+                [
+                  { key: 'client', label: 'Boleta Cliente', icon: FileText },
+                  { key: 'workshop', label: 'Boleta Taller', icon: Wrench },
+                  { key: 'label', label: 'Etiqueta Equipo', icon: Tag },
+                ] as const
+              ).map(({ key, label, icon: Icon }) => {
+                const active = selectedDocs[key];
+                return (
+                  <div key={key} className="inline-flex items-center overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+                    <button
+                      type="button"
+                      onClick={() => toggleDoc(key)}
+                      className={`inline-flex h-8 items-center gap-1.5 px-2.5 text-xs font-semibold transition ${
                         active
-                          ? 'border-[#0072BB] bg-[#0072BB] text-white'
-                          : 'border-slate-300 dark:border-slate-600'
+                          ? 'bg-sky-50 text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300'
+                          : 'text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800'
                       }`}
+                      title="Incluir / quitar de la impresión"
                     >
-                      {active && <Check className="h-2.5 w-2.5" />}
-                    </span>
-                    <Icon className="h-3.5 w-3.5" />
-                    {label}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => selectOnly(key)}
-                    className="h-8 border-l border-slate-200 px-2 text-[10px] font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
-                    title={`Seleccionar solo ${label}`}
-                  >
-                    Solo
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+                      <span
+                        className={`flex h-3.5 w-3.5 items-center justify-center rounded border text-[10px] ${
+                          active
+                            ? 'border-[#0072BB] bg-[#0072BB] text-white'
+                            : 'border-slate-300 dark:border-slate-600'
+                        }`}
+                      >
+                        {active && <Check className="h-2.5 w-2.5" />}
+                      </span>
+                      <Icon className="h-3.5 w-3.5" />
+                      {label}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => selectOnly(key)}
+                      className="h-8 border-l border-slate-200 px-2 text-[10px] font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+                      title={`Seleccionar solo ${label}`}
+                    >
+                      Solo
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {selectedCount === 0 ? (
+        {printFormat === 'label50' ? (
+          <div className="space-y-2">
+            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Etiqueta adhesiva compacta (50×30mm) para impresora de etiquetas
+            </div>
+            {renderLabel50(false)}
+          </div>
+        ) : selectedCount === 0 ? (
           <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-center text-xs text-slate-500">
             Seleccioná al menos un comprobante o etiqueta para previsualizar e imprimir.
           </div>
@@ -1579,7 +1674,9 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
 
       {/* Print-only layout rendered cleanly when user triggers window.print() */}
       <div className="print-only hidden text-slate-900">
-        {printFormat === 'thermal80' ? (
+        {printFormat === 'label50' ? (
+          <div>{renderLabel50(true)}</div>
+        ) : printFormat === 'thermal80' ? (
           <>
             {selectedDocs.client && (
               <div

@@ -22,6 +22,7 @@ import {
   isActiveRepairStatus,
   todayISO,
 } from '../utils/formatters';
+import { isCashShiftTask } from '../utils/cashRegister';
 
 interface AgendaPageProps {
   tasks: TaskRecord[];
@@ -74,8 +75,13 @@ export const AgendaPage: React.FC<AgendaPageProps> = ({
   });
   const [hideDelivered, setHideDelivered] = useState(false);
 
+  const visibleTasks = useMemo(
+    () => tasks.filter((t) => !isCashShiftTask(t)),
+    [tasks]
+  );
+
   const counts = useMemo(() => {
-    const pending = tasks.filter((t) => t.status !== 'completado');
+    const pending = visibleTasks.filter((t) => t.status !== 'completado');
     const dueToday = pending.filter((t) => t.status === 'hoy' || t.dueDate === today);
     const urgent = pending.filter((t) => t.priority === 'alta');
     return {
@@ -83,16 +89,16 @@ export const AgendaPage: React.FC<AgendaPageProps> = ({
       today: dueToday.length,
       urgent: urgent.length,
     };
-  }, [tasks, today]);
+  }, [visibleTasks, today]);
 
   const sorted = useMemo(
     () =>
-      [...tasks].sort((a, b) => {
+      [...visibleTasks].sort((a, b) => {
         if (a.status === 'completado' && b.status !== 'completado') return 1;
         if (a.status !== 'completado' && b.status === 'completado') return -1;
         return b.createdAt - a.createdAt;
       }),
-    [tasks]
+    [visibleTasks]
   );
 
   const repairsByDate = useMemo(() => {
@@ -110,7 +116,7 @@ export const AgendaPage: React.FC<AgendaPageProps> = ({
 
   const tasksByDate = useMemo(() => {
     const map = new Map<string, TaskRecord[]>();
-    for (const t of tasks) {
+    for (const t of visibleTasks) {
       const iso = normalizeISODate(t.dueDate);
       if (!iso) continue;
       const list = map.get(iso);
@@ -118,7 +124,7 @@ export const AgendaPage: React.FC<AgendaPageProps> = ({
       else map.set(iso, [t]);
     }
     return map;
-  }, [tasks]);
+  }, [visibleTasks]);
 
   const calendarCells = useMemo(() => {
     const { year, month } = monthCursor;

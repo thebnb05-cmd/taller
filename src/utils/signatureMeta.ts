@@ -2,6 +2,7 @@ import { sanitizeImageDataUrl, sanitizePlainLine } from './validation';
 
 const SIG_MARKER = '<!--TH3BNB_SIG:';
 const SIG_END = '-->';
+const RPAY_RE = /\n?<!--TH3BNB_RPAY:([\s\S]*?)-->/;
 const MAX_SIG_DATA_URL_LEN = 350_000;
 
 export interface ParsedCheckoutSignature {
@@ -15,15 +16,16 @@ export function parseCheckoutAndSignature(
   if (!raw || typeof raw !== 'string') {
     return { text: '', signatureDataUrl: '' };
   }
-  const idx = raw.lastIndexOf(SIG_MARKER);
+  const withoutRpay = raw.replace(RPAY_RE, '');
+  const idx = withoutRpay.lastIndexOf(SIG_MARKER);
   if (idx === -1) {
     return {
-      text: sanitizePlainLine(raw, 500),
+      text: sanitizePlainLine(withoutRpay, 500),
       signatureDataUrl: '',
     };
   }
-  const text = sanitizePlainLine(raw.slice(0, idx), 500);
-  const after = raw.slice(idx + SIG_MARKER.length);
+  const text = sanitizePlainLine(withoutRpay.slice(0, idx), 500);
+  const after = withoutRpay.slice(idx + SIG_MARKER.length);
   const endIdx = after.lastIndexOf(SIG_END);
   const sigRaw = (endIdx !== -1 ? after.slice(0, endIdx) : after).trim();
   const signatureDataUrl = sanitizeImageDataUrl(sigRaw, MAX_SIG_DATA_URL_LEN);
@@ -32,17 +34,23 @@ export function parseCheckoutAndSignature(
 
 export function serializeCheckoutAndSignature(
   text: string,
-  signatureDataUrl?: string | null
+  signatureDataUrl?: string | null,
+  existingCheckoutState?: string | null
 ): string {
   const cleanText = sanitizePlainLine(text, 500)
     .replace(/<!--TH3BNB_SIG:/g, '')
+    .replace(/<!--TH3BNB_RPAY:/g, '')
     .replace(/-->/g, '')
     .trim();
   const safeSig = sanitizeImageDataUrl(signatureDataUrl, MAX_SIG_DATA_URL_LEN);
-  if (!safeSig) {
-    return cleanText;
-  }
-  return cleanText
-    ? `${cleanText}\n${SIG_MARKER}${safeSig}${SIG_END}`
-    : `${SIG_MARKER}${safeSig}${SIG_END}`;
+  const head = !safeSig
+    ? cleanText
+    : cleanText
+      ? `${cleanText}\n${SIG_MARKER}${safeSig}${SIG_END}`
+      : `${SIG_MARKER}${safeSig}${SIG_END}`;
+
+  const rpayMatch = existingCheckoutState ? RPAY_RE.exec(existingCheckoutState) : null;
+  if (!rpayMatch) return head;
+  const rpayBlock = rpayMatch[0].trim();
+  return head ? `${head}\n${rpayBlock}` : rpayBlock;
 }

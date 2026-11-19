@@ -10,7 +10,10 @@ import {
   Phone,
   RefreshCw,
   Search,
+  ShieldCheck,
   Smartphone,
+  ThumbsDown,
+  ThumbsUp,
   Video,
   Wrench,
   X,
@@ -23,6 +26,7 @@ import {
 } from '../lib/db';
 import { sanitizeCurrencyCode, useActiveCurrency } from '../utils/currency';
 import { formatCurrency, formatDateShort, getStatusMeta } from '../utils/formatters';
+import { computeWarrantyInfo, parseRepairPublicMeta } from '../utils/repairMeta';
 import { getEmbedVideoUrl, parseWorkDetailAndMedia } from '../utils/techMedia';
 import {
   sanitizeDbErrorMessage,
@@ -48,6 +52,17 @@ const ORDERED_STEPS = [
 
 const VALID_TRACKING_CODE_RE = /^[a-zA-Z0-9_-]{1,40}$/;
 
+function formatTimelineDateTime(iso: string): string {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return iso;
+  return new Intl.DateTimeFormat('es-AR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(ms));
+}
+
 export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
   initialCode,
   onExitTracking,
@@ -66,6 +81,9 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [lightboxImageId, setLightboxImageId] = useState<string | null>(null);
+  const [quoteNote, setQuoteNote] = useState('');
+  const [submittingQuote, setSubmittingQuote] = useState(false);
+  const [quoteFeedback, setQuoteFeedback] = useState('');
 
   const loadTicket = useCallback(async (code: string, showLoader: boolean) => {
     if (showLoader) setIsLoading(true);
@@ -139,6 +157,10 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
   const parsedWork = ticket
     ? parseWorkDetailAndMedia(ticket.workDetail)
     : { text: '', media: [] };
+  const publicMeta = ticket
+    ? parseRepairPublicMeta(ticket.workDetail)
+    : { timeline: [], quote: { status: 'none' as const } };
+  const warrantyInfo = ticket ? computeWarrantyInfo(ticket) : null;
   const imageItems = parsedWork.media.filter((item) => item.type === 'image');
   const activeLightboxIndex = lightboxImageId
     ? imageItems.findIndex((img) => img.id === lightboxImageId)
@@ -171,10 +193,63 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
       setErrorMsg('El código de seguimiento solo puede contener letras, números y guiones.');
       return;
     }
+    setQuoteFeedback('');
+    setQuoteNote('');
     setActiveCode(cleaned);
     const url = new URL(window.location.href);
     url.searchParams.set('track', cleaned);
     window.history.replaceState({}, '', url.toString());
+  };
+
+  const handleQuoteDecision = async (decision: 'approved' | 'rejected') => {
+    if (!ticket || submittingQuote) return;
+    setSubmittingQuote(true);
+    setQuoteFeedback('');
+    try {
+      const response = await fetch('/api/tracking/quote-decision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          trackingCode: ticket.trackingCode,
+          decision,
+          clientNote: quoteNote.trim(),
+        }),
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        workDetail?: string;
+      };
+      if (!response.ok || !payload.ok) {
+        setQuoteFeedback(
+          payload.error || 'No se pudo enviar tu respuesta. Escribinos por teléfono o WhatsApp.'
+        );
+        return;
+      }
+      if (typeof payload.workDetail === 'string') {
+        setTicket((prev) =>
+          prev
+            ? {
+                ...prev,
+                workDetail: payload.workDetail,
+                updatedAt: Date.now(),
+              }
+            : prev
+        );
+      } else {
+        await loadTicket(ticket.trackingCode, false);
+      }
+      setQuoteNote('');
+      setQuoteFeedback(
+        decision === 'approved'
+          ? '¡Listo! Aprobaste el presupuesto y el taller ya recibió la confirmación.'
+          : 'Registramos que rechazaste el presupuesto. El taller se va a comunicar con vos.'
+      );
+    } catch {
+      setQuoteFeedback('Sin conexión con el servidor. Intentá de nuevo en unos segundos.');
+    } finally {
+      setSubmittingQuote(false);
+    }
   };
 
   return (
@@ -335,6 +410,121 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
               </div>
             </div>
 
+            {/* Online Quote Approval Card */}
+            {publicMeta.quote.status === 'pending' && (
+              <div className="space-y-3 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-900/60 dark:bg-amber-950/25">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wide text-amber-800 dark:text-amber-300">
+                      Presupuesto pendiente de tu aprobación
+                    </div>
+                    <p className="mt-0.5 text-xs text-amber-900/80 dark:text-amber-200/80">
+                      Revisá el valor informado por el taller para autorizar el trabajo.
+                    </p>
+                  </div>
+                  <div className="font-mono-num text-lg font-extrabold text-slate-900 dark:text-white">
+                    {formatCurrency(publicMeta.quote.amount ?? ticket.price, displayCurrency)}
+                  </div>
+                </div>
+                <textarea
+                  rows={2}
+                  maxLength={240}
+                  value={quoteNote}
+                  onChange={(e) => setQuoteNote(e.target.value)}
+                  placeholder="Comentario o consulta opcional para el taller..."
+                  className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-amber-900/60 dark:bg-slate-900 dark:text-white"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={submittingQuote}
+                    onClick={() => void handleQuoteDecision('approved')}
+                    className="inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-4 text-xs font-bold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                  >
+                    <ThumbsUp className="h-3.5 w-3.5" />
+                    {submittingQuote ? 'Enviando...' : 'Aprobar presupuesto'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={submittingQuote}
+                    onClick={() => void handleQuoteDecision('rejected')}
+                    className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-rose-300 bg-white px-4 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-60 dark:border-rose-800 dark:bg-slate-900 dark:text-rose-300 dark:hover:bg-rose-950/30"
+                  >
+                    <ThumbsDown className="h-3.5 w-3.5" />
+                    Rechazar
+                  </button>
+                </div>
+                {quoteFeedback && (
+                  <p className="text-xs font-semibold text-rose-700 dark:text-rose-300">
+                    {quoteFeedback}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {(publicMeta.quote.status === 'approved' || publicMeta.quote.status === 'rejected') && (
+              <div
+                className={`rounded-2xl border px-4 py-3 text-xs ${
+                  publicMeta.quote.status === 'approved'
+                    ? 'border-emerald-200 bg-emerald-50/70 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200'
+                    : 'border-rose-200 bg-rose-50/70 text-rose-900 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200'
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 font-bold">
+                  <span>
+                    {publicMeta.quote.status === 'approved'
+                      ? 'Presupuesto aprobado por el cliente'
+                      : 'Presupuesto rechazado por el cliente'}
+                  </span>
+                  {publicMeta.quote.respondedAt && (
+                    <span className="font-mono-num text-[11px] font-medium opacity-80">
+                      {formatTimelineDateTime(publicMeta.quote.respondedAt)}
+                    </span>
+                  )}
+                </div>
+                {publicMeta.quote.clientNote && (
+                  <p className="mt-1 opacity-90">Nota: {publicMeta.quote.clientNote}</p>
+                )}
+              </div>
+            )}
+
+            {quoteFeedback && publicMeta.quote.status !== 'pending' && (
+              <div className="rounded-xl border border-sky-200 bg-sky-50 px-3.5 py-2.5 text-xs font-semibold text-[#0072BB] dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-300">
+                {quoteFeedback}
+              </div>
+            )}
+
+            {/* Warranty card */}
+            {warrantyInfo && warrantyInfo.warrantyDays > 0 && (
+              <div
+                className={`flex flex-wrap items-center justify-between gap-2 rounded-2xl border px-4 py-3 text-xs ${
+                  warrantyInfo.isActive
+                    ? 'border-emerald-200 bg-emerald-50/60 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/25 dark:text-emerald-200'
+                    : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <div>
+                    <div className="font-bold">
+                      Garantía del trabajo: {warrantyInfo.warrantyDays} días
+                    </div>
+                    <div className="text-[11px] opacity-85">
+                      {warrantyInfo.deliveredAt
+                        ? warrantyInfo.isActive
+                          ? `Vigente · quedan ${warrantyInfo.daysLeft} días (hasta ${formatDateShort(
+                              warrantyInfo.expiresAt?.toISOString().slice(0, 10)
+                            )})`
+                          : `Finalizada el ${formatDateShort(
+                              warrantyInfo.expiresAt?.toISOString().slice(0, 10)
+                            )}`
+                        : 'Se activa automáticamente al momento de retirar el equipo.'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2 dark:border-slate-800">
               <div className="rounded-xl bg-slate-50 p-3.5 dark:bg-slate-800/50">
                 <div className="text-xs text-slate-500 dark:text-slate-400">Falla reportada</div>
@@ -359,6 +549,34 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
                 <p className="mt-1 whitespace-pre-line text-sm text-slate-800 dark:text-slate-200">
                   {parsedWork.text}
                 </p>
+              </div>
+            )}
+
+            {publicMeta.timeline.length > 0 && (
+              <div className="space-y-2.5 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                <div className="text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                  Historial de avances
+                </div>
+                <ol className="space-y-2 border-l-2 border-slate-200 pl-3.5 dark:border-slate-700">
+                  {[...publicMeta.timeline].reverse().map((entry) => (
+                    <li key={entry.id} className="relative text-xs">
+                      <span className="absolute -left-[19px] top-1.5 h-2 w-2 rounded-full bg-[#0072BB] dark:bg-sky-400" />
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <span className="font-semibold text-slate-900 dark:text-white">
+                          {entry.label}
+                        </span>
+                        <span className="font-mono-num text-[11px] text-slate-400">
+                          {formatTimelineDateTime(entry.at)}
+                        </span>
+                      </div>
+                      {entry.note && (
+                        <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                          {entry.note}
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ol>
               </div>
             )}
 

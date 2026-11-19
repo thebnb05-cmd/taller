@@ -104,7 +104,7 @@ export const WELCOME_TOUR_STEPS: WelcomeTourStep[] = [
     mobileTargetSelector: '[data-tour="mobile-nav"]',
     title: 'Todas las secciones del taller',
     description:
-      'Navegá entre Reparaciones (Tarjetas y Kanban), Agenda, Clientes, Inventario, Proveedores, Compras, Ventas y Reportes.',
+      'Navegá entre Reparaciones (Tarjetas y Kanban), Agenda, Clientes, Inventario, Proveedores, Compras, Ventas, Caja diaria y Reportes.',
     tips: [
       'En celular encontrás las secciones adicionales tocando el botón «Más» abajo a la derecha.',
     ],
@@ -265,6 +265,24 @@ export const PAGE_GUIDES: Record<Exclude<PageId, 'admin_taller'>, ContextualGuid
       {
         id: 'sales_csv_export',
         text: 'Exportá el historial de ventas a CSV para control contable externo.',
+      },
+    ],
+  },
+  cash: {
+    title: 'Guía rápida · Caja diaria',
+    subtitle: 'Controlá apertura, cobros del día y arqueo de cierre',
+    bullets: [
+      {
+        id: 'cash_shift_open_close',
+        text: 'Abrí tu turno con el efectivo inicial de caja y realizá el arqueo al cierre para detectar diferencias.',
+      },
+      {
+        id: 'cash_auto_movements',
+        text: 'Los cobros de Ventas, señas/pagos de Reparaciones y compras en efectivo se suman automáticamente por medio de pago.',
+      },
+      {
+        id: 'cash_manual_entries',
+        text: 'Registrá retiros o ingresos manuales (ej. cambio o gastos menores) sin salir del turno.',
       },
     ],
   },

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Banknote,
   BarChart3,
   Bell,
   Boxes,
@@ -75,6 +76,7 @@ import type {
 } from '../types/workshop';
 import { AdminTallerPage } from '../pages/AdminTallerPage';
 import { AgendaPage } from '../pages/AgendaPage';
+import { CashRegisterPage } from '../pages/CashRegisterPage';
 import { ClientsPage } from '../pages/ClientsPage';
 import { HomePage } from '../pages/HomePage';
 import { InventoryPage } from '../pages/InventoryPage';
@@ -143,6 +145,7 @@ const NAV_GROUPS: Array<{ title: string; items: NavItem[] }> = [
     title: 'Ventas y Control',
     items: [
       { id: 'sales', label: 'Ventas', icon: ShoppingBag },
+      { id: 'cash', label: 'Caja diaria', icon: Banknote },
       { id: 'reports', label: 'Reportes', icon: BarChart3 },
     ],
   },
@@ -151,7 +154,7 @@ const NAV_GROUPS: Array<{ title: string; items: NavItem[] }> = [
 const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
 
 const MOBILE_MORE_ITEMS: NavItem[] = NAV_ITEMS.filter((item) =>
-  ['agenda', 'suppliers', 'purchases', 'sales', 'reports'].includes(item.id)
+  ['agenda', 'suppliers', 'purchases', 'sales', 'cash', 'reports'].includes(item.id)
 );
 
 const PLATFORM_ADMIN_EMAIL = 'thebnb05@gmail.com';
@@ -275,6 +278,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   const [showBrandSettings, setShowBrandSettings] = useState(false);
   const [showNewRepair, setShowNewRepair] = useState(false);
   const [repairPreClient, setRepairPreClient] = useState<ClientRecord | null>(null);
+  const [warrantySourceRepair, setWarrantySourceRepair] = useState<RepairRecord | null>(null);
   const [selectedRepairId, setSelectedRepairId] = useState<string | null>(null);
   const [justCreatedRepair, setJustCreatedRepair] = useState<RepairRecord | null>(null);
   const [repairModalInitialTab, setRepairModalInitialTab] = useState<'detail' | 'edit' | 'receipt'>('detail');
@@ -298,6 +302,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
 
   const [showNewSale, setShowNewSale] = useState(false);
   const [saleProduct, setSaleProduct] = useState<ProductRecord | null>(null);
+  const [editingSale, setEditingSale] = useState<SaleRecord | null>(null);
   const [selectedPrintSale, setSelectedPrintSale] = useState<SaleRecord | null>(null);
   const [showNewPurchase, setShowNewPurchase] = useState(false);
 
@@ -521,6 +526,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   };
 
   const openNewRepairFlow = (client?: ClientRecord | null) => {
+    setWarrantySourceRepair(null);
     setRepairPreClient(client || null);
     setShowNewRepair(true);
   };
@@ -936,9 +942,26 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                   profile={profile}
                   onNewSale={() => {
                     setSaleProduct(null);
+                    setEditingSale(null);
+                    setShowNewSale(true);
+                  }}
+                  onEditSale={(s) => {
+                    setSaleProduct(null);
+                    setEditingSale(s);
                     setShowNewSale(true);
                   }}
                   onPrintSale={(s) => setSelectedPrintSale(s)}
+                />
+              )}
+
+              {page === 'cash' && (
+                <CashRegisterPage
+                  ownerId={userId}
+                  tasks={tasks}
+                  sales={sales}
+                  repairs={repairs}
+                  purchases={purchases}
+                  profile={profile}
                 />
               )}
 
@@ -1011,7 +1034,9 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
           onClick={() => setMoreMenuOpen((prev) => !prev)}
           className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition ${
             moreMenuOpen ||
-            ['agenda', 'suppliers', 'sales', 'purchases', 'reports', 'admin_taller'].includes(page)
+            ['agenda', 'suppliers', 'sales', 'cash', 'purchases', 'reports', 'admin_taller'].includes(
+              page
+            )
               ? 'text-[#0072BB] dark:text-sky-400'
               : 'text-slate-500 dark:text-slate-400'
           }`}
@@ -1098,6 +1123,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         onClose={() => {
           setShowNewRepair(false);
           setRepairPreClient(null);
+          setWarrantySourceRepair(null);
         }}
         onCreated={(created) => {
           setJustCreatedRepair(created);
@@ -1113,6 +1139,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         repairs={repairs}
         products={products}
         preselectedClient={repairPreClient}
+        warrantyFromRepair={warrantySourceRepair}
       />
 
       <RepairDetailModal
@@ -1130,6 +1157,12 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
             setSelectedRepairId(null);
             setBatchPrintData({ repairs: matching, batchRef });
           }
+        }}
+        onWarrantyReentry={(sourceRepair) => {
+          setSelectedRepairId(null);
+          setRepairPreClient(null);
+          setWarrantySourceRepair(sourceRepair);
+          setShowNewRepair(true);
         }}
         onClose={() => {
           setSelectedRepairId(null);
@@ -1227,11 +1260,13 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         onClose={() => {
           setShowNewSale(false);
           setSaleProduct(null);
+          setEditingSale(null);
         }}
         ownerId={userId}
         clients={clients}
         products={products}
         preselectedProduct={saleProduct}
+        editSale={editingSale}
         profile={profile}
         brandName={profile.brandName}
         onCreated={(createdSale) => setSelectedPrintSale(createdSale)}
@@ -1253,6 +1288,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         onClose={() => setShowNewPurchase(false)}
         ownerId={userId}
         suppliers={suppliers}
+        products={products}
         profile={profile}
       />
 

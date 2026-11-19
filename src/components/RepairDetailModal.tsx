@@ -5,6 +5,7 @@ import {
   Camera,
   Check,
   CheckCircle2,
+  Clock,
   Coins,
   Copy,
   CreditCard,
@@ -17,9 +18,13 @@ import {
   PenTool,
   Printer,
   QrCode,
+  RotateCcw,
   Search,
   Send,
   Settings2,
+  ShieldCheck,
+  ThumbsDown,
+  ThumbsUp,
   Trash2,
   Upload,
   User,
@@ -87,6 +92,22 @@ import {
   parseCheckoutAndSignature,
   serializeCheckoutAndSignature,
 } from '../utils/signatureMeta';
+import {
+  appendTimelineEntry,
+  computeWarrantyInfo,
+  createRepairMetaId,
+  mergeCheckoutPaymentLedger,
+  mergeWorkDetailPublicMeta,
+  parseRepairPaymentLedger,
+  parseRepairPublicMeta,
+  type RepairPublicMeta,
+} from '../utils/repairMeta';
+import {
+  buildRepairWhatsAppMessage,
+  resolveDefaultTemplateForStatus,
+  WHATSAPP_TEMPLATE_OPTIONS,
+  type WhatsAppTemplateId,
+} from '../utils/whatsappTemplates';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
 import {
   isValidEmail,
@@ -116,6 +137,7 @@ interface RepairDetailModalProps {
   initialTab?: 'detail' | 'edit' | 'receipt';
   justCreated?: boolean;
   onOpenBatch?: (batchRef: string) => void;
+  onWarrantyReentry?: (repair: RepairRecord) => void;
   onClose: () => void;
 }
 
@@ -127,6 +149,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   initialTab = 'detail',
   justCreated = false,
   onOpenBatch,
+  onWarrantyReentry,
   onClose,
 }) => {
   const { notify } = useToast();
@@ -164,12 +187,19 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   const [checkoutState, setCheckoutState] = useState('');
   const [physicalCheck, setPhysicalCheck] = useState<Record<string, string>>({});
   const [functionalCheck, setFunctionalCheck] = useState<Record<string, string>>({});
+  const [warrantyDays, setWarrantyDays] = useState<number>(0);
   const [saving, setSaving] = useState(false);
 
-  // Payment state in Detalle tab
+  // Payment, quote & WhatsApp template state in Detalle tab
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo');
   const [paying, setPaying] = useState(false);
   const [justPaid, setJustPaid] = useState(false);
+  const [partialAmount, setPartialAmount] = useState('');
+  const [partialMethod, setPartialMethod] = useState<PaymentMethod>('efectivo');
+  const [partialNote, setPartialNote] = useState('');
+  const [savingPartial, setSavingPartial] = useState(false);
+  const [waTemplate, setWaTemplate] = useState<WhatsAppTemplateId>('auto');
+  const [sendingQuote, setSendingQuote] = useState(false);
   const [transferConfig, setTransferConfig] = useState<TransferConfig>(() =>
     loadTransferConfig(repair?.ownerId || '')
   );
@@ -182,6 +212,10 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     setConfirmDelete(false);
     setJustPaid(false);
     setPaymentMethod('efectivo');
+    setPartialAmount('');
+    setPartialMethod('efectivo');
+    setPartialNote('');
+    setWaTemplate('auto');
     setEditingTransferConfig(false);
     setShowLinkInput(false);
     setMediaLinkUrl('');
@@ -232,8 +266,10 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       )
     );
     const parsedWork = parseWorkDetailAndMedia(repair.workDetail);
+    const parsedMeta = parseRepairPublicMeta(repair.workDetail);
     setWorkDetail(parsedWork.text);
     setMediaItems(parsedWork.media);
+    setWarrantyDays(parsedMeta.warrantyDays ?? 0);
     setCheckoutState(parseCheckoutAndSignature(repair.checkoutState).text);
     setPhysicalCheck({ ...(repair.physicalCheck || {}) });
     setFunctionalCheck({ ...(repair.functionalCheck || {}) });
@@ -318,6 +354,9 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   );
 
   const detailWork = parseWorkDetailAndMedia(repair.workDetail);
+  const detailMeta = parseRepairPublicMeta(repair.workDetail);
+  const warrantyInfo = computeWarrantyInfo(repair);
+  const paymentLedger = parseRepairPaymentLedger(repair.checkoutState);
   const initialPartIds = repair.partIds || [];
   const initialPartNames = repair.partNames || [];
   const spareParts = products.filter((p) => p.category === 'Repuesto');
@@ -427,15 +466,16 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   );
 
   const cleanPhoneForWa = (repair.clientPhone || '').replace(/[^\d]/g, '');
-  const whatsappMessage = encodeURIComponent(
-    `Hola ${repair.clientName}, te escribimos de ${
-      profile?.brandName || 'TH3 BNB Servicio Técnico'
-    }. Tu ${repair.brand} ${repair.model} (Orden ${repair.code}) está en estado: ${
-      statusMeta.label
-    } (${repair.progress}%). Podés seguir el estado acá: ${trackingUrl}`
-  );
+  const resolvedWaTemplateId =
+    waTemplate === 'auto' ? resolveDefaultTemplateForStatus(repair.status) : waTemplate;
+  const whatsappText = buildRepairWhatsAppMessage({
+    templateId: waTemplate,
+    repair,
+    profile: profile || null,
+    trackingUrl,
+  });
   const whatsappHref = cleanPhoneForWa
-    ? `https://wa.me/${cleanPhoneForWa}?text=${whatsappMessage}`
+    ? `https://wa.me/${cleanPhoneForWa}?text=${encodeURIComponent(whatsappText)}`
     : '';
 
   const copyTrackingLink = async () => {
@@ -484,8 +524,26 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       const cleanPhone = sanitizePhone(clientPhone, 60);
       const cleanDni = sanitizeDni(clientDni, 40);
       const cleanAddress = sanitizePlainLine(clientAddress, 240);
-      const combinedWorkDetail = serializeWorkDetailAndMedia(workDetail, mediaItems);
       const nowIso = new Date().toISOString();
+      const workDetailWithMeta = mergeWorkDetailPublicMeta(repair.workDetail, (prev) => {
+        let nextMeta: RepairPublicMeta = {
+          ...prev,
+          warrantyDays:
+            warrantyDays > 0 ? Math.min(3650, Math.round(warrantyDays)) : undefined,
+        };
+        if (status !== repair.status) {
+          nextMeta = appendTimelineEntry(nextMeta, status, undefined, nowIso);
+        }
+        if (status === 'entregado' && !nextMeta.deliveredAt) {
+          nextMeta = { ...nextMeta, deliveredAt: nowIso };
+        }
+        return nextMeta;
+      });
+      const combinedWorkDetail = serializeWorkDetailAndMedia(
+        workDetail,
+        mediaItems,
+        workDetailWithMeta
+      );
 
       const nextPartIds = selectedPartIds.slice(0, 30);
       const nextPartNames = nextPartIds
@@ -536,7 +594,8 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
           workDetail: combinedWorkDetail,
           checkoutState: serializeCheckoutAndSignature(
             checkoutState,
-            parseCheckoutAndSignature(repair.checkoutState).signatureDataUrl
+            parseCheckoutAndSignature(repair.checkoutState).signatureDataUrl,
+            repair.checkoutState
           ),
           physicalCheck,
           functionalCheck,
@@ -552,7 +611,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
             repair.trackingCode,
             stripUndefined({
               status,
-              progress,
+              progress: safeProgress,
               workDetail: combinedWorkDetail,
               price: budget,
               deposit: advance,
@@ -574,17 +633,17 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
               brand: repair.brand,
               model: repair.model,
               status,
-            progress: safeProgress,
-            dateIn: repair.dateIn,
-            dateEst: repair.dateEst || '',
-            problemSummary: clampStr(repair.problem, 200),
-            workDetail: combinedWorkDetail,
-            price: budget,
-            deposit: advance,
-            updatedAt: nowIso,
-          })
-        );
-      }
+              progress: safeProgress,
+              dateIn: repair.dateIn,
+              dateEst: repair.dateEst || '',
+              problemSummary: clampStr(repair.problem, 200),
+              workDetail: combinedWorkDetail,
+              price: budget,
+              deposit: advance,
+              updatedAt: nowIso,
+            })
+          );
+        }
       }
 
       if (repair.clientId && clients.some((c) => c.id === repair.clientId)) {
@@ -613,7 +672,11 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   const syncMediaToTracking = async (nextMedia: TechMediaItem[], successMessage: string) => {
     setSendingMedia(true);
     try {
-      const combinedWorkDetail = serializeWorkDetailAndMedia(workDetail, nextMedia);
+      const combinedWorkDetail = serializeWorkDetailAndMedia(
+        workDetail,
+        nextMedia,
+        repair.workDetail
+      );
       const nowIso = new Date().toISOString();
       await updateRow('repairs', repair.id, {
         workDetail: combinedWorkDetail,
@@ -788,6 +851,19 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       )
     );
     const nowIso = new Date().toISOString();
+    const prevDeposit = parseSafePositiveNumber(repair.deposit, 0);
+    const paidNow = Math.max(0, Math.round((budget - prevDeposit) * 100) / 100) || budget;
+    const prevLedger = parseRepairPaymentLedger(repair.checkoutState);
+    const nextCheckoutState = mergeCheckoutPaymentLedger(repair.checkoutState, [
+      ...prevLedger,
+      {
+        id: createRepairMetaId('pay'),
+        amount: paidNow,
+        method: paymentMethod,
+        date: nowIso,
+        note: prevDeposit > 0 ? 'Cancelación de saldo' : 'Pago total',
+      },
+    ]);
     const nextPaymentStatus = serializeRepairPaymentStatus({
       base: 'pagado',
       method: paymentMethod,
@@ -806,6 +882,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
         deposit: budget,
         paidAmount: budget,
         paymentStatus: nextPaymentStatus,
+        checkoutState: nextCheckoutState,
         updatedAt: nowIso,
       });
 
@@ -826,6 +903,160 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       notify(sanitizeDbErrorMessage(err, 'No se pudo registrar el pago.'), 'error');
     } finally {
       setPaying(false);
+    }
+  };
+
+  const handleRegisterPartialPayment = async () => {
+    const amt = parseSafePositiveNumber(partialAmount, 0);
+    if (amt <= 0) {
+      notify('Ingresá un monto de seña o abono mayor a 0.', 'error');
+      return;
+    }
+    setSavingPartial(true);
+    try {
+      const nowIso = new Date().toISOString();
+      const prevDeposit = Math.max(0, Number(repair.deposit || 0));
+      const budget = Math.max(0, Number(repair.price || 0));
+      const nextDeposit = Math.round((prevDeposit + amt) * 100) / 100;
+      const nextBaseStatus: 'pendiente' | 'parcial' | 'pagado' =
+        budget > 0 && nextDeposit >= budget ? 'pagado' : 'parcial';
+
+      const prevLedger = parseRepairPaymentLedger(repair.checkoutState);
+      const nextCheckoutState = mergeCheckoutPaymentLedger(repair.checkoutState, [
+        ...prevLedger,
+        {
+          id: createRepairMetaId('pay'),
+          amount: amt,
+          method: partialMethod,
+          date: nowIso,
+          note: sanitizePlainLine(partialNote, 120) || 'Seña / Abono parcial',
+        },
+      ]);
+
+      const nextPaymentStatus = serializeRepairPaymentStatus({
+        base: nextBaseStatus,
+        method: nextBaseStatus === 'pagado' ? partialMethod : null,
+        currency:
+          paymentInfo.currency && paymentInfo.currency !== baseCurrency
+            ? paymentInfo.currency
+            : undefined,
+        rate:
+          paymentInfo.currency && paymentInfo.currency !== baseCurrency
+            ? paymentInfo.rate
+            : undefined,
+        technician: paymentInfo.technician || undefined,
+      });
+
+      await updateRow('repairs', repair.id, {
+        deposit: nextDeposit,
+        paidAmount: nextDeposit,
+        paymentStatus: nextPaymentStatus,
+        checkoutState: nextCheckoutState,
+        updatedAt: nowIso,
+      });
+
+      if (repair.trackingCode) {
+        const ticket = await fetchSingleById<{ id: string }>('public_tickets', repair.trackingCode);
+        if (ticket) {
+          await updateRow('public_tickets', repair.trackingCode, {
+            deposit: nextDeposit,
+            updatedAt: nowIso,
+          });
+        }
+      }
+
+      setDeposit(
+        String(
+          isEditSecondary
+            ? Math.round(convertFromBaseCurrency(nextDeposit, editRate) * 100) / 100
+            : nextDeposit
+        )
+      );
+      setPartialAmount('');
+      setPartialNote('');
+      notify(`Abono de ${formatCurrency(amt, baseCurrency)} (${PAYMENT_METHOD_LABELS[partialMethod]}) registrado.`);
+      if (nextBaseStatus === 'pagado') {
+        setJustPaid(true);
+      }
+    } catch (err) {
+      notify(sanitizeDbErrorMessage(err, 'No se pudo registrar el abono.'), 'error');
+    } finally {
+      setSavingPartial(false);
+    }
+  };
+
+  const handleSendOnlineQuote = async () => {
+    const budget = parseSafePositiveNumber(repair.price, 0);
+    if (budget <= 0) {
+      notify('Definí un presupuesto mayor a 0 en la pestaña Técnico antes de enviarlo.', 'error');
+      return;
+    }
+    setSendingQuote(true);
+    try {
+      const nowIso = new Date().toISOString();
+      const nextWorkDetail = mergeWorkDetailPublicMeta(repair.workDetail, (prev) =>
+        appendTimelineEntry(
+          {
+            ...prev,
+            quote: {
+              status: 'pending',
+              amount: budget,
+              requestedAt: nowIso,
+            },
+          },
+          repair.status,
+          `Presupuesto (${formatCurrency(budget, baseCurrency)}) enviado para aprobación online`,
+          nowIso
+        )
+      );
+
+      await updateRow('repairs', repair.id, {
+        workDetail: nextWorkDetail,
+        updatedAt: nowIso,
+      });
+
+      if (repair.trackingCode) {
+        const ticket = await fetchSingleById<{ id: string }>('public_tickets', repair.trackingCode);
+        if (ticket) {
+          await updateRow('public_tickets', repair.trackingCode, {
+            workDetail: nextWorkDetail,
+            price: budget,
+            updatedAt: nowIso,
+          });
+        } else {
+          await upsertRow(
+            'public_tickets',
+            stripUndefined({
+              id: repair.trackingCode,
+              ownerId: repair.ownerId,
+              repairId: repair.id,
+              trackingCode: repair.trackingCode,
+              repairCode: repair.code,
+              businessName: profile?.brandName || 'TH3 BNB Servicio Técnico',
+              businessPhone: profile?.businessPhone || '',
+              deviceType: repair.deviceType,
+              brand: repair.brand,
+              model: repair.model,
+              status: repair.status,
+              progress: repair.progress,
+              dateIn: repair.dateIn,
+              dateEst: repair.dateEst || '',
+              problemSummary: clampStr(repair.problem, 200),
+              workDetail: nextWorkDetail,
+              price: budget,
+              deposit: Number(repair.deposit || 0),
+              updatedAt: nowIso,
+            })
+          );
+        }
+      }
+
+      setWaTemplate('quote_pending');
+      notify('Presupuesto habilitado para aprobación en el seguimiento online.');
+    } catch (err) {
+      notify(sanitizeDbErrorMessage(err, 'No se pudo habilitar el presupuesto online.'), 'error');
+    } finally {
+      setSendingQuote(false);
     }
   };
 
@@ -1354,18 +1585,62 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                     );
                   })()}
 
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      disabled={paying}
-                      onClick={() => void handleRegisterFullPayment()}
-                      className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-bold text-white transition hover:bg-emerald-700 disabled:opacity-60"
-                    >
-                      <CheckCircle2 className="h-4 w-4" />
-                      {paying
-                        ? 'Registrando pago...'
-                        : `Registrar pago (${formatCurrency(pendingBalance)}) · ${PAYMENT_METHOD_LABELS[paymentMethod]}`}
-                    </button>
+                  <div className="space-y-2.5 border-t border-slate-200/80 pt-3 dark:border-slate-700/60">
+                    <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+                      <div className="mb-2 text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                        Registrar seña o abono parcial ({getCurrencyOption(baseCurrency).symbol})
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-[120px_130px_1fr_auto]">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={partialAmount}
+                          onChange={(e) => setPartialAmount(e.target.value)}
+                          placeholder="Monto"
+                          className="h-9 rounded-lg border border-slate-200 bg-slate-50 px-2.5 font-mono-num text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                        />
+                        <select
+                          value={partialMethod}
+                          onChange={(e) => setPartialMethod(e.target.value as PaymentMethod)}
+                          className="h-9 rounded-lg border border-slate-200 bg-slate-50 px-2 text-xs font-medium text-slate-800 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                        >
+                          <option value="efectivo">Efectivo</option>
+                          <option value="transferencia">Transferencia</option>
+                          <option value="tarjeta">Tarjeta</option>
+                        </select>
+                        <input
+                          type="text"
+                          value={partialNote}
+                          onChange={(e) => setPartialNote(e.target.value)}
+                          placeholder="Nota opcional (ej: seña repuesto)"
+                          maxLength={80}
+                          className="h-9 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                        />
+                        <button
+                          type="button"
+                          disabled={savingPartial}
+                          onClick={() => void handleRegisterPartialPayment()}
+                          className="h-9 rounded-lg border border-[#0072BB] bg-sky-50 px-3 text-xs font-bold text-[#0072BB] hover:bg-sky-100 disabled:opacity-60 dark:border-sky-500 dark:bg-sky-950/40 dark:text-sky-300"
+                        >
+                          {savingPartial ? 'Guardando...' : 'Abonar'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        disabled={paying}
+                        onClick={() => void handleRegisterFullPayment()}
+                        className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-bold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                      >
+                        <CheckCircle2 className="h-4 w-4" />
+                        {paying
+                          ? 'Registrando pago...'
+                          : `Cancelar saldo (${formatCurrency(pendingBalance, baseCurrency)}) · ${PAYMENT_METHOD_LABELS[paymentMethod]}`}
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -1392,6 +1667,239 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   </div>
                 )
               )}
+
+              {paymentLedger.length > 0 && (
+                <div className="border-t border-slate-200/80 pt-2.5 dark:border-slate-700/60">
+                  <div className="mb-1.5 text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                    Movimientos de cobro registrados
+                  </div>
+                  <div className="space-y-1">
+                    {paymentLedger.map((entry) => (
+                      <div
+                        key={entry.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-1.5 text-xs dark:bg-slate-900"
+                      >
+                        <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200">
+                          <span className="font-semibold">
+                            {PAYMENT_METHOD_LABELS[entry.method]}
+                          </span>
+                          {entry.note && (
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                              · {entry.note}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2.5">
+                          <span className="font-mono-num text-[11px] text-slate-400">
+                            {formatDateShort(entry.date)}
+                          </span>
+                          <span className="font-mono-num font-bold text-emerald-700 dark:text-emerald-400">
+                            {formatCurrency(entry.amount, baseCurrency)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Presupuesto online, Plantillas WhatsApp y Garantía */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                    Presupuesto online y WhatsApp
+                  </h4>
+                  {detailMeta.quote.status === 'approved' && (
+                    <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                      <ThumbsUp className="h-3 w-3" />
+                      Aprobado
+                    </span>
+                  )}
+                  {detailMeta.quote.status === 'rejected' && (
+                    <span className="inline-flex items-center gap-1 rounded-lg bg-red-50 px-2 py-0.5 text-[11px] font-bold text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                      <ThumbsDown className="h-3 w-3" />
+                      Rechazado
+                    </span>
+                  )}
+                  {detailMeta.quote.status === 'pending' && (
+                    <span className="inline-flex items-center gap-1 rounded-lg bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                      <Clock className="h-3 w-3" />
+                      Pendiente
+                    </span>
+                  )}
+                </div>
+
+                {detailMeta.quote.status === 'pending' && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-2.5 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                    Presupuesto de{' '}
+                    <strong className="font-mono-num">
+                      {formatCurrency(detailMeta.quote.amount ?? repair.price, baseCurrency)}
+                    </strong>{' '}
+                    habilitado para que el cliente lo apruebe desde el link de seguimiento.
+                  </div>
+                )}
+
+                {detailMeta.quote.status === 'approved' && (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-2.5 text-xs text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
+                    <div className="font-semibold">
+                      Cliente aprobó{' '}
+                      <span className="font-mono-num">
+                        {formatCurrency(detailMeta.quote.amount ?? repair.price, baseCurrency)}
+                      </span>
+                      {detailMeta.quote.respondedAt
+                        ? ` el ${formatDateShort(detailMeta.quote.respondedAt)}`
+                        : ''}
+                    </div>
+                    {detailMeta.quote.clientNote && (
+                      <div className="mt-1 text-[11px] opacity-90">
+                        Nota: "{detailMeta.quote.clientNote}"
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {detailMeta.quote.status === 'rejected' && (
+                  <div className="rounded-xl border border-red-200 bg-red-50/70 p-2.5 text-xs text-red-900 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
+                    <div className="font-semibold">
+                      Cliente rechazó{' '}
+                      <span className="font-mono-num">
+                        {formatCurrency(detailMeta.quote.amount ?? repair.price, baseCurrency)}
+                      </span>
+                      {detailMeta.quote.respondedAt
+                        ? ` el ${formatDateShort(detailMeta.quote.respondedAt)}`
+                        : ''}
+                    </div>
+                    {detailMeta.quote.clientNote && (
+                      <div className="mt-1 text-[11px] opacity-90">
+                        Motivo: "{detailMeta.quote.clientNote}"
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    disabled={sendingQuote}
+                    onClick={() => void handleSendOnlineQuote()}
+                    className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-[#0072BB] bg-sky-50 px-3 text-xs font-bold text-[#0072BB] transition hover:bg-sky-100 disabled:opacity-60 dark:border-sky-500 dark:bg-sky-950/40 dark:text-sky-300"
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                    {sendingQuote
+                      ? 'Habilitando...'
+                      : detailMeta.quote.status === 'pending'
+                        ? 'Actualizar presupuesto online'
+                        : detailMeta.quote.status === 'rejected'
+                          ? 'Enviar nuevo presupuesto online'
+                          : 'Enviar presupuesto para aprobación online'}
+                  </button>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <select
+                      value={waTemplate}
+                      onChange={(e) => setWaTemplate(e.target.value as WhatsAppTemplateId)}
+                      aria-label="Plantilla de WhatsApp"
+                      className="h-9 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-800 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    >
+                      <option value="auto">
+                        Automática (
+                        {WHATSAPP_TEMPLATE_OPTIONS.find(
+                          (o) => o.id === resolveDefaultTemplateForStatus(repair.status)
+                        )?.label || 'Seguimiento'}
+                        )
+                      </option>
+                      {WHATSAPP_TEMPLATE_OPTIONS.map((opt) => (
+                        <option key={opt.id} value={opt.id}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                    {whatsappHref && (
+                      <a
+                        href={whatsappHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700"
+                      >
+                        <MessageCircle className="h-3.5 w-3.5" />
+                        Enviar
+                      </a>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    Plantilla activa:{' '}
+                    {WHATSAPP_TEMPLATE_OPTIONS.find((o) => o.id === resolvedWaTemplateId)?.label}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col justify-between space-y-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400">
+                      <ShieldCheck className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
+                      Garantía y reingresos
+                    </h4>
+                    {warrantyInfo.warrantyDays > 0 && (
+                      <span className="font-mono-num text-xs font-bold text-slate-900 dark:text-white">
+                        {warrantyInfo.warrantyDays} días
+                      </span>
+                    )}
+                  </div>
+
+                  {warrantyInfo.warrantyDays <= 0 ? (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Sin garantía configurada. Podés establecer los días de cobertura desde la
+                      pestaña <strong>Técnico</strong>.
+                    </p>
+                  ) : warrantyInfo.deliveredAt ? (
+                    <div
+                      className={`rounded-xl border p-2.5 text-xs ${
+                        warrantyInfo.isActive
+                          ? 'border-emerald-200 bg-emerald-50/70 text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200'
+                          : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-300'
+                      }`}
+                    >
+                      <div className="font-semibold">
+                        {warrantyInfo.isActive
+                          ? `Garantía vigente · quedan ${warrantyInfo.daysLeft} días`
+                          : 'Garantía vencida'}
+                      </div>
+                      {warrantyInfo.expiresAt && (
+                        <div className="mt-0.5 font-mono-num text-[11px] opacity-85">
+                          Entregado: {formatDateShort(warrantyInfo.deliveredAt)} · Vence:{' '}
+                          {formatDateShort(warrantyInfo.expiresAt.toISOString())}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-2.5 text-xs text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200">
+                      Cobertura de <strong className="font-mono-num">{warrantyInfo.warrantyDays} días</strong>{' '}
+                      (se activa automáticamente al marcar como Entregado).
+                    </div>
+                  )}
+
+                  {detailMeta.parentRepairCode && (
+                    <div className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                      Reingreso por garantía de la orden{' '}
+                      <span className="font-mono-num">{detailMeta.parentRepairCode}</span>
+                    </div>
+                  )}
+                </div>
+
+                {onWarrantyReentry && (
+                  <button
+                    type="button"
+                    onClick={() => onWarrantyReentry(repair)}
+                    className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700 transition hover:border-[#0072BB] hover:bg-sky-50 hover:text-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-sky-400 dark:hover:text-sky-300"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    Reingreso por garantía
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -1687,6 +2195,41 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                     PIN / Clave: {repair.securityPin}
                   </div>
                 )}
+              </div>
+            )}
+
+            {detailMeta.timeline.length > 0 && (
+              <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                <h4 className="mb-3 flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400">
+                  <Clock className="h-3.5 w-3.5" />
+                  Historial de avances
+                </h4>
+                <div className="space-y-2.5">
+                  {[...detailMeta.timeline].reverse().map((ev, idx) => (
+                    <div key={ev.id} className="flex items-start gap-2.5 text-xs">
+                      <span
+                        className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
+                          idx === 0 ? 'bg-[#0072BB] dark:bg-sky-400' : 'bg-slate-300 dark:bg-slate-600'
+                        }`}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-semibold text-slate-900 dark:text-white">
+                            {ev.label}
+                          </span>
+                          <span className="font-mono-num text-[11px] text-slate-400">
+                            {formatDateShort(ev.at)}
+                          </span>
+                        </div>
+                        {ev.note && (
+                          <p className="mt-0.5 text-[11px] text-slate-600 dark:text-slate-300">
+                            {ev.note}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -2313,6 +2856,46 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   </span>
                 </div>
               )}
+
+              <div className="border-t border-slate-100 pt-3 dark:border-slate-800">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Garantía del trabajo (días desde la entrega)
+                  </label>
+                  <span className="font-mono-num text-xs font-bold text-[#0072BB] dark:text-sky-400">
+                    {warrantyDays > 0 ? `${warrantyDays} días` : 'Sin garantía'}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[0, 30, 60, 90].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setWarrantyDays(preset)}
+                      className={`h-8 rounded-lg px-2.5 text-xs font-semibold transition ${
+                        warrantyDays === preset
+                          ? 'bg-[#0072BB] text-white'
+                          : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                      }`}
+                    >
+                      {preset === 0 ? 'Sin garantía' : `${preset} días`}
+                    </button>
+                  ))}
+                  <input
+                    type="number"
+                    min="0"
+                    max="3650"
+                    value={warrantyDays}
+                    onChange={(e) =>
+                      setWarrantyDays(
+                        Math.max(0, Math.min(3650, Math.round(Number(e.target.value) || 0)))
+                      )
+                    }
+                    aria-label="Días de garantía personalizados"
+                    className="h-8 w-24 rounded-lg border border-slate-200 bg-white px-2.5 font-mono-num text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="space-y-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
