@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   Building2,
+  CheckCircle2,
   Coins,
   Globe,
   Image as ImageIcon,
@@ -11,6 +12,7 @@ import {
   Store,
   Trash2,
   UploadCloud,
+  XCircle,
 } from 'lucide-react';
 import {
   clampStr,
@@ -81,12 +83,22 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [infoMsg, setInfoMsg] = useState('');
   const [remainingAttempts, setRemainingAttempts] = useState<number | null>(null);
   const [otpLock, setOtpLock] = useState<OtpLockState | null>(null);
+
+  const hasSignupComparison = mode === 'signup' && confirmPassword.length > 0;
+  const passwordsMatch = hasSignupComparison && password.length > 0 && password === confirmPassword;
+  const passwordsMismatch = hasSignupComparison && password !== confirmPassword;
+  const passwordMatchBorderClass = passwordsMatch
+    ? 'border-emerald-500 focus:border-emerald-500 ring-2 ring-emerald-500/15 dark:border-emerald-500 dark:focus:border-emerald-400'
+    : passwordsMismatch
+    ? 'border-red-500 focus:border-red-500 ring-2 ring-red-500/15 dark:border-red-500 dark:focus:border-red-400'
+    : 'border-slate-200 focus:border-[#0072BB] dark:border-slate-700';
 
   // Restore active 5-minute lockout modal if user refreshes during lockout
   useEffect(() => {
@@ -185,6 +197,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
         );
         return;
       }
+      if (password !== confirmPassword) {
+        setErrorMsg(
+          tr(
+            'Las contraseñas no coinciden. Escribí la misma contraseña en ambos campos.',
+            'Passwords do not match. Enter the same password in both fields.',
+            'As senhas não coincidem. Digite a mesma senha nos dois campos.'
+          )
+        );
+        return;
+      }
     }
 
     setLoading(true);
@@ -238,6 +260,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
               'Conta criada. Verifique seu e-mail para confirmar a conta e depois faça login.'
             )
           );
+          setConfirmPassword('');
           setMode('login');
         }
       }
@@ -301,26 +324,26 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10 dark:bg-slate-950">
-      <div className="grid w-full max-w-4xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm lg:grid-cols-2 dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex flex-col justify-between bg-slate-900 p-8 text-white sm:p-10 dark:bg-slate-950">
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-3 py-5 sm:px-6 sm:py-8 lg:py-10 dark:bg-slate-950">
+      <div className="grid w-full max-w-4xl grid-cols-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm sm:rounded-3xl md:grid-cols-2 dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex flex-col justify-between bg-slate-900 p-6 text-white sm:p-7 md:p-8 lg:p-10 dark:bg-slate-950">
           <div>
-            <div className="inline-flex items-center gap-2.5 text-xl font-extrabold tracking-tight font-display">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#0072BB] text-white">
+            <div className="inline-flex items-center gap-2.5 text-lg font-extrabold tracking-tight font-display sm:text-xl">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#0072BB] text-white sm:h-10 sm:w-10">
                 <Smartphone className="h-5 w-5" />
               </span>
               <span>
                 TU <span className="text-sky-400">TALLER</span>
               </span>
             </div>
-            <h1 className="mt-8 text-3xl font-bold leading-tight tracking-tight text-balance font-display">
+            <h1 className="mt-5 text-2xl font-bold leading-tight tracking-tight text-balance font-display sm:mt-6 sm:text-3xl md:mt-8">
               {tr(
                 'Gestión integral para tu servicio técnico',
                 'Complete management for your repair shop',
                 'Gestão completa para sua assistência técnica'
               )}
             </h1>
-            <p className="mt-3 text-sm leading-relaxed text-slate-300">
+            <p className="mt-2.5 text-sm leading-relaxed text-slate-300 sm:mt-3">
               {tr(
                 'Controlá órdenes, repuestos, ventas y caja en tiempo real, con firma digital, QR de seguimiento y comprobantes listos para imprimir o enviar por WhatsApp.',
                 'Manage orders, spare parts, sales, and cash register in real time, with digital signatures, tracking QR codes, and receipts ready to print or send via WhatsApp.',
@@ -329,7 +352,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
             </p>
           </div>
 
-          <div className="mt-8 space-y-3 border-t border-slate-800 pt-6 text-xs text-slate-300">
+          <div className="mt-6 space-y-2.5 border-t border-slate-800 pt-4 text-xs text-slate-300 sm:mt-7 sm:pt-5 md:mt-8 md:space-y-3 md:pt-6">
             <div className="flex items-center gap-2.5">
               <Building2 className="h-4 w-4 shrink-0 text-sky-400" />
               <span>
@@ -344,7 +367,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
               <button
                 type="button"
                 onClick={onOpenTrackingLookup}
-                className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-sky-400 hover:text-sky-300 hover:underline"
+                className="mt-1 inline-flex items-center gap-1.5 text-left text-xs font-medium text-sky-400 hover:text-sky-300 hover:underline md:mt-2"
               >
                 {tr(
                   '¿Sos cliente? Consultar estado de reparación',
@@ -356,28 +379,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
           </div>
         </div>
 
-        <div className="flex flex-col justify-center p-8 sm:p-10">
-          <div className="space-y-5">
-              <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col justify-center p-6 sm:p-7 md:p-8 lg:p-10">
+          <div className="space-y-4 sm:space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-2.5">
                 <div>
                   <h2 className="text-xl font-bold text-slate-900 dark:text-white font-display">
                     {mode === 'login'
                       ? tr('Ingresar al sistema', 'Sign in', 'Entrar no sistema')
                       : tr('Crear cuenta de taller', 'Create workshop account', 'Criar conta da oficina')}
                   </h2>
-                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                    {mode === 'login'
-                      ? tr(
-                          'Ingresá con tu correo y contraseña para acceder a tu taller.',
-                          'Sign in with your email and password to access your workshop.',
-                          'Entre com seu e-mail e senha para acessar sua oficina.'
-                        )
-                      : tr(
-                          'Registrate con tu correo para crear un nuevo taller.',
-                          'Sign up with your email to create a new workshop.',
-                          'Cadastre-se com seu e-mail para criar uma nova oficina.'
-                        )}
-                  </p>
                 </div>
                 <label className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
                   <Globe className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
@@ -401,6 +411,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
                   type="button"
                   onClick={() => {
                     setMode('login');
+                    setConfirmPassword('');
                     setErrorMsg('');
                     setInfoMsg('');
                     setRemainingAttempts(null);
@@ -417,6 +428,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
                   type="button"
                   onClick={() => {
                     setMode('signup');
+                    setConfirmPassword('');
                     setErrorMsg('');
                     setInfoMsg('');
                     setRemainingAttempts(null);
@@ -517,26 +529,101 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
                   <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     {tr('Contraseña', 'Password', 'Senha')}
                   </label>
-                  <input
-                    type="password"
-                    required
-                    minLength={mode === 'signup' ? 8 : 6}
-                    maxLength={128}
-                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder={
-                      mode === 'signup'
-                        ? tr(
-                            'Mín. 8 caracteres (letras y números)',
-                            'Min. 8 chars (letters & numbers)',
-                            'Mín. 8 caracteres (letras e números)'
-                          )
-                        : tr('Tu contraseña', 'Your password', 'Sua senha')
-                    }
-                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                  />
+                  <div className="relative">
+                    <input
+                      type="password"
+                      required
+                      minLength={mode === 'signup' ? 8 : 6}
+                      maxLength={128}
+                      autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                      aria-invalid={mode === 'signup' ? passwordsMismatch : undefined}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder={
+                        mode === 'signup'
+                          ? tr(
+                              'Mín. 8 caracteres (letras y números)',
+                              'Min. 8 chars (letters & numbers)',
+                              'Mín. 8 caracteres (letras e números)'
+                            )
+                          : tr('Tu contraseña', 'Your password', 'Sua senha')
+                      }
+                      className={`h-11 w-full rounded-xl border bg-white px-3.5 text-sm text-slate-900 outline-none transition-colors dark:bg-slate-800 dark:text-white ${
+                        hasSignupComparison ? 'pr-10' : ''
+                      } ${passwordMatchBorderClass}`}
+                    />
+                    {passwordsMatch && (
+                      <CheckCircle2
+                        aria-hidden="true"
+                        className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-500 dark:text-emerald-400"
+                      />
+                    )}
+                    {passwordsMismatch && (
+                      <XCircle
+                        aria-hidden="true"
+                        className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-red-500 dark:text-red-400"
+                      />
+                    )}
+                  </div>
                 </div>
+
+                {mode === 'signup' && (
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      {tr('Repetir contraseña', 'Confirm password', 'Repetir senha')}
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="password"
+                        required
+                        minLength={8}
+                        maxLength={128}
+                        autoComplete="new-password"
+                        aria-invalid={passwordsMismatch}
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder={tr(
+                          'Volvé a escribir tu contraseña',
+                          'Re-enter your password',
+                          'Digite sua senha novamente'
+                        )}
+                        className={`h-11 w-full rounded-xl border bg-white px-3.5 pr-10 text-sm text-slate-900 outline-none transition-colors dark:bg-slate-800 dark:text-white ${passwordMatchBorderClass}`}
+                      />
+                      {passwordsMatch && (
+                        <CheckCircle2
+                          aria-hidden="true"
+                          className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-500 dark:text-emerald-400"
+                        />
+                      )}
+                      {passwordsMismatch && (
+                        <XCircle
+                          aria-hidden="true"
+                          className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-red-500 dark:text-red-400"
+                        />
+                      )}
+                    </div>
+                    {hasSignupComparison && (
+                      <p
+                        className={`mt-1.5 flex items-center gap-1 text-[11px] font-medium ${
+                          passwordsMatch
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : 'text-red-600 dark:text-red-400'
+                        }`}
+                      >
+                        {passwordsMatch ? (
+                          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                        ) : (
+                          <XCircle className="h-3.5 w-3.5 shrink-0" />
+                        )}
+                        <span>
+                          {passwordsMatch
+                            ? tr('Las contraseñas coinciden.', 'Passwords match.', 'As senhas coincidem.')
+                            : tr('Las contraseñas no coinciden.', 'Passwords do not match.', 'As senhas não coincidem.')}
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 <button
                   type="submit"
