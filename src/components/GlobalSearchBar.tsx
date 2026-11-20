@@ -161,21 +161,34 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
   }, []);
 
   useEffect(() => {
+    const focusGlobalSearch = () => {
+      if (window.innerWidth < 640) {
+        setMobileOpen(true);
+        setOpen(true);
+        window.setTimeout(() => mobileInputRef.current?.focus(), 20);
+      } else {
+        setOpen(true);
+        desktopInputRef.current?.focus();
+      }
+    };
+
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        if (window.innerWidth < 640) {
-          setMobileOpen(true);
-          setOpen(true);
-          window.setTimeout(() => mobileInputRef.current?.focus(), 20);
-        } else {
-          setOpen(true);
-          desktopInputRef.current?.focus();
-        }
+        focusGlobalSearch();
       }
     };
+
+    const handleCustomOpen = () => {
+      focusGlobalSearch();
+    };
+
     window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+    window.addEventListener('th3bnb:open-global-search', handleCustomOpen);
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeyDown);
+      window.removeEventListener('th3bnb:open-global-search', handleCustomOpen);
+    };
   }, []);
 
   const closeSearch = () => {

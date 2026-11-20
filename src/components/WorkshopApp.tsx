@@ -8,6 +8,7 @@ import {
   Factory,
   HelpCircle,
   Home,
+  Keyboard,
   LogOut,
   MessageSquarePlus,
   Moon,
@@ -32,8 +33,16 @@ import {
   type TableName,
 } from '../lib/db';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import { useGlobalShortcuts } from '../hooks/useGlobalShortcuts';
 import { useActiveCurrency } from '../utils/currency';
 import { useI18n } from '../utils/i18n';
+import {
+  formatShortcutKey,
+  getShortcutsEnabled,
+  isMacPlatform,
+  setShortcutsEnabled as persistShortcutsEnabled,
+  type ShortcutActionId,
+} from '../utils/keyboardShortcuts';
 import { clearTransferConfigCache, hydrateTransferConfig } from '../utils/payment';
 import {
   clearMercadoPagoConfigCache,
@@ -92,6 +101,7 @@ import { BrandSettingsModal } from './BrandSettingsModal';
 import { ClientDetailModal, NewClientModal } from './ClientModals';
 import { GlobalSearchBar } from './GlobalSearchBar';
 import { ContextualWindowGuide, WelcomeSpotlightTour } from './GuidedTourOverlay';
+import { KeyboardShortcutsModal } from './KeyboardShortcutsModal';
 import { NewPurchaseModal } from './NewPurchaseModal';
 import { NewRepairModal } from './NewRepairModal';
 import { NewSaleModal } from './NewSaleModal';
@@ -109,6 +119,7 @@ import {
   type PendingCheckoutState,
 } from './SubscriptionModal';
 import { SupportModal } from './SupportModal';
+import { useToast } from './ToastProvider';
 
 interface WorkshopAppProps {
   userId: string;
@@ -134,8 +145,10 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   onToggleDark,
 }) => {
   const isOnline = useOnlineStatus();
+  const { notify } = useToast();
   const { tr } = useI18n();
   useActiveCurrency();
+  const isMac = useMemo(() => isMacPlatform(), []);
 
   const navGroups = useMemo<Array<{ title: string; items: NavItem[] }>>(
     () => [
@@ -327,6 +340,8 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   const [mpPlatformConfigured, setMpPlatformConfigured] = useState(true);
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
+  const [showShortcutsModal, setShowShortcutsModal] = useState(false);
+  const [shortcutsEnabled, setShortcutsEnabled] = useState<boolean>(() => getShortcutsEnabled());
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
@@ -545,6 +560,111 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
     setShowNewRepair(true);
   };
 
+  const hasBlockingModalOpen = Boolean(
+    showBrandSettings ||
+      showNewRepair ||
+      selectedRepairId ||
+      batchPrintData ||
+      showClientModal ||
+      selectedClientId ||
+      showProductModal ||
+      selectedProductId ||
+      showProductImport ||
+      showNewTask ||
+      showSupplierModal ||
+      showNewSale ||
+      selectedPrintSale ||
+      showNewPurchase ||
+      showSubscriptionModal ||
+      isSubscriptionBlocking ||
+      showSupportModal ||
+      welcomeTourOpen ||
+      moreMenuOpen
+  );
+
+  const handleShortcutAction = (actionId: ShortcutActionId) => {
+    switch (actionId) {
+      case 'new_repair':
+        openNewRepairFlow();
+        break;
+      case 'new_client':
+        setEditClient(null);
+        setShowClientModal(true);
+        break;
+      case 'new_product':
+        setEditProduct(null);
+        setShowProductModal(true);
+        break;
+      case 'new_sale':
+        setSaleProduct(null);
+        setEditingSale(null);
+        setShowNewSale(true);
+        break;
+      case 'new_task':
+        setShowNewTask(true);
+        break;
+      case 'new_purchase':
+        setEditingPurchase(null);
+        setShowNewPurchase(true);
+        break;
+      case 'nav_home':
+        navigateTo('home');
+        break;
+      case 'nav_repairs':
+        navigateTo('repairs');
+        break;
+      case 'nav_agenda':
+        navigateTo('agenda');
+        break;
+      case 'nav_clients':
+        navigateTo('clients');
+        break;
+      case 'nav_inventory':
+        navigateTo('inventory');
+        break;
+      case 'nav_suppliers':
+        navigateTo('suppliers');
+        break;
+      case 'nav_purchases':
+        navigateTo('purchases');
+        break;
+      case 'nav_sales':
+        navigateTo('sales');
+        break;
+      case 'nav_cash':
+        navigateTo('cash');
+        break;
+      case 'nav_reports':
+        navigateTo('reports');
+        break;
+      case 'global_search':
+        window.dispatchEvent(new CustomEvent('th3bnb:open-global-search'));
+        break;
+      case 'open_settings':
+        setShowBrandSettings(true);
+        break;
+      case 'toggle_dark':
+        onToggleDark();
+        break;
+      case 'open_shortcuts':
+        setShowShortcutsModal((prev) => !prev);
+        break;
+      case 'close_modal':
+        break;
+    }
+  };
+
+  useGlobalShortcuts({
+    enabled: shortcutsEnabled && !isLoading && !isSubscriptionBlocking,
+    hasBlockingModalOpen,
+    shortcutsModalOpen: showShortcutsModal,
+    onTrigger: handleShortcutAction,
+    onToggleShortcutsModal: () => setShowShortcutsModal((prev) => !prev),
+    onEscape: () => {
+      if (moreMenuOpen) setMoreMenuOpen(false);
+    },
+  });
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       {/* Desktop Sidebar */}
@@ -620,8 +740,13 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                 onClick={() => openNewRepairFlow()}
                 className="flex h-9 w-full items-center gap-2 rounded-xl bg-[#0072BB] px-3 text-xs font-semibold text-white hover:bg-[#005f9c]"
               >
-                <Plus className="h-3.5 w-3.5" />
-                {tr('Nueva reparación', 'New repair', 'Novo reparo')}
+                <Plus className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{tr('Nueva reparación', 'New repair', 'Novo reparo')}</span>
+                {shortcutsEnabled && (
+                  <kbd className="ml-auto shrink-0 rounded border border-white/25 bg-white/15 px-1.5 py-0.5 font-mono-num text-[10px] font-semibold text-white/95">
+                    {formatShortcutKey('Ctrl', isMac)} N
+                  </kbd>
+                )}
               </button>
               <button
                 type="button"
@@ -631,8 +756,13 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                 }}
                 className="flex h-9 w-full items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
               >
-                <Plus className="h-3.5 w-3.5" />
-                {tr('Nuevo cliente', 'New client', 'Novo cliente')}
+                <Plus className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{tr('Nuevo cliente', 'New client', 'Novo cliente')}</span>
+                {shortcutsEnabled && (
+                  <kbd className="ml-auto shrink-0 rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 font-mono-num text-[10px] font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+                    {formatShortcutKey('Alt', isMac)} C
+                  </kbd>
+                )}
               </button>
               <button
                 type="button"
@@ -642,8 +772,13 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                 }}
                 className="flex h-9 w-full items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
               >
-                <Plus className="h-3.5 w-3.5" />
-                {tr('Nuevo producto', 'New product', 'Novo produto')}
+                <Plus className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{tr('Nuevo producto', 'New product', 'Novo produto')}</span>
+                {shortcutsEnabled && (
+                  <kbd className="ml-auto shrink-0 rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 font-mono-num text-[10px] font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+                    {formatShortcutKey('Alt', isMac)} P
+                  </kbd>
+                )}
               </button>
             </div>
           </div>
@@ -785,6 +920,16 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               className="hidden lg:flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <HelpCircle className="h-4 w-4" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowShortcutsModal(true)}
+              aria-label={tr('Atajos de teclado', 'Keyboard shortcuts', 'Atalhos de teclado')}
+              title={`${tr('Atajos de teclado', 'Keyboard shortcuts', 'Atalhos de teclado')} (${formatShortcutKey('Ctrl', isMac)}+/)`}
+              className="hidden lg:flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              <Keyboard className="h-4 w-4" />
             </button>
 
             <button
@@ -1406,6 +1551,23 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         profile={profile}
         userEmail={userEmail}
         currentPage={page}
+      />
+
+      <KeyboardShortcutsModal
+        open={showShortcutsModal}
+        onClose={() => setShowShortcutsModal(false)}
+        enabled={shortcutsEnabled}
+        onToggleEnabled={(next) => {
+          setShortcutsEnabled(next);
+          persistShortcutsEnabled(next);
+          notify(
+            next
+              ? tr('Atajos de teclado activados.', 'Keyboard shortcuts enabled.', 'Atalhos de teclado ativados.')
+              : tr('Atajos de teclado desactivados.', 'Keyboard shortcuts disabled.', 'Atalhos de teclado desativados.'),
+            'info'
+          );
+        }}
+        onRunAction={handleShortcutAction}
       />
 
       <WelcomeSpotlightTour
