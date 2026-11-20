@@ -640,6 +640,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
           {subscriptionRecord && (
             <button
               type="button"
+              data-tour="subscription-sidebar"
               onClick={() => setShowSubscriptionModal(true)}
               className={`flex w-full items-center justify-between gap-2 rounded-xl border px-2.5 py-2 text-left transition ${
                 subscriptionRecord.payload.isExemptAnnual
@@ -735,7 +736,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                     subscriptionRecord.payload.planId,
                     subscriptionRecord.payload.isExemptAnnual
                   )} · ${subscriptionRemaining.detailLabel}`}
-                  className={`hidden sm:inline-flex h-8 sm:h-9 shrink-0 items-center gap-1 rounded-xl border px-2 xl:px-2.5 text-[11px] xl:text-xs font-semibold transition whitespace-nowrap ${
+                  className={`hidden sm:inline-flex lg:hidden h-8 sm:h-9 shrink-0 items-center gap-1 rounded-xl border px-2.5 text-[11px] font-semibold transition whitespace-nowrap ${
                     subscriptionRecord.payload.isExemptAnnual
                       ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-200'
                       : subscriptionRemaining.isExpired
@@ -745,21 +746,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                           : 'border-sky-200 bg-sky-50/80 text-[#0072BB] hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300'
                   }`}
                 >
-                  <span className="xl:hidden">{shortPlanLabel}</span>
-                  <span className="hidden xl:inline">
-                    {getPlanDisplayName(
-                      subscriptionRecord.payload.planId,
-                      subscriptionRecord.payload.isExemptAnnual
-                    )}
-                    {' · '}
-                    <span className="font-mono-num">
-                      {subscriptionRemaining.isExpired
-                        ? 'Vencida'
-                        : subscriptionRemaining.days >= 1
-                          ? `Faltan ${subscriptionRemaining.days}d`
-                          : subscriptionRemaining.shortLabel}
-                    </span>
-                  </span>
+                  <span>{shortPlanLabel}</span>
                 </button>
               );
             })()}

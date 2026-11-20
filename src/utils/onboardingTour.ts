@@ -121,10 +121,11 @@ export const WELCOME_TOUR_STEPS: WelcomeTourStep[] = [
   },
   {
     id: 'subscription-status',
-    targetSelector: '[data-tour="subscription-badge"]',
+    targetSelector: '[data-tour="subscription-sidebar"]',
+    mobileTargetSelector: '[data-tour="subscription-badge"]',
     title: 'Tu suscripción y días restantes',
     description:
-      'En la barra superior ves en todo momento tu plan activo y exactamente cuánto falta para el próximo vencimiento o renovación.',
+      'En el menú lateral (o arriba al lado del buscador en tablet vertical) y dentro de Configuración ves tu plan activo y cuánto falta para el próximo vencimiento.',
     tips: [
       'Tocá el indicador para ver los planes con descuento (Mensual, 6 Meses o Anual) y suscribirte con Mercado Pago.',
     ],
