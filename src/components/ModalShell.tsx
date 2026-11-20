@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { X } from 'lucide-react';
+import { useI18n } from '../utils/i18n';
 
 interface ModalShellProps {
   open: boolean;
@@ -26,6 +27,7 @@ export const ModalShell: React.FC<ModalShellProps> = ({
   maxWidth = 'xl',
   children,
 }) => {
+  const { tr } = useI18n();
   useEffect(() => {
     if (!open) return;
     const handleKey = (e: KeyboardEvent) => {
@@ -63,7 +65,7 @@ export const ModalShell: React.FC<ModalShellProps> = ({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Cerrar ventana"
+            aria-label={tr('Cerrar ventana', 'Close window', 'Fechar janela')}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
           >
             <X className="h-5 w-5" />

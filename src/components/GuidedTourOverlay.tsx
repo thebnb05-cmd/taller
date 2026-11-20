@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Check, ChevronLeft, ChevronRight, Compass, Sparkles, X } from 'lucide-react';
 import type { ResolvedContextualGuide, WelcomeTourStep } from '../utils/onboardingTour';
+import { useI18n } from '../utils/i18n';
 
 interface SpotlightRect {
   top: number;
@@ -36,6 +37,7 @@ export const WelcomeSpotlightTour: React.FC<WelcomeSpotlightTourProps> = ({
   onComplete,
   onSkip,
 }) => {
+  const { tr } = useI18n();
   const [stepIndex, setStepIndex] = useState(0);
   const [targetRect, setTargetRect] = useState<SpotlightRect | null>(null);
   const [viewport, setViewport] = useState({ width: 1280, height: 800 });
@@ -164,7 +166,7 @@ export const WelcomeSpotlightTour: React.FC<WelcomeSpotlightTourProps> = ({
       className="no-print fixed inset-0 z-[70]"
       role="dialog"
       aria-modal="true"
-      aria-label="Tour guiado inicial"
+      aria-label={tr('Tour guiado inicial', 'Welcome guided tour', 'Tour guiado inicial')}
     >
       {/* Backdrop or Spotlight cutout */}
       {targetRect ? (
@@ -201,7 +203,11 @@ export const WelcomeSpotlightTour: React.FC<WelcomeSpotlightTourProps> = ({
             </span>
             <div>
               <div className="text-[11px] font-bold uppercase tracking-wider text-[#0072BB] dark:text-sky-400">
-                Tour guiado · Paso {stepIndex + 1} de {steps.length}
+                {tr(
+                  `Tour guiado · Paso ${stepIndex + 1} de ${steps.length}`,
+                  `Guided tour · Step ${stepIndex + 1} of ${steps.length}`,
+                  `Tour guiado · Passo ${stepIndex + 1} de ${steps.length}`
+                )}
               </div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white font-display">
                 {currentStep.title}
@@ -212,7 +218,7 @@ export const WelcomeSpotlightTour: React.FC<WelcomeSpotlightTourProps> = ({
           <button
             type="button"
             onClick={onSkip}
-            aria-label="Omitir tour guiado"
+            aria-label={tr('Omitir tour guiado', 'Skip guided tour', 'Pular tour guiado')}
             className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
           >
             <X className="h-4 w-4" />
@@ -240,7 +246,7 @@ export const WelcomeSpotlightTour: React.FC<WelcomeSpotlightTourProps> = ({
             onClick={onSkip}
             className="text-xs font-medium text-slate-500 transition hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
           >
-            Omitir tour
+            {tr('Omitir tour', 'Skip tour', 'Pular tour')}
           </button>
 
           <div className="flex items-center gap-2">
@@ -251,7 +257,7 @@ export const WelcomeSpotlightTour: React.FC<WelcomeSpotlightTourProps> = ({
                 className="inline-flex h-9 items-center gap-1 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
-                Anterior
+                {tr('Anterior', 'Back', 'Anterior')}
               </button>
             )}
             <button
@@ -268,11 +274,11 @@ export const WelcomeSpotlightTour: React.FC<WelcomeSpotlightTourProps> = ({
               {isLast ? (
                 <>
                   <Check className="h-3.5 w-3.5" />
-                  Finalizar
+                  {tr('Finalizar', 'Finish', 'Concluir')}
                 </>
               ) : (
                 <>
-                  Siguiente
+                  {tr('Siguiente', 'Next', 'Próximo')}
                   <ChevronRight className="h-3.5 w-3.5" />
                 </>
               )}
@@ -295,6 +301,7 @@ export const ContextualWindowGuide: React.FC<ContextualWindowGuideProps> = ({
   onDismissCurrent,
   onDismissAll,
 }) => {
+  const { tr } = useI18n();
   if (!guide) return null;
 
   return (
@@ -318,7 +325,7 @@ export const ContextualWindowGuide: React.FC<ContextualWindowGuideProps> = ({
               </h4>
               {guide.isIncrementalUpdate && (
                 <span className="rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-[#0072BB] dark:bg-sky-950 dark:text-sky-300">
-                  Nuevo
+                  {tr('Nuevo', 'New', 'Novo')}
                 </span>
               )}
             </div>
@@ -329,7 +336,7 @@ export const ContextualWindowGuide: React.FC<ContextualWindowGuideProps> = ({
         <button
           type="button"
           onClick={onDismissCurrent}
-          aria-label="Cerrar guía de esta ventana"
+          aria-label={tr('Cerrar guía de esta ventana', 'Close guide for this screen', 'Fechar guia desta tela')}
           className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
         >
           <X className="h-3.5 w-3.5" />
@@ -351,7 +358,7 @@ export const ContextualWindowGuide: React.FC<ContextualWindowGuideProps> = ({
           onClick={onDismissAll}
           className="text-[11px] font-medium text-slate-500 transition hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
         >
-          Desactivar todas las guías
+          {tr('Desactivar todas las guías', 'Disable all guides', 'Desativar todos os guias')}
         </button>
         <button
           type="button"
@@ -359,7 +366,7 @@ export const ContextualWindowGuide: React.FC<ContextualWindowGuideProps> = ({
           className="inline-flex h-8 items-center gap-1 rounded-xl bg-[#0072BB] px-3 text-[11px] font-semibold text-white transition hover:bg-[#005f9c]"
         >
           <Check className="h-3.5 w-3.5" />
-          Entendido
+          {tr('Entendido', 'Got it', 'Entendi')}
         </button>
       </div>
     </aside>

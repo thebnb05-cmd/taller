@@ -23,6 +23,7 @@ import {
 } from '../utils/validation';
 import { ModalShell } from './ModalShell';
 import { useToast } from './ToastProvider';
+import { useI18n } from '../utils/i18n';
 import {
   CLIENT_TYPE_LABELS,
   parseClientMeta,
@@ -44,6 +45,7 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
   editClient,
 }) => {
   const { notify } = useToast();
+  const { tr } = useI18n();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [altPhone, setAltPhone] = useState('');
@@ -132,17 +134,27 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
     }
   };
 
+  const clientTypeLabel = (type: ClientType) => {
+    if (type === 'empresa') return tr('Empresa', 'Company', 'Empresa');
+    if (type === 'gremio') return tr('Gremio', 'Trade', 'Parceiro');
+    return tr('Particular', 'Individual', 'Particular');
+  };
+
   return (
     <ModalShell
       open={open}
       onClose={onClose}
-      title={editClient ? 'Editar cliente' : 'Nuevo cliente'}
+      title={
+        editClient
+          ? tr('Editar cliente', 'Edit client', 'Editar cliente')
+          : tr('Nuevo cliente', 'New client', 'Novo cliente')
+      }
       maxWidth="lg"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Tipo de cliente
+            {tr('Tipo de cliente', 'Client type', 'Tipo de cliente')}
           </label>
           <div className="grid grid-cols-3 gap-2">
             {(['particular', 'empresa', 'gremio'] as const).map((type) => {
@@ -158,7 +170,7 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
                       : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
                   }`}
                 >
-                  {CLIENT_TYPE_LABELS[type]}
+                  {clientTypeLabel(type) || CLIENT_TYPE_LABELS[type]}
                 </button>
               );
             })}
@@ -167,14 +179,20 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
 
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-            {clientType === 'empresa' ? 'Nombre / Razón social *' : 'Nombre completo *'}
+            {clientType === 'empresa'
+              ? tr('Nombre / Razón social *', 'Company name *', 'Nome / Razão social *')
+              : tr('Nombre completo *', 'Full name *', 'Nome completo *')}
           </label>
           <input
             type="text"
             required
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder={clientType === 'empresa' ? 'Ej: TechStore SRL' : 'Nombre completo'}
+            placeholder={
+              clientType === 'empresa'
+                ? tr('Ej: TechStore SRL', 'e.g. TechStore LLC', 'Ex: TechStore Ltda')
+                : tr('Nombre completo', 'Full name', 'Nome completo')
+            }
             className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
           />
         </div>
@@ -182,7 +200,7 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Teléfono principal
+              {tr('Teléfono principal', 'Primary phone', 'Telefone principal')}
             </label>
             <input
               type="tel"
@@ -194,13 +212,13 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Teléfono alternativo
+              {tr('Teléfono alternativo', 'Alternate phone', 'Telefone alternativo')}
             </label>
             <input
               type="tel"
               value={altPhone}
               onChange={(e) => setAltPhone(e.target.value)}
-              placeholder="Familiar o contacto secundario"
+              placeholder={tr('Familiar o contacto secundario', 'Family or secondary contact', 'Familiar ou contato secundário')}
               className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
           </div>
@@ -209,7 +227,7 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              DNI
+              {tr('DNI', 'ID / SSN', 'RG / CPF')}
             </label>
             <input
               type="text"
@@ -221,7 +239,7 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              CUIT / CUIL
+              {tr('CUIT / CUIL', 'Tax ID', 'CNPJ / CPF')}
             </label>
             <input
               type="text"
@@ -235,7 +253,7 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
 
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Email
+            {tr('Email', 'Email', 'E-mail')}
           </label>
           <input
             type="email"
@@ -249,25 +267,25 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Dirección
+              {tr('Dirección', 'Address', 'Endereço')}
             </label>
             <input
               type="text"
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-              placeholder="Calle y altura"
+              placeholder={tr('Calle y altura', 'Street & number', 'Rua e número')}
               className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Localidad / Barrio
+              {tr('Localidad / Barrio', 'City / Neighborhood', 'Cidade / Bairro')}
             </label>
             <input
               type="text"
               value={neighborhood}
               onChange={(e) => setNeighborhood(e.target.value)}
-              placeholder="Ej: Centro, Palermo..."
+              placeholder={tr('Ej: Centro, Palermo...', 'e.g. Downtown...', 'Ex: Centro...')}
               className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
           </div>
@@ -275,13 +293,17 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
 
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Notas / Observaciones
+            {tr('Notas / Observaciones', 'Notes / Remarks', 'Notas / Observações')}
           </label>
           <textarea
             rows={2}
             value={existingNotes}
             onChange={(e) => setExistingNotes(e.target.value)}
-            placeholder="Preferencias de contacto, horarios, acuerdos de gremio..."
+            placeholder={tr(
+              'Preferencias de contacto, horarios, acuerdos de gremio...',
+              'Contact preferences, hours, trade agreements...',
+              'Preferências de contato, horários, acordos...'
+            )}
             className="w-full rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
           />
         </div>
@@ -292,14 +314,14 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
             onClick={onClose}
             className="h-11 flex-1 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
           >
-            Cancelar
+            {tr('Cancelar', 'Cancel', 'Cancelar')}
           </button>
           <button
             type="submit"
             disabled={saving}
             className="h-11 flex-1 rounded-xl bg-[#0072BB] text-sm font-semibold text-white hover:bg-[#005f9c] disabled:opacity-60"
           >
-            {saving ? 'Guardando...' : 'Guardar'}
+            {saving ? tr('Guardando...', 'Saving...', 'Salvando...') : tr('Guardar', 'Save', 'Salvar')}
           </button>
         </div>
       </form>
@@ -339,6 +361,7 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
   onSelectRepair,
 }) => {
   const { notify } = useToast();
+  const { tr } = useI18n();
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
@@ -348,6 +371,12 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
   if (!client) return null;
 
   const clientMeta = parseClientMeta(client);
+  const clientTypeText =
+    clientMeta.clientType === 'empresa'
+      ? tr('Empresa', 'Company', 'Empresa')
+      : clientMeta.clientType === 'gremio'
+        ? tr('Gremio', 'Trade', 'Parceiro')
+        : tr('Particular', 'Individual', 'Particular');
   const primaryLinks = buildPhoneActionLinks(client.phone);
   const altLinks = buildPhoneActionLinks(clientMeta.altPhone);
 
@@ -382,24 +411,22 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
       open={Boolean(client)}
       onClose={onClose}
       title={client.name}
-      subtitle={`${CLIENT_TYPE_LABELS[clientMeta.clientType]} · ${clientRepairs.length} reparaciones · ${clientSales.length} ventas · Total ${formatCurrency(totalSpent)}`}
+      subtitle={`${clientTypeText} · ${clientRepairs.length} ${tr('reparaciones', 'repairs', 'reparos')} · ${clientSales.length} ${tr('ventas', 'sales', 'vendas')} · Total ${formatCurrency(totalSpent)}`}
       maxWidth="2xl"
     >
       <div className="space-y-5">
         <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs sm:grid-cols-2 dark:border-slate-800 dark:bg-slate-800/40">
           <div>
-            <span className="text-slate-500">Tipo de cliente: </span>
-            <strong className="text-slate-900 dark:text-white">
-              {CLIENT_TYPE_LABELS[clientMeta.clientType]}
-            </strong>
+            <span className="text-slate-500">{tr('Tipo de cliente:', 'Client type:', 'Tipo de cliente:')} </span>
+            <strong className="text-slate-900 dark:text-white">{clientTypeText}</strong>
           </div>
           <div>
-            <span className="text-slate-500">Email: </span>
+            <span className="text-slate-500">{tr('Email:', 'Email:', 'E-mail:')} </span>
             <strong className="text-slate-900 dark:text-white">{client.email || '—'}</strong>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-1.5">
             <div>
-              <span className="text-slate-500">Teléfono principal: </span>
+              <span className="text-slate-500">{tr('Teléfono principal:', 'Primary phone:', 'Telefone principal:')} </span>
               <strong className="font-mono-num text-slate-900 dark:text-white">
                 {client.phone || '—'}
               </strong>
@@ -423,7 +450,7 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                     className="inline-flex h-6 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
                   >
                     <Phone className="h-3 w-3" />
-                    Llamar
+                    {tr('Llamar', 'Call', 'Ligar')}
                   </a>
                 )}
               </div>
@@ -431,7 +458,7 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
           </div>
           <div className="flex flex-wrap items-center justify-between gap-1.5">
             <div>
-              <span className="text-slate-500">Teléfono alternativo: </span>
+              <span className="text-slate-500">{tr('Teléfono alternativo:', 'Alternate phone:', 'Telefone alternativo:')} </span>
               <strong className="font-mono-num text-slate-900 dark:text-white">
                 {clientMeta.altPhone || '—'}
               </strong>
@@ -455,37 +482,37 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                     className="inline-flex h-6 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
                   >
                     <Phone className="h-3 w-3" />
-                    Llamar
+                    {tr('Llamar', 'Call', 'Ligar')}
                   </a>
                 )}
               </div>
             )}
           </div>
           <div>
-            <span className="text-slate-500">DNI: </span>
+            <span className="text-slate-500">{tr('DNI:', 'ID / SSN:', 'RG / CPF:')} </span>
             <strong className="font-mono-num text-slate-900 dark:text-white">
               {client.dni || '—'}
             </strong>
           </div>
           <div>
-            <span className="text-slate-500">CUIT / CUIL: </span>
+            <span className="text-slate-500">{tr('CUIT / CUIL:', 'Tax ID:', 'CNPJ / CPF:')} </span>
             <strong className="font-mono-num text-slate-900 dark:text-white">
               {clientMeta.cuit || '—'}
             </strong>
           </div>
           <div>
-            <span className="text-slate-500">Dirección: </span>
+            <span className="text-slate-500">{tr('Dirección:', 'Address:', 'Endereço:')} </span>
             <strong className="text-slate-900 dark:text-white">{client.address || '—'}</strong>
           </div>
           <div>
-            <span className="text-slate-500">Localidad / Barrio: </span>
+            <span className="text-slate-500">{tr('Localidad / Barrio:', 'City / Neighborhood:', 'Cidade / Bairro:')} </span>
             <strong className="text-slate-900 dark:text-white">
               {clientMeta.neighborhood || '—'}
             </strong>
           </div>
           {clientMeta.notes && (
             <div className="border-t border-slate-200/80 pt-2 sm:col-span-2 dark:border-slate-700/60">
-              <span className="text-slate-500">Notas: </span>
+              <span className="text-slate-500">{tr('Notas:', 'Notes:', 'Notas:')} </span>
               <span className="whitespace-pre-line font-medium text-slate-800 dark:text-slate-200">
                 {clientMeta.notes}
               </span>
@@ -503,7 +530,7 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
             className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-xs font-semibold text-white hover:bg-[#005f9c]"
           >
             <Plus className="h-4 w-4" />
-            Nueva reparación para este cliente
+            {tr('Nueva reparación para este cliente', 'New repair for this client', 'Novo reparo para este cliente')}
           </button>
           <button
             type="button"
@@ -514,17 +541,17 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
             className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 px-4 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
           >
             <Edit3 className="h-3.5 w-3.5" />
-            Editar datos
+            {tr('Editar datos', 'Edit details', 'Editar dados')}
           </button>
         </div>
 
         <div>
           <h3 className="mb-2 text-xs font-bold text-slate-500 dark:text-slate-400">
-            Historial de reparaciones
+            {tr('Historial de reparaciones', 'Repair history', 'Histórico de reparos')}
           </h3>
           {clientRepairs.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-xs text-slate-500 dark:border-slate-800">
-              Sin reparaciones registradas todavía.
+              {tr('Sin reparaciones registradas todavía.', 'No repairs recorded yet.', 'Nenhum reparo registrado ainda.')}
             </div>
           ) : (
             <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
@@ -568,11 +595,11 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
 
         <div>
           <h3 className="mb-2 text-xs font-bold text-slate-500 dark:text-slate-400">
-            Historial de ventas
+            {tr('Historial de ventas', 'Sales history', 'Histórico de vendas')}
           </h3>
           {clientSales.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-xs text-slate-500 dark:border-slate-800">
-              Sin ventas registradas todavía.
+              {tr('Sin ventas registradas todavía.', 'No sales recorded yet.', 'Nenhuma venda registrada ainda.')}
             </div>
           ) : (
             <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
@@ -593,7 +620,7 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                       <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">
                         {s.productName
                           ? `${s.productName}${s.quantity ? ` × ${s.quantity}` : ''}`
-                          : 'Venta de mostrador'}
+                          : tr('Venta de mostrador', 'Counter sale', 'Venda no balcão')}
                       </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
@@ -604,7 +631,11 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                             : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
                         }`}
                       >
-                        {info.isPaid ? 'Cobrado' : info.deposit > 0 ? 'Señado' : 'Pendiente'}
+                        {info.isPaid
+                          ? tr('Cobrado', 'Paid', 'Pago')
+                          : info.deposit > 0
+                            ? tr('Señado', 'Deposit', 'Sinal')
+                            : tr('Pendiente', 'Pending', 'Pendente')}
                       </span>
                       <span className="font-mono-num text-xs font-bold text-slate-900 dark:text-white">
                         {formatCurrency(s.amount)}
@@ -625,26 +656,26 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
               className="inline-flex h-9 items-center gap-1.5 rounded-xl px-3 text-xs font-semibold text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
             >
               <Trash2 className="h-3.5 w-3.5" />
-              Eliminar cliente
+              {tr('Eliminar cliente', 'Delete client', 'Excluir cliente')}
             </button>
           ) : (
             <div className="flex items-center gap-2">
               <span className="text-xs font-medium text-red-600 dark:text-red-400">
-                ¿Eliminar este cliente?
+                {tr('¿Eliminar este cliente?', 'Delete this client?', 'Excluir este cliente?')}
               </span>
               <button
                 type="button"
                 onClick={handleDelete}
                 className="h-8 rounded-lg bg-red-600 px-3 text-xs font-semibold text-white"
               >
-                Confirmar
+                {tr('Confirmar', 'Confirm', 'Confirmar')}
               </button>
               <button
                 type="button"
                 onClick={() => setConfirmDelete(false)}
                 className="h-8 rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 dark:border-slate-700 dark:text-slate-300"
               >
-                Cancelar
+                {tr('Cancelar', 'Cancel', 'Cancelar')}
               </button>
             </div>
           )}

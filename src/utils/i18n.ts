@@ -255,6 +255,70 @@ const TOAST_TRANSLATIONS: Record<string, { en: string; pt: string }> = {
     en: 'There are no clients to export with the current filter.',
     pt: 'Não há clientes para exportar com o filtro atual.',
   },
+  'Configuración de Mercado Pago guardada en tu cuenta.': {
+    en: 'Mercado Pago settings saved to your account.',
+    pt: 'Configurações do Mercado Pago salvas na sua conta.',
+  },
+  'Se limpiaron los datos de Mercado Pago.': {
+    en: 'Mercado Pago settings cleared.',
+    pt: 'Dados do Mercado Pago limpos.',
+  },
+  'Cliente guardado.': {
+    en: 'Client saved.',
+    pt: 'Cliente salvo.',
+  },
+  'Cliente actualizado.': {
+    en: 'Client updated.',
+    pt: 'Cliente atualizado.',
+  },
+  'Cliente eliminado.': {
+    en: 'Client deleted.',
+    pt: 'Cliente excluído.',
+  },
+  'Producto guardado.': {
+    en: 'Product saved.',
+    pt: 'Produto salvo.',
+  },
+  'Producto actualizado.': {
+    en: 'Product updated.',
+    pt: 'Produto atualizado.',
+  },
+  'Proveedor guardado.': {
+    en: 'Supplier saved.',
+    pt: 'Fornecedor salvo.',
+  },
+  'Proveedor actualizado.': {
+    en: 'Supplier updated.',
+    pt: 'Fornecedor atualizado.',
+  },
+  'Tarea agregada a la agenda.': {
+    en: 'Task added to schedule.',
+    pt: 'Tarefa adicionada à agenda.',
+  },
+  'Venta registrada.': {
+    en: 'Sale recorded.',
+    pt: 'Venda registrada.',
+  },
+  'Venta actualizada.': {
+    en: 'Sale updated.',
+    pt: 'Venda atualizada.',
+  },
+  'Compra actualizada.': {
+    en: 'Purchase updated.',
+    pt: 'Compra atualizada.',
+  },
+  'Compra / gasto registrado.': {
+    en: 'Purchase / expense recorded.',
+    pt: 'Compra / despesa registrada.',
+  },
+  'Copia de seguridad descargada.': {
+    en: 'Backup downloaded.',
+    pt: 'Cópia de segurança baixada.',
+  },
+  'Logo quitado.': {
+    en: 'Logo removed.',
+    pt: 'Logotipo removido.',
+  },
 };
 
 export function translateToastMessage(

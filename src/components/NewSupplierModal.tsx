@@ -16,6 +16,7 @@ import {
 } from '../utils/validation';
 import { ModalShell } from './ModalShell';
 import { useToast } from './ToastProvider';
+import { useI18n } from '../utils/i18n';
 
 interface NewSupplierModalProps {
   open: boolean;
@@ -31,6 +32,7 @@ export const NewSupplierModal: React.FC<NewSupplierModalProps> = ({
   editSupplier,
 }) => {
   const { notify } = useToast();
+  const { tr } = useI18n();
   const [name, setName] = useState('');
   const [category, setCategory] = useState('Repuestos');
   const [contact, setContact] = useState('');
@@ -108,14 +110,18 @@ export const NewSupplierModal: React.FC<NewSupplierModalProps> = ({
     <ModalShell
       open={open}
       onClose={onClose}
-      title={editSupplier ? 'Editar proveedor' : 'Nuevo proveedor'}
+      title={
+        editSupplier
+          ? tr('Editar proveedor', 'Edit supplier', 'Editar fornecedor')
+          : tr('Nuevo proveedor', 'New supplier', 'Novo fornecedor')
+      }
       maxWidth="lg"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Nombre *
+              {tr('Nombre *', 'Name *', 'Nome *')}
             </label>
             <input
               type="text"
@@ -128,22 +134,22 @@ export const NewSupplierModal: React.FC<NewSupplierModalProps> = ({
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Categoría
+              {tr('Categoría', 'Category', 'Categoria')}
             </label>
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
               className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             >
-              <option value="Repuestos">Repuestos</option>
-              <option value="Accesorios">Accesorios</option>
-              <option value="Baterías">Baterías</option>
-              <option value="Servicio">Servicio</option>
+              <option value="Repuestos">{tr('Repuestos', 'Parts', 'Peças')}</option>
+              <option value="Accesorios">{tr('Accesorios', 'Accessories', 'Acessórios')}</option>
+              <option value="Baterías">{tr('Baterías', 'Batteries', 'Baterias')}</option>
+              <option value="Servicio">{tr('Servicio', 'Service', 'Serviço')}</option>
             </select>
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Contacto
+              {tr('Contacto', 'Contact', 'Contato')}
             </label>
             <input
               type="text"
@@ -155,7 +161,7 @@ export const NewSupplierModal: React.FC<NewSupplierModalProps> = ({
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Teléfono
+              {tr('Teléfono', 'Phone', 'Telefone')}
             </label>
             <input
               type="tel"
@@ -167,7 +173,7 @@ export const NewSupplierModal: React.FC<NewSupplierModalProps> = ({
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Email
+              {tr('Email', 'Email', 'E-mail')}
             </label>
             <input
               type="email"
@@ -179,7 +185,7 @@ export const NewSupplierModal: React.FC<NewSupplierModalProps> = ({
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Plazo de entrega
+              {tr('Plazo de entrega', 'Lead time', 'Prazo de entrega')}
             </label>
             <input
               type="text"
@@ -192,7 +198,7 @@ export const NewSupplierModal: React.FC<NewSupplierModalProps> = ({
         </div>
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Saldo pendiente
+            {tr('Saldo pendiente', 'Pending balance', 'Saldo pendente')}
           </label>
           <input
             type="number"
@@ -209,14 +215,16 @@ export const NewSupplierModal: React.FC<NewSupplierModalProps> = ({
             onClick={onClose}
             className="h-11 flex-1 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300"
           >
-            Cancelar
+            {tr('Cancelar', 'Cancel', 'Cancelar')}
           </button>
           <button
             type="submit"
             disabled={saving}
             className="h-11 flex-1 rounded-xl bg-[#0072BB] text-sm font-semibold text-white hover:bg-[#005f9c]"
           >
-            {saving ? 'Guardando...' : 'Guardar proveedor'}
+            {saving
+              ? tr('Guardando...', 'Saving...', 'Salvando...')
+              : tr('Guardar proveedor', 'Save supplier', 'Salvar fornecedor')}
           </button>
         </div>
       </form>

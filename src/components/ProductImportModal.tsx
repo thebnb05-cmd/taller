@@ -20,6 +20,7 @@ import {
 } from '../utils/validation';
 import { ModalShell } from './ModalShell';
 import { useToast } from './ToastProvider';
+import { useI18n } from '../utils/i18n';
 
 interface ProductImportModalProps {
   open: boolean;
@@ -46,6 +47,7 @@ export const ProductImportModal: React.FC<ProductImportModalProps> = ({
   existingProducts,
 }) => {
   const { notify } = useToast();
+  const { tr } = useI18n();
   const [dragOver, setDragOver] = useState(false);
   const [fileName, setFileName] = useState('');
   const [toImport, setToImport] = useState<ParsedImportProduct[]>([]);
@@ -232,8 +234,12 @@ export const ProductImportModal: React.FC<ProductImportModalProps> = ({
         reset();
         onClose();
       }}
-      title="Importar productos"
-      subtitle="Subí un archivo Excel (.xlsx) o CSV (.csv). Los duplicados se omiten automáticamente."
+      title={tr('Importar productos', 'Import products', 'Importar produtos')}
+      subtitle={tr(
+        'Subí un archivo Excel (.xlsx) o CSV (.csv). Los duplicados se omiten automáticamente.',
+        'Upload an Excel (.xlsx) or CSV (.csv) file. Duplicates are skipped automatically.',
+        'Envie um arquivo Excel (.xlsx) ou CSV (.csv). Duplicados são ignorados automaticamente.'
+      )}
       maxWidth="lg"
     >
       <div className="space-y-4">
@@ -266,24 +272,41 @@ export const ProductImportModal: React.FC<ProductImportModalProps> = ({
             <UploadCloud className="h-8 w-8 text-slate-400" />
           )}
           <div className="text-sm font-semibold text-slate-900 dark:text-white">
-            {fileName || 'Arrastrá el archivo aquí o hacé clic para buscarlo'}
+            {fileName ||
+              tr(
+                'Arrastrá el archivo aquí o hacé clic para buscarlo',
+                'Drag the file here or click to browse',
+                'Arraste o arquivo aqui ou clique para procurar'
+              )}
           </div>
-          <div className="text-xs text-slate-500">Formatos permitidos: .xlsx y .csv</div>
+          <div className="text-xs text-slate-500">
+            {tr('Formatos permitidos: .xlsx y .csv', 'Allowed formats: .xlsx and .csv', 'Formatos permitidos: .xlsx e .csv')}
+          </div>
         </label>
 
         <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600 dark:bg-slate-800/50 dark:text-slate-300">
-          Columnas reconocidas: <strong>Nombre</strong> (obligatoria), Precio, Costo, Stock,
-          Categoría, Subcategoría, SKU y Código de barras.
+          {tr(
+            'Columnas reconocidas: Nombre (obligatoria), Precio, Costo, Stock, Categoría, Subcategoría, SKU y Código de barras.',
+            'Recognized columns: Name (required), Price, Cost, Stock, Category, Subcategory, SKU, and Barcode.',
+            'Colunas reconhecidas: Nome (obrigatória), Preço, Custo, Estoque, Categoria, Subcategoria, SKU e Código de barras.'
+          )}
         </div>
 
         {fileName && (
           <div className="rounded-xl border border-slate-200 p-3.5 text-xs dark:border-slate-800">
             <div className="font-semibold text-slate-900 dark:text-white">
-              Listos para importar: <span className="font-mono-num">{toImport.length}</span> productos
+              {tr('Listos para importar:', 'Ready to import:', 'Prontos para importar:')}{' '}
+              <span className="font-mono-num">{toImport.length}</span>{' '}
+              {tr('productos', 'products', 'produtos')}
             </div>
             {skippedCount > 0 && (
               <div className="mt-1 text-slate-500">
-                Omitidos por duplicado o sin nombre: {skippedCount}
+                {tr(
+                  'Omitidos por duplicado o sin nombre:',
+                  'Skipped (duplicates or missing name):',
+                  'Ignorados por duplicidade ou sem nome:'
+                )}{' '}
+                {skippedCount}
               </div>
             )}
           </div>
@@ -298,7 +321,7 @@ export const ProductImportModal: React.FC<ProductImportModalProps> = ({
             }}
             className="h-11 flex-1 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
           >
-            Cancelar
+            {tr('Cancelar', 'Cancel', 'Cancelar')}
           </button>
           {toImport.length > 0 && (
             <button
@@ -307,7 +330,13 @@ export const ProductImportModal: React.FC<ProductImportModalProps> = ({
               onClick={handleConfirmImport}
               className="h-11 flex-1 rounded-xl bg-[#0072BB] text-sm font-semibold text-white hover:bg-[#005f9c] disabled:opacity-60"
             >
-              {importing ? 'Importando...' : `Importar ${toImport.length} productos`}
+              {importing
+                ? tr('Importando...', 'Importing...', 'Importando...')
+                : tr(
+                    `Importar ${toImport.length} productos`,
+                    `Import ${toImport.length} products`,
+                    `Importar ${toImport.length} produtos`
+                  )}
             </button>
           )}
         </div>

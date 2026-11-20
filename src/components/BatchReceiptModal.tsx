@@ -40,6 +40,7 @@ import type { PrintFormat } from './RepairPrintDocuments';
 import { SignaturePadModal } from './SignaturePadModal';
 import { useToast } from './ToastProvider';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
+import { useI18n } from '../utils/i18n';
 
 interface BatchReceiptModalProps {
   open: boolean;
@@ -83,6 +84,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
   onSelectRepair,
 }) => {
   const { notify } = useToast();
+  const { tr } = useI18n();
   const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
   const firstPaymentInfo = useMemo(
     () => (repairs[0] ? parsePaymentInfo(repairs[0]) : null),
@@ -248,11 +250,25 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
       setSignatureModalOpen(false);
       notify(
         nextSignatureUrl
-          ? 'Firma guardada en la boleta múltiple, térmico 80mm y PDF.'
-          : 'Firma eliminada de la boleta múltiple.'
+          ? tr(
+              'Firma guardada en la boleta múltiple, térmico 80mm y PDF.',
+              'Signature saved on batch receipt, 80mm thermal slip, and PDF.',
+              'Assinatura salva no comprovante múltiplo, térmico 80mm e PDF.'
+            )
+          : tr(
+              'Firma eliminada de la boleta múltiple.',
+              'Signature removed from batch receipt.',
+              'Assinatura removida do comprovante múltiplo.'
+            )
       );
     } catch (err) {
-      notify(sanitizeDbErrorMessage(err, 'No se pudo guardar la firma.'), 'error');
+      notify(
+        sanitizeDbErrorMessage(
+          err,
+          tr('No se pudo guardar la firma.', 'Could not save signature.', 'Não foi possível salvar a assinatura.')
+        ),
+        'error'
+      );
     } finally {
       setSavingSignature(false);
     }
@@ -272,12 +288,23 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
       });
       notify(
         forWhatsApp
-          ? `PDF del lote descargado (${fileName}). Adjuntalo en el chat de WhatsApp.`
-          : `PDF del lote descargado (${fileName}).`
+          ? tr(
+              `PDF del lote descargado (${fileName}). Adjuntalo en el chat de WhatsApp.`,
+              `Batch PDF downloaded (${fileName}). Attach it in the WhatsApp chat.`,
+              `PDF do lote baixado (${fileName}). Anexe no chat do WhatsApp.`
+            )
+          : tr(
+              `PDF del lote descargado (${fileName}).`,
+              `Batch PDF downloaded (${fileName}).`,
+              `PDF do lote baixado (${fileName}).`
+            )
       );
     } catch (err) {
       console.error(err);
-      notify('No se pudo generar el PDF del lote.', 'error');
+      notify(
+        tr('No se pudo generar el PDF del lote.', 'Could not generate the batch PDF.', 'Não foi possível gerar o PDF do lote.'),
+        'error'
+      );
     } finally {
       setGeneratingPdf(false);
     }
@@ -326,7 +353,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-4">
         <div className="flex flex-col items-start gap-1.5">
           <div className="inline-block rounded-md bg-sky-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#0072BB]">
-            Boleta Cliente · Ingreso Múltiple / Gremio
+            {tr('Boleta Cliente · Ingreso Múltiple / Gremio', 'Client Receipt · Batch / Trade Intake', 'Comprovante Cliente · Lote Múltiplo / Parceiro')}
           </div>
           <div>
             {isPrintMode ? (
@@ -343,15 +370,15 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
             </div>
           )}
           <div className="flex flex-col gap-0.5 text-xs text-slate-600">
-            <span>{profile?.businessAddress || 'Servicio técnico especializado'}</span>
+            <span>{profile?.businessAddress || tr('Servicio técnico especializado', 'Specialized repair service', 'Assistência técnica especializada')}</span>
             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
-              {profile?.businessPhone && <span>Tel: {profile.businessPhone}</span>}
+              {profile?.businessPhone && <span>{tr('Tel:', 'Phone:', 'Tel:')} {profile.businessPhone}</span>}
               {workshopMeta.businessEmail && <span>{workshopMeta.businessEmail}</span>}
               {workshopMeta.taxId && <span>{workshopMeta.taxId}</span>}
             </div>
             {(workshopMeta.hours || workshopMeta.social) && (
               <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] text-slate-500">
-                {workshopMeta.hours && <span>Horarios: {workshopMeta.hours}</span>}
+                {workshopMeta.hours && <span>{tr('Horarios:', 'Hours:', 'Horários:')} {workshopMeta.hours}</span>}
                 {workshopMeta.social && <span>{workshopMeta.social}</span>}
               </div>
             )}
@@ -360,17 +387,17 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
 
         <div className="text-right">
           <div className="font-mono-num text-lg font-extrabold text-slate-900">
-            Ref. {batchRef}
+            {tr('Ref.', 'Ref.', 'Ref.')} {batchRef}
           </div>
           <div className="font-mono-num text-xs font-semibold text-[#0072BB]">
-            {repairs.length} equipos · Órdenes {orderRangeLabel}
+            {repairs.length} {tr('equipos', 'devices', 'equipamentos')} · {tr('Órdenes', 'Orders', 'Ordens')} {orderRangeLabel}
           </div>
           <div className="mt-0.5 text-xs text-slate-500">
-            Ingreso: {formatDateShort(first.dateIn)}
+            {tr('Ingreso:', 'Check-in:', 'Entrada:')} {formatDateShort(first.dateIn)}
           </div>
           {first.dateEst && (
             <div className="text-xs text-slate-500">
-              Entrega est.: {formatDateShort(first.dateEst)}
+              {tr('Entrega est.:', 'Est. pickup:', 'Entrega est.:')} {formatDateShort(first.dateEst)}
             </div>
           )}
         </div>
@@ -378,13 +405,13 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
 
       <div className="mt-4 rounded-xl border border-slate-200/80 bg-slate-50/70 p-3 text-xs">
         <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
-          Datos del cliente / gremio
+          {tr('Datos del cliente / gremio', 'Client / trade details', 'Dados do cliente / parceiro')}
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-700">
           <strong className="text-sm text-slate-900">{first.clientName}</strong>
-          {first.clientPhone && <span>Tel: {first.clientPhone}</span>}
-          {first.clientDni && <span>DNI: {first.clientDni}</span>}
-          {first.clientAddress && <span>Dir: {first.clientAddress}</span>}
+          {first.clientPhone && <span>{tr('Tel:', 'Phone:', 'Tel:')} {first.clientPhone}</span>}
+          {first.clientDni && <span>{tr('DNI:', 'ID:', 'Doc:')} {first.clientDni}</span>}
+          {first.clientAddress && <span>{tr('Dir:', 'Addr:', 'End:')} {first.clientAddress}</span>}
         </div>
       </div>
 
@@ -392,12 +419,12 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
         <table className="w-full text-left text-xs">
           <thead className="bg-slate-100 text-[11px] font-bold uppercase tracking-wide text-slate-600">
             <tr>
-              <th className="px-3 py-2">Orden / Seg.</th>
-              <th className="px-3 py-2">Equipo</th>
-              <th className="px-3 py-2">Falla y accesorios</th>
-              <th className="px-3 py-2 text-right">Presup.</th>
-              <th className="px-3 py-2 text-right">Seña</th>
-              <th className="px-3 py-2 text-right">Saldo</th>
+              <th className="px-3 py-2">{tr('Orden / Seg.', 'Order / Track', 'Ordem / Rast.')}</th>
+              <th className="px-3 py-2">{tr('Equipo', 'Device', 'Equipamento')}</th>
+              <th className="px-3 py-2">{tr('Falla y accesorios', 'Issue & accessories', 'Defeito e acessórios')}</th>
+              <th className="px-3 py-2 text-right">{tr('Presup.', 'Quote', 'Orç.')}</th>
+              <th className="px-3 py-2 text-right">{tr('Seña', 'Deposit', 'Sinal')}</th>
+              <th className="px-3 py-2 text-right">{tr('Saldo', 'Balance', 'Saldo')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -458,19 +485,19 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
 
       <div className="mt-4 grid grid-cols-3 gap-2 border-y border-slate-200 py-3 text-center text-xs">
         <div>
-          <div className="text-slate-500">Total Presupuesto</div>
+          <div className="text-slate-500">{tr('Total Presupuesto', 'Total Quote', 'Orçamento Total')}</div>
           <div className="font-mono-num text-sm font-bold text-slate-900">
             {fmtDisplay(totalBudget)}
           </div>
         </div>
         <div>
-          <div className="text-slate-500">Total Seña / Anticipo</div>
+          <div className="text-slate-500">{tr('Total Seña / Anticipo', 'Total Deposit', 'Total Sinal / Adiant.')}</div>
           <div className="font-mono-num text-sm font-bold text-emerald-700">
             {fmtDisplay(totalDeposit)}
           </div>
         </div>
         <div>
-          <div className="text-slate-500">Saldo Pendiente Total</div>
+          <div className="text-slate-500">{tr('Saldo Pendiente Total', 'Total Balance Due', 'Saldo Pendente Total')}</div>
           <div className="font-mono-num text-sm font-bold text-slate-900">
             {fmtDisplay(totalPending)}
           </div>
@@ -479,14 +506,14 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
 
       {isConverted && (
         <div className="mt-1.5 text-center text-[10px] text-slate-500">
-          Moneda: {selectedCurrency} (1 {selectedCurrency} = {formatCurrency(activeRate, workshopMeta.currency)}) · Base: {formatCurrency(totalBudget, workshopMeta.currency)}
+          {tr('Moneda:', 'Currency:', 'Moeda:')} {selectedCurrency} (1 {selectedCurrency} = {formatCurrency(activeRate, workshopMeta.currency)}) · Base: {formatCurrency(totalBudget, workshopMeta.currency)}
         </div>
       )}
 
       {(profile?.receiptTerms ?? DEFAULT_RECEIPT_TERMS).trim() && (
         <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 text-[10px] leading-relaxed text-slate-600">
           <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-700">
-            Términos y condiciones
+            {tr('Términos y condiciones', 'Terms and conditions', 'Termos e condições')}
           </div>
           <div className="whitespace-pre-line text-[8px] leading-snug text-slate-600">
             {profile?.receiptTerms ?? DEFAULT_RECEIPT_TERMS}
@@ -502,9 +529,13 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
 
       <div className="mt-5 flex flex-wrap items-end justify-between gap-4 border-t border-dashed border-slate-300 pt-4 text-[11px] text-slate-600">
         <div>
-          <div className="font-semibold text-slate-800">Referencia de lote: {batchRef}</div>
+          <div className="font-semibold text-slate-800">{tr('Referencia de lote:', 'Batch reference:', 'Referência do lote:')} {batchRef}</div>
           <div className="text-[10px] text-slate-500">
-            Conservar este comprobante para retirar los {repairs.length} equipos.
+            {tr(
+              `Conservar este comprobante para retirar los ${repairs.length} equipos.`,
+              `Keep this receipt to pick up all ${repairs.length} devices.`,
+              `Guarde este comprovante para retirar os ${repairs.length} equipamentos.`
+            )}
           </div>
         </div>
         <div className="text-right">
@@ -512,11 +543,11 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
             <div className="flex flex-col items-center">
               <img
                 src={savedSignature}
-                alt={`Firma de ${first.clientName}`}
+                alt={`${tr('Firma de', 'Signature of', 'Assinatura de')} ${first.clientName}`}
                 className="mx-auto mb-1 h-12 max-w-[190px] object-contain"
               />
               <div className="w-52 border-b border-slate-400" />
-              <div className="mt-1 text-[10px] text-slate-500">Firma y aclaración del cliente</div>
+              <div className="mt-1 text-[10px] text-slate-500">{tr('Firma y aclaración del cliente', 'Client signature and printed name', 'Assinatura e nome do cliente')}</div>
               {!isPrintMode && (
                 <button
                   type="button"
@@ -524,7 +555,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
                   className="mt-1 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold text-[#0072BB] hover:bg-sky-50"
                 >
                   <PenTool className="h-3 w-3" />
-                  Cambiar firma
+                  {tr('Cambiar firma', 'Change signature', 'Alterar assinatura')}
                 </button>
               )}
             </div>
@@ -536,15 +567,15 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
             >
               <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#0072BB]">
                 <PenTool className="h-3.5 w-3.5" />
-                Tocá acá para firmar en pantalla
+                {tr('Tocá acá para firmar en pantalla', 'Tap here to sign on screen', 'Toque aqui para assinar na tela')}
               </span>
               <div className="mt-3 w-52 border-b border-slate-400" />
-              <div className="mt-1 text-[10px] text-slate-500">Firma y aclaración del cliente</div>
+              <div className="mt-1 text-[10px] text-slate-500">{tr('Firma y aclaración del cliente', 'Client signature and printed name', 'Assinatura e nome do cliente')}</div>
             </button>
           ) : (
             <div>
               <div className="mt-4 w-52 border-b border-slate-400" />
-              <div className="mt-1 text-[10px] text-slate-500">Firma y aclaración del cliente</div>
+              <div className="mt-1 text-[10px] text-slate-500">{tr('Firma y aclaración del cliente', 'Client signature and printed name', 'Assinatura e nome do cliente')}</div>
             </div>
           )}
         </div>
@@ -562,7 +593,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
     >
       <div className="border-b border-dashed border-black pb-2 text-center">
         <div className="text-[10px] font-bold uppercase tracking-wider">
-          Boleta Cliente · Lote Múltiple
+          {tr('Boleta Cliente · Lote Múltiple', 'Client Receipt · Batch Intake', 'Comprovante Cliente · Lote Múltiplo')}
         </div>
         <div className="mt-0.5 text-sm font-black uppercase">
           {profile?.brandName || 'TH3 BNB Servicio Técnico'}
@@ -574,14 +605,14 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
         {profile?.businessPhone && <div className="text-[10px]">Tel: {profile.businessPhone}</div>}
         {workshopMeta.businessEmail && <div className="text-[9.5px]">{workshopMeta.businessEmail}</div>}
         {workshopMeta.taxId && <div className="text-[9.5px]">{workshopMeta.taxId}</div>}
-        {workshopMeta.hours && <div className="text-[9px]">Horarios: {workshopMeta.hours}</div>}
+        {workshopMeta.hours && <div className="text-[9px]">{tr('Horarios:', 'Hours:', 'Horários:')} {workshopMeta.hours}</div>}
         {workshopMeta.social && <div className="text-[9px]">{workshopMeta.social}</div>}
       </div>
 
       <div className="border-b border-dashed border-black py-2 text-[10px]">
         <div className="flex justify-between font-bold">
-          <span>Ref. Lote: {batchRef}</span>
-          <span>{repairs.length} equipos</span>
+          <span>Ref. {batchRef}</span>
+          <span>{repairs.length} {tr('equipos', 'devices', 'equip.')}</span>
         </div>
         <div className="flex justify-between">
           <span>Órdenes: {orderRangeLabel}</span>
@@ -755,8 +786,12 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
       <ModalShell
         open={open}
         onClose={onClose}
-        title={`Boleta múltiple · ${batchRef}`}
-        subtitle={`${repairs.length} equipos cargados para ${first.clientName}`}
+        title={tr(`Boleta múltiple · ${batchRef}`, `Batch receipt · ${batchRef}`, `Comprovante múltiplo · ${batchRef}`)}
+        subtitle={tr(
+          `${repairs.length} equipos cargados para ${first.clientName}`,
+          `${repairs.length} devices logged for ${first.clientName}`,
+          `${repairs.length} equipamentos registrados para ${first.clientName}`
+        )}
         maxWidth="3xl"
       >
         {printFormat === 'thermal80' && (
@@ -771,10 +806,18 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
               </span>
               <div>
                 <div className="text-sm font-bold text-emerald-950 dark:text-emerald-200">
-                  Lote {batchRef} guardado · {repairs.length} órdenes generadas ({orderRangeLabel})
+                  {tr(
+                    `Lote ${batchRef} guardado · ${repairs.length} órdenes generadas (${orderRangeLabel})`,
+                    `Batch ${batchRef} saved · ${repairs.length} orders generated (${orderRangeLabel})`,
+                    `Lote ${batchRef} salvo · ${repairs.length} ordens geradas (${orderRangeLabel})`
+                  )}
                 </div>
                 <div className="text-xs text-emerald-800 dark:text-emerald-300">
-                  Tenés una sola boleta consolidada con todas las órdenes y el total general ({fmtDisplay(totalBudget)}).
+                  {tr(
+                    `Tenés una sola boleta consolidada con todas las órdenes y el total general (${fmtDisplay(totalBudget)}).`,
+                    `You have a single consolidated receipt with all orders and the grand total (${fmtDisplay(totalBudget)}).`,
+                    `Você tem um único comprovante consolidado com todas as ordens e o total geral (${fmtDisplay(totalBudget)}).`
+                  )}
                 </div>
               </div>
             </div>
@@ -797,7 +840,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
                 className="inline-flex h-10 items-center gap-2 rounded-xl border border-emerald-700 bg-white px-3.5 text-xs font-bold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50 dark:bg-slate-900 dark:text-emerald-300"
               >
                 <Printer className="h-4 w-4" />
-                Imprimir
+                {tr('Imprimir', 'Print', 'Imprimir')}
               </button>
             </div>
           </div>
@@ -806,7 +849,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-2.5">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Formato:
+                  {tr('Formato:', 'Format:', 'Formato:')}
                 </span>
                 <div className="inline-flex rounded-xl border border-slate-200 bg-white p-0.5 dark:border-slate-700 dark:bg-slate-900">
                   <button
@@ -819,7 +862,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
                     }`}
                   >
                     <FileText className="h-3.5 w-3.5" />
-                    Hoja A4
+                    {tr('Hoja A4', 'A4 Sheet', 'Folha A4')}
                   </button>
                   <button
                     type="button"
@@ -831,7 +874,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
                     }`}
                   >
                     <ReceiptText className="h-3.5 w-3.5" />
-                    Térmico 80mm
+                    {tr('Térmico 80mm', 'Thermal 80mm', 'Térmica 80mm')}
                   </button>
                 </div>
                 {availableCurrencies.length > 1 && (
@@ -840,7 +883,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
                     <select
                       value={selectedCurrency}
                       onChange={(e) => setSelectedCurrency(sanitizeCurrencyCode(e.target.value))}
-                      aria-label="Moneda del comprobante de lote"
+                      aria-label={tr('Moneda del comprobante de lote', 'Batch receipt currency', 'Moeda do comprovante do lote')}
                       className="h-9 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-800 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                     >
                       {availableCurrencies.map((code) => {
@@ -867,7 +910,9 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
                   }`}
                 >
                   <PenTool className="h-4 w-4" />
-                  {savedSignature ? 'Firma guardada ✓' : 'Firmar cliente'}
+                  {savedSignature
+                    ? tr('Firma guardada ✓', 'Signature saved ✓', 'Assinatura salva ✓')
+                    : tr('Firmar cliente', 'Client signature', 'Assinar cliente')}
                 </button>
 
                 <button
@@ -877,7 +922,9 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
                   className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-sky-400 dark:hover:text-sky-300"
                 >
                   <FileDown className="h-4 w-4" />
-                  {generatingPdf ? 'Generando...' : 'PDF Lote'}
+                  {generatingPdf
+                    ? tr('Generando...', 'Generating...', 'Gerando...')
+                    : tr('PDF Lote', 'Batch PDF', 'PDF Lote')}
                 </button>
 
                 {canNativeSharePdf && (
@@ -888,7 +935,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
                     className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
                   >
                     <Share2 className="h-4 w-4" />
-                    Compartir PDF
+                    {tr('Compartir PDF', 'Share PDF', 'Compartilhar PDF')}
                   </button>
                 )}
 
@@ -899,7 +946,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
                   className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0072BB] px-4 text-xs font-semibold text-white hover:bg-[#005f9c] disabled:opacity-50"
                 >
                   <Printer className="h-4 w-4" />
-                  Imprimir seleccionados
+                  {tr('Imprimir seleccionados', 'Print selected', 'Imprimir selecionados')}
                 </button>
               </div>
             </div>
@@ -916,7 +963,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
               >
                 <Check className={`h-3.5 w-3.5 ${includeClientReceipt ? 'opacity-100' : 'opacity-25'}`} />
                 <FileText className="h-3.5 w-3.5" />
-                Boleta Cliente Consolidada (1 hoja)
+                {tr('Boleta Cliente Consolidada (1 hoja)', 'Consolidated Client Receipt (1 page)', 'Comprovante Cliente Consolidado (1 folha)')}
               </button>
 
               <button
@@ -930,21 +977,25 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
               >
                 <Check className={`h-3.5 w-3.5 ${includeLabels ? 'opacity-100' : 'opacity-25'}`} />
                 <Tag className="h-3.5 w-3.5" />
-                Etiquetas para cada equipo ({repairs.length})
+                {tr(`Etiquetas para cada equipo (${repairs.length})`, `Labels for each device (${repairs.length})`, `Etiquetas para cada equipamento (${repairs.length})`)}
               </button>
             </div>
           </div>
 
           {selectedCount === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-center text-xs text-slate-500">
-              Seleccioná al menos un comprobante o etiqueta para previsualizar e imprimir.
+              {tr(
+                'Seleccioná al menos un comprobante o etiqueta para previsualizar e imprimir.',
+                'Select at least one receipt or label to preview and print.',
+                'Selecione pelo menos um comprovante ou etiqueta para visualizar e imprimir.'
+              )}
             </div>
           ) : (
             <div className="space-y-5">
               {includeClientReceipt && (
                 <div className="space-y-1.5">
                   <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                    1 · Boleta consolidada ({batchRef})
+                    {tr(`1 · Boleta consolidada (${batchRef})`, `1 · Consolidated receipt (${batchRef})`, `1 · Comprovante consolidado (${batchRef})`)}
                   </div>
                   {printFormat === 'thermal80'
                     ? renderConsolidatedThermal(false)
@@ -955,7 +1006,11 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
               {includeLabels && (
                 <div className="space-y-1.5">
                   <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                    2 · Etiquetas adhesivas por equipo ({repairs.length})
+                    {tr(
+                      `2 · Etiquetas adhesivas por equipo (${repairs.length})`,
+                      `2 · Adhesive labels per device (${repairs.length})`,
+                      `2 · Etiquetas adesivas por equipamento (${repairs.length})`
+                    )}
                   </div>
                   {renderDeviceLabels(false)}
                 </div>
@@ -979,7 +1034,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
             <div className="mb-3 flex items-center gap-2 text-[10px] text-slate-400">
               <Scissors className="h-3.5 w-3.5" />
               <div className="flex-1 border-b border-dashed border-slate-300" />
-              <span>Etiquetas · {batchRef}</span>
+              <span>{tr(`Etiquetas · ${batchRef}`, `Labels · ${batchRef}`, `Etiquetas · ${batchRef}`)}</span>
               <div className="flex-1 border-b border-dashed border-slate-300" />
             </div>
             {renderDeviceLabels(true)}

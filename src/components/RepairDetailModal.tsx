@@ -125,6 +125,7 @@ import {
   sanitizeSafeUrl,
   sanitizeText,
 } from '../utils/validation';
+import { getTranslatedStatusLabel, useI18n } from '../utils/i18n';
 import { ModalShell } from './ModalShell';
 import { PatternLock } from './PatternLock';
 import { RepairPrintDocuments } from './RepairPrintDocuments';
@@ -154,6 +155,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   onClose,
 }) => {
   const { notify } = useToast();
+  const { tr } = useI18n();
   const activeCurrency = useActiveCurrency();
   const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
   const baseCurrency: CurrencyCode = profile ? workshopMeta.currency : activeCurrency;
@@ -1219,7 +1221,11 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
         open={Boolean(repair)}
         onClose={onClose}
         title={`${repair.deviceIcon || '📱'} ${repair.brand} ${repair.model}`}
-        subtitle={`Orden ${repair.code} · Cliente: ${repair.clientName}`}
+        subtitle={tr(
+          `Orden ${repair.code} · Cliente: ${repair.clientName}`,
+          `Order ${repair.code} · Client: ${repair.clientName}`,
+          `Ordem ${repair.code} · Cliente: ${repair.clientName}`
+        )}
         maxWidth="3xl"
       >
         <div className="mb-5 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3 dark:border-slate-800">
@@ -1233,7 +1239,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   : 'text-slate-600 dark:text-slate-400'
               }`}
             >
-              Detalle
+              {tr('Detalle', 'Details', 'Detalhes')}
             </button>
             <button
               type="button"
@@ -1245,7 +1251,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
               }`}
             >
               <Edit3 className="h-3.5 w-3.5" />
-              Técnico
+              {tr('Técnico', 'Technician', 'Técnico')}
             </button>
             <button
               type="button"
@@ -1257,7 +1263,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
               }`}
             >
               <Printer className="h-3.5 w-3.5" />
-              Imprimir
+              {tr('Imprimir', 'Print', 'Imprimir')}
             </button>
           </div>
           {(() => {
@@ -1269,7 +1275,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                 onClick={() => onOpenBatch(batchRef)}
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 text-xs font-semibold text-[#0072BB] hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/50 dark:text-sky-300"
               >
-                Boleta lote ({batchRef})
+                {tr(`Boleta lote (${batchRef})`, `Batch receipt (${batchRef})`, `Comprovante lote (${batchRef})`)}
               </button>
             );
           })()}
@@ -1281,7 +1287,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
               className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               <Copy className="h-3.5 w-3.5" />
-              Copiar link
+              {tr('Copiar link', 'Copy link', 'Copiar link')}
             </button>
             {whatsappHref && (
               <a
@@ -1303,13 +1309,18 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="space-y-1">
                   <div className="text-xs text-slate-500 dark:text-slate-400">
-                    Estado actual · Prioridad {repair.priority}
+                    {tr('Estado actual · Prioridad', 'Current status · Priority', 'Status atual · Prioridade')}{' '}
+                    {repair.priority === 'alta'
+                      ? tr('alta', 'high', 'alta')
+                      : repair.priority === 'baja'
+                        ? tr('baja', 'low', 'baixa')
+                        : tr('media', 'medium', 'média')}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span
                       className={`inline-flex items-center rounded-lg px-2.5 py-1 text-xs font-semibold ${statusMeta.badgeClass}`}
                     >
-                      {statusMeta.label}
+                      {getTranslatedStatusLabel(repair.status) || statusMeta.label}
                     </span>
                     <span className="font-mono-num text-sm font-bold text-slate-900 dark:text-white">
                       {repair.progress}%
@@ -1327,7 +1338,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                         className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
                       >
                         <PenTool className="h-3 w-3" />
-                        Firmada por el cliente ✓
+                        {tr('Firmada por el cliente ✓', 'Signed by client ✓', 'Assinado pelo cliente ✓')}
                       </button>
                     )}
                   </div>
@@ -1335,7 +1346,9 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
 
                 <div className="grid grid-cols-3 gap-4 text-right">
                   <div>
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400">Presupuesto</div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {tr('Presupuesto', 'Estimate', 'Orçamento')}
+                    </div>
                     <div className="font-mono-num text-sm font-bold text-slate-900 dark:text-white">
                       {formatCurrency(repair.price, baseCurrency)}
                     </div>
@@ -1346,7 +1359,9 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                     )}
                   </div>
                   <div>
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400">Seña</div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {tr('Seña', 'Deposit', 'Sinal')}
+                    </div>
                     <div className="font-mono-num text-sm font-bold text-emerald-600 dark:text-emerald-400">
                       {formatCurrency(repair.deposit, baseCurrency)}
                     </div>
@@ -1360,7 +1375,9 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                     )}
                   </div>
                   <div>
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400">Pendiente</div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {tr('Pendiente', 'Balance due', 'Pendente')}
+                    </div>
                     <div className="font-mono-num text-sm font-bold text-[#0072BB] dark:text-sky-400">
                       {formatCurrency(pendingBalance, baseCurrency)}
                     </div>
@@ -1380,14 +1397,14 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                 <div className="space-y-3 border-t border-slate-200/80 pt-3 dark:border-slate-700/60">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
-                      Registrar pago · Elegí el medio de pago
+                      {tr('Registrar pago · Elegí el medio de pago', 'Record payment · Select payment method', 'Registrar pagamento · Escolha a forma')}
                     </span>
                     <div className="grid grid-cols-3 gap-1.5 rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900">
                       {(
                         [
-                          { id: 'efectivo', label: 'Efectivo', icon: Banknote },
-                          { id: 'transferencia', label: 'Transferencia', icon: QrCode },
-                          { id: 'tarjeta', label: 'Tarjeta', icon: CreditCard },
+                          { id: 'efectivo', label: tr('Efectivo', 'Cash', 'Dinheiro'), icon: Banknote },
+                          { id: 'transferencia', label: tr('Transferencia', 'Transfer', 'Transferência'), icon: QrCode },
+                          { id: 'tarjeta', label: tr('Tarjeta', 'Card', 'Cartão'), icon: CreditCard },
                         ] as const
                       ).map(({ id, label, icon: Icon }) => {
                         const active = paymentMethod === id;
@@ -1453,7 +1470,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                           <div className="min-w-0 flex-1 space-y-2 text-xs">
                             <div className="flex items-center justify-between gap-2">
                               <span className="font-bold text-slate-900 dark:text-white">
-                                Cobro por transferencia
+                                {tr('Cobro por transferencia', 'Transfer payment', 'Pagamento por transferência')}
                               </span>
                               <span className="font-mono-num text-sm font-extrabold text-[#0072BB] dark:text-sky-400">
                                 {formatCurrency(pendingBalance, baseCurrency)}
@@ -1481,7 +1498,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                                   className="inline-flex shrink-0 items-center gap-1 font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
                                 >
                                   <Copy className="h-3 w-3" />
-                                  Copiar
+                                  {tr('Copiar', 'Copy', 'Copiar')}
                                 </button>
                               </div>
                             )}
@@ -1497,7 +1514,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                                   className="inline-flex shrink-0 items-center gap-1 font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
                                 >
                                   <Copy className="h-3 w-3" />
-                                  Copiar
+                                  {tr('Copiar', 'Copy', 'Copiar')}
                                 </button>
                               </div>
                             )}
@@ -1505,7 +1522,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                             {transferConfig.paymentLink.trim() && (
                               <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800">
                                 <span className="truncate text-slate-700 dark:text-slate-200">
-                                  <strong>Link de pago:</strong> {transferConfig.paymentLink.trim()}
+                                  <strong>{tr('Link de pago:', 'Payment link:', 'Link de pagamento:')}</strong> {transferConfig.paymentLink.trim()}
                                 </span>
                                 <button
                                   type="button"
@@ -1515,26 +1532,24 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                                   className="inline-flex shrink-0 items-center gap-1 font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
                                 >
                                   <Copy className="h-3 w-3" />
-                                  Copiar
+                                  {tr('Copiar', 'Copy', 'Copiar')}
                                 </button>
                               </div>
                             )}
 
                             {transferConfig.holder && (
                               <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                                Titular: <strong>{transferConfig.holder}</strong>
+                                {tr('Titular:', 'Holder:', 'Titular:')} <strong>{transferConfig.holder}</strong>
                               </div>
                             )}
 
                             {!hasAnyData && (
                               <p className="rounded-lg bg-amber-50/80 px-2.5 py-2 text-[11px] text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-                                Cargá tu <strong>Alias / CBU</strong> para enviarlo al cliente por WhatsApp, o subí una captura de <strong>Tu QR de Mercado Pago</strong> / pegá un <strong>Link de pago</strong>.
-                              </p>
-                            )}
-
-                            {hasAnyData && !hasOfficialQr && !hasLinkQr && (
-                              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                                Mercado Pago no genera QR directo desde un Alias: copiá los datos o envialos por WhatsApp, o subí la captura de tu QR oficial desde Configurar.
+                                {tr(
+                                  'Cargá tu Alias / CBU para enviarlo al cliente por WhatsApp, o subí una captura de Tu QR de Mercado Pago / pegá un Link de pago.',
+                                  'Add your bank alias/details to send via WhatsApp, or upload a QR image / payment link.',
+                                  'Adicione sua chave Pix/dados bancários para enviar por WhatsApp ou suba a imagem do QR / link.'
+                                )}
                               </p>
                             )}
 
@@ -1549,7 +1564,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                                     className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                                   >
                                     <Copy className="h-3 w-3" />
-                                    Copiar datos + monto
+                                    {tr('Copiar datos + monto', 'Copy details + amount', 'Copiar dados + valor')}
                                   </button>
 
                                   <a
@@ -1559,7 +1574,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                                     className="inline-flex h-8 items-center gap-1 rounded-lg bg-emerald-600 px-2.5 text-[11px] font-semibold text-white hover:bg-emerald-700"
                                   >
                                     <MessageCircle className="h-3 w-3" />
-                                    Enviar por WhatsApp
+                                    {tr('Enviar por WhatsApp', 'Send via WhatsApp', 'Enviar por WhatsApp')}
                                   </a>
                                 </>
                               )}
@@ -1571,8 +1586,8 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                               >
                                 <Settings2 className="h-3 w-3" />
                                 {editingTransferConfig
-                                  ? 'Ocultar configuración'
-                                  : 'Configurar Alias / QR Mercado Pago'}
+                                  ? tr('Ocultar configuración', 'Hide settings', 'Ocultar configuração')
+                                  : tr('Configurar Alias / QR Mercado Pago', 'Configure Alias / QR', 'Configurar Chave / QR')}
                               </button>
                             </div>
                           </div>
@@ -1580,9 +1595,6 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
 
                         {editingTransferConfig && (
                           <div className="mt-3 space-y-2.5 border-t border-slate-200 pt-3 dark:border-slate-800">
-                            <div className="rounded-lg bg-sky-50/70 px-2.5 py-2 text-[11px] text-slate-600 dark:bg-sky-950/30 dark:text-slate-300">
-                              Para que funcione con el escáner de <strong>Mercado Pago</strong>, subí la imagen de <strong>Tu QR</strong> (descargada desde la app de Mercado Pago o tu banco) o pegá un <strong>Link de pago</strong> (<code>mpago.la/...</code>).
-                            </div>
                             <div className="grid gap-2 sm:grid-cols-2">
                               <input
                                 type="text"
@@ -1590,7 +1602,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                                 onChange={(e) =>
                                   setTransferConfig((p) => ({ ...p, alias: e.target.value }))
                                 }
-                                placeholder="Alias (ej: taller.th3bnb)"
+                                placeholder={tr('Alias (ej: taller.th3bnb)', 'Alias / Pix', 'Apelido / Pix')}
                                 className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                               />
                               <input
@@ -1599,7 +1611,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                                 onChange={(e) =>
                                   setTransferConfig((p) => ({ ...p, cbu: e.target.value }))
                                 }
-                                placeholder="CBU / CVU (22 dígitos)"
+                                placeholder={tr('CBU / CVU (22 dígitos)', 'Bank / Account number', 'Conta bancária')}
                                 className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 font-mono-num text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                               />
                               <input
@@ -1608,7 +1620,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                                 onChange={(e) =>
                                   setTransferConfig((p) => ({ ...p, holder: e.target.value }))
                                 }
-                                placeholder="Nombre del titular"
+                                placeholder={tr('Nombre del titular', 'Account holder name', 'Nome do titular')}
                                 className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                               />
                               <input
@@ -1617,7 +1629,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                                 onChange={(e) =>
                                   setTransferConfig((p) => ({ ...p, paymentLink: e.target.value }))
                                 }
-                                placeholder="Link de pago MP (https://mpago.la/...)"
+                                placeholder={tr('Link de pago MP (https://mpago.la/...)', 'Payment link (https://...)', 'Link de pagamento (https://...)')}
                                 className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                               />
                             </div>
@@ -1626,7 +1638,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                               <div className="flex items-center gap-2">
                                 <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
                                   <Upload className="h-3.5 w-3.5" />
-                                  Subir captura QR (Mercado Pago / Banco)
+                                  {tr('Subir captura QR (Mercado Pago / Banco)', 'Upload QR image', 'Enviar imagem QR')}
                                   <input
                                     type="file"
                                     accept="image/png,image/jpeg,image/webp"
@@ -1644,7 +1656,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                                     }}
                                     className="text-[11px] font-semibold text-red-600 hover:underline dark:text-red-400"
                                   >
-                                    Quitar QR
+                                    {tr('Quitar QR', 'Remove QR', 'Remover QR')}
                                   </button>
                                 )}
                               </div>
@@ -1654,7 +1666,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                                 onClick={handleSaveTransferConfig}
                                 className="h-8 rounded-lg bg-[#0072BB] px-3 text-[11px] font-semibold text-white hover:bg-[#005f9c]"
                               >
-                                Guardar datos
+                                {tr('Guardar datos', 'Save details', 'Salvar dados')}
                               </button>
                             </div>
                           </div>
@@ -1667,11 +1679,15 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                     <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
                       <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-600 dark:text-slate-300">
                         <span>
-                          Registrar seña o abono parcial ({getCurrencyOption(partialCurrency).symbol})
+                          {tr(
+                            `Registrar seña o abono parcial (${getCurrencyOption(partialCurrency).symbol})`,
+                            `Record partial payment / deposit (${getCurrencyOption(partialCurrency).symbol})`,
+                            `Registrar sinal ou pagamento parcial (${getCurrencyOption(partialCurrency).symbol})`
+                          )}
                         </span>
                         {isPartialSecondary && partialInputNum > 0 && (
                           <span className="font-mono-num text-[#0072BB] dark:text-sky-300">
-                            Equivale a {formatCurrency(partialBaseEquivalent, baseCurrency)}
+                            {tr('Equivale a', 'Equivalent to', 'Equivale a')} {formatCurrency(partialBaseEquivalent, baseCurrency)}
                           </span>
                         )}
                       </div>
@@ -1688,14 +1704,14 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                           step="0.01"
                           value={partialAmount}
                           onChange={(e) => setPartialAmount(e.target.value)}
-                          placeholder="Monto"
+                          placeholder={tr('Monto', 'Amount', 'Valor')}
                           className="h-9 rounded-lg border border-slate-200 bg-slate-50 px-2.5 font-mono-num text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                         />
                         {partialSelectableCurrencies.length > 1 && (
                           <select
                             value={partialCurrency}
                             onChange={(e) => setPartialCurrency(sanitizeCurrencyCode(e.target.value))}
-                            aria-label="Moneda del abono parcial"
+                            aria-label={tr('Moneda del abono parcial', 'Partial payment currency', 'Moeda do pagamento parcial')}
                             className="h-9 rounded-lg border border-slate-200 bg-slate-50 px-2 text-xs font-semibold text-slate-800 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                           >
                             {partialSelectableCurrencies.map((code) => {
@@ -1713,15 +1729,15 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                           onChange={(e) => setPartialMethod(e.target.value as PaymentMethod)}
                           className="h-9 rounded-lg border border-slate-200 bg-slate-50 px-2 text-xs font-medium text-slate-800 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                         >
-                          <option value="efectivo">Efectivo</option>
-                          <option value="transferencia">Transferencia</option>
-                          <option value="tarjeta">Tarjeta</option>
+                          <option value="efectivo">{tr('Efectivo', 'Cash', 'Dinheiro')}</option>
+                          <option value="transferencia">{tr('Transferencia', 'Transfer', 'Transferência')}</option>
+                          <option value="tarjeta">{tr('Tarjeta', 'Card', 'Cartão')}</option>
                         </select>
                         <input
                           type="text"
                           value={partialNote}
                           onChange={(e) => setPartialNote(e.target.value)}
-                          placeholder="Nota opcional (ej: seña repuesto)"
+                          placeholder={tr('Nota opcional (ej: seña repuesto)', 'Optional note (e.g. parts deposit)', 'Nota opcional (ex: sinal peça)')}
                           maxLength={80}
                           className="h-9 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                         />
@@ -1731,7 +1747,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                           onClick={() => void handleRegisterPartialPayment()}
                           className="h-9 rounded-lg border border-[#0072BB] bg-sky-50 px-3 text-xs font-bold text-[#0072BB] hover:bg-sky-100 disabled:opacity-60 dark:border-sky-500 dark:bg-sky-950/40 dark:text-sky-300"
                         >
-                          {savingPartial ? 'Guardando...' : 'Abonar'}
+                          {savingPartial ? tr('Guardando...', 'Saving...', 'Salvando...') : tr('Abonar', 'Apply', 'Pagar')}
                         </button>
                       </div>
                     </div>
@@ -1745,8 +1761,8 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                       >
                         <CheckCircle2 className="h-4 w-4" />
                         {paying
-                          ? 'Registrando pago...'
-                          : `Cancelar saldo (${formatCurrency(pendingBalance, baseCurrency)}${
+                          ? tr('Registrando pago...', 'Recording payment...', 'Registrando pagamento...')
+                          : `${tr('Cancelar saldo', 'Pay balance', 'Quitar saldo')} (${formatCurrency(pendingBalance, baseCurrency)}${
                               hasForeignDisplay && savedCurrency && savedRate
                                 ? ` / ${formatCurrency(
                                     convertFromBaseCurrency(pendingBalance, savedRate),
@@ -1764,7 +1780,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                     <div className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200">
                       <CheckCircle2 className="h-4 w-4 shrink-0" />
                       <span>
-                        PAGO · {repair.clientName}
+                        {tr('PAGO', 'PAID', 'PAGO')} · {repair.clientName}
                         {paymentInfo.methodLabel ? ` (${paymentInfo.methodLabel})` : ''}
                       </span>
                     </div>
@@ -1777,7 +1793,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                       className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 text-xs font-semibold text-white hover:bg-emerald-700"
                     >
                       <Printer className="h-3.5 w-3.5" />
-                      Imprimir boleta con sello PAGO
+                      {tr('Imprimir boleta con sello PAGO', 'Print receipt with PAID stamp', 'Imprimir comprovante com carimbo PAGO')}
                     </button>
                   </div>
                 )
@@ -1786,7 +1802,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
               {paymentLedger.length > 0 && (
                 <div className="border-t border-slate-200/80 pt-2.5 dark:border-slate-700/60">
                   <div className="mb-1.5 text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                    Movimientos de cobro registrados
+                    {tr('Movimientos de cobro registrados', 'Recorded payments', 'Pagamentos registrados')}
                   </div>
                   <div className="space-y-1">
                     {paymentLedger.map((entry) => (
@@ -1824,52 +1840,56 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
               <div className="space-y-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
                 <div className="flex items-center justify-between gap-2">
                   <h4 className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                    Presupuesto online y WhatsApp
+                    {tr('Presupuesto online y WhatsApp', 'Online quote & WhatsApp', 'Orçamento online e WhatsApp')}
                   </h4>
                   {detailMeta.quote.status === 'approved' && (
                     <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
                       <ThumbsUp className="h-3 w-3" />
-                      Aprobado
+                      {tr('Aprobado', 'Approved', 'Aprovado')}
                     </span>
                   )}
                   {detailMeta.quote.status === 'rejected' && (
                     <span className="inline-flex items-center gap-1 rounded-lg bg-red-50 px-2 py-0.5 text-[11px] font-bold text-red-700 dark:bg-red-950/40 dark:text-red-300">
                       <ThumbsDown className="h-3 w-3" />
-                      Rechazado
+                      {tr('Rechazado', 'Rejected', 'Recusado')}
                     </span>
                   )}
                   {detailMeta.quote.status === 'pending' && (
                     <span className="inline-flex items-center gap-1 rounded-lg bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
                       <Clock className="h-3 w-3" />
-                      Pendiente
+                      {tr('Pendiente', 'Pending', 'Pendente')}
                     </span>
                   )}
                 </div>
 
                 {detailMeta.quote.status === 'pending' && (
                   <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-2.5 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
-                    Presupuesto de{' '}
+                    {tr('Presupuesto de', 'Quote of', 'Orçamento de')}{' '}
                     <strong className="font-mono-num">
                       {formatCurrency(detailMeta.quote.amount ?? repair.price, baseCurrency)}
                     </strong>{' '}
-                    habilitado para que el cliente lo apruebe desde el link de seguimiento.
+                    {tr(
+                      'habilitado para que el cliente lo apruebe desde el link de seguimiento.',
+                      'enabled for client approval from the tracking link.',
+                      'habilitado para aprovação do cliente pelo link de acompanhamento.'
+                    )}
                   </div>
                 )}
 
                 {detailMeta.quote.status === 'approved' && (
                   <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-2.5 text-xs text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
                     <div className="font-semibold">
-                      Cliente aprobó{' '}
+                      {tr('Cliente aprobó', 'Client approved', 'Cliente aprovou')}{' '}
                       <span className="font-mono-num">
                         {formatCurrency(detailMeta.quote.amount ?? repair.price, baseCurrency)}
                       </span>
                       {detailMeta.quote.respondedAt
-                        ? ` el ${formatDateShort(detailMeta.quote.respondedAt)}`
+                        ? ` · ${formatDateShort(detailMeta.quote.respondedAt)}`
                         : ''}
                     </div>
                     {detailMeta.quote.clientNote && (
                       <div className="mt-1 text-[11px] opacity-90">
-                        Nota: "{detailMeta.quote.clientNote}"
+                        {tr('Nota:', 'Note:', 'Nota:')} "{detailMeta.quote.clientNote}"
                       </div>
                     )}
                   </div>
@@ -1878,17 +1898,17 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                 {detailMeta.quote.status === 'rejected' && (
                   <div className="rounded-xl border border-red-200 bg-red-50/70 p-2.5 text-xs text-red-900 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
                     <div className="font-semibold">
-                      Cliente rechazó{' '}
+                      {tr('Cliente rechazó', 'Client rejected', 'Cliente recusou')}{' '}
                       <span className="font-mono-num">
                         {formatCurrency(detailMeta.quote.amount ?? repair.price, baseCurrency)}
                       </span>
                       {detailMeta.quote.respondedAt
-                        ? ` el ${formatDateShort(detailMeta.quote.respondedAt)}`
+                        ? ` · ${formatDateShort(detailMeta.quote.respondedAt)}`
                         : ''}
                     </div>
                     {detailMeta.quote.clientNote && (
                       <div className="mt-1 text-[11px] opacity-90">
-                        Motivo: "{detailMeta.quote.clientNote}"
+                        {tr('Motivo:', 'Reason:', 'Motivo:')} "{detailMeta.quote.clientNote}"
                       </div>
                     )}
                   </div>
@@ -1903,23 +1923,23 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   >
                     <Send className="h-3.5 w-3.5" />
                     {sendingQuote
-                      ? 'Habilitando...'
+                      ? tr('Habilitando...', 'Enabling...', 'Habilitando...')
                       : detailMeta.quote.status === 'pending'
-                        ? 'Actualizar presupuesto online'
+                        ? tr('Actualizar presupuesto online', 'Update online quote', 'Atualizar orçamento online')
                         : detailMeta.quote.status === 'rejected'
-                          ? 'Enviar nuevo presupuesto online'
-                          : 'Enviar presupuesto para aprobación online'}
+                          ? tr('Enviar nuevo presupuesto online', 'Send new online quote', 'Enviar novo orçamento online')
+                          : tr('Enviar presupuesto para aprobación online', 'Send quote for online approval', 'Enviar orçamento para aprovação online')}
                   </button>
 
                   <div className="flex flex-wrap items-center gap-2 pt-1">
                     <select
                       value={waTemplate}
                       onChange={(e) => setWaTemplate(e.target.value as WhatsAppTemplateId)}
-                      aria-label="Plantilla de WhatsApp"
+                      aria-label={tr('Plantilla de WhatsApp', 'WhatsApp template', 'Modelo de WhatsApp')}
                       className="h-9 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-800 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     >
                       <option value="auto">
-                        Automática (
+                        {tr('Automática', 'Automatic', 'Automático')} (
                         {WHATSAPP_TEMPLATE_OPTIONS.find(
                           (o) => o.id === resolveDefaultTemplateForStatus(repair.status)
                         )?.label || 'Seguimiento'}
@@ -1939,12 +1959,12 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                         className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700"
                       >
                         <MessageCircle className="h-3.5 w-3.5" />
-                        Enviar
+                        {tr('Enviar', 'Send', 'Enviar')}
                       </a>
                     )}
                   </div>
                   <div className="text-[11px] text-slate-400">
-                    Plantilla activa:{' '}
+                    {tr('Plantilla activa:', 'Active template:', 'Modelo ativo:')}{' '}
                     {WHATSAPP_TEMPLATE_OPTIONS.find((o) => o.id === resolvedWaTemplateId)?.label}
                   </div>
                 </div>
@@ -1955,19 +1975,22 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   <div className="flex items-center justify-between gap-2">
                     <h4 className="flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400">
                       <ShieldCheck className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
-                      Garantía y reingresos
+                      {tr('Garantía y reingresos', 'Warranty & re-entries', 'Garantia e reingressos')}
                     </h4>
                     {warrantyInfo.warrantyDays > 0 && (
                       <span className="font-mono-num text-xs font-bold text-slate-900 dark:text-white">
-                        {warrantyInfo.warrantyDays} días
+                        {warrantyInfo.warrantyDays} {tr('días', 'days', 'dias')}
                       </span>
                     )}
                   </div>
 
                   {warrantyInfo.warrantyDays <= 0 ? (
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Sin garantía configurada. Podés establecer los días de cobertura desde la
-                      pestaña <strong>Técnico</strong>.
+                      {tr(
+                        'Sin garantía configurada. Podés establecer los días de cobertura desde la pestaña Técnico.',
+                        'No warranty configured. You can set coverage days from the Technician tab.',
+                        'Sem garantia configurada. Você pode definir os dias de cobertura na aba Técnico.'
+                      )}
                     </p>
                   ) : warrantyInfo.deliveredAt ? (
                     <div
@@ -1979,26 +2002,37 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                     >
                       <div className="font-semibold">
                         {warrantyInfo.isActive
-                          ? `Garantía vigente · quedan ${warrantyInfo.daysLeft} días`
-                          : 'Garantía vencida'}
+                          ? tr(
+                              `Garantía vigente · quedan ${warrantyInfo.daysLeft} días`,
+                              `Active warranty · ${warrantyInfo.daysLeft} days left`,
+                              `Garantia vigente · restam ${warrantyInfo.daysLeft} dias`
+                            )
+                          : tr('Garantía vencida', 'Warranty expired', 'Garantia expirada')}
                       </div>
                       {warrantyInfo.expiresAt && (
                         <div className="mt-0.5 font-mono-num text-[11px] opacity-85">
-                          Entregado: {formatDateShort(warrantyInfo.deliveredAt)} · Vence:{' '}
+                          {tr('Entregado:', 'Delivered:', 'Entregue:')} {formatDateShort(warrantyInfo.deliveredAt)} · {tr('Vence:', 'Expires:', 'Vence:')}{' '}
                           {formatDateShort(warrantyInfo.expiresAt.toISOString())}
                         </div>
                       )}
                     </div>
                   ) : (
                     <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-2.5 text-xs text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200">
-                      Cobertura de <strong className="font-mono-num">{warrantyInfo.warrantyDays} días</strong>{' '}
-                      (se activa automáticamente al marcar como Entregado).
+                      {tr('Cobertura de', 'Coverage of', 'Cobertura de')}{' '}
+                      <strong className="font-mono-num">
+                        {warrantyInfo.warrantyDays} {tr('días', 'days', 'dias')}
+                      </strong>{' '}
+                      {tr(
+                        '(se activa automáticamente al marcar como Entregado).',
+                        '(activates automatically when marked Delivered).',
+                        '(ativa automaticamente ao marcar como Entregue).'
+                      )}
                     </div>
                   )}
 
                   {detailMeta.parentRepairCode && (
                     <div className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-                      Reingreso por garantía de la orden{' '}
+                      {tr('Reingreso por garantía de la orden', 'Warranty re-entry from order', 'Reingresso por garantia da ordem')}{' '}
                       <span className="font-mono-num">{detailMeta.parentRepairCode}</span>
                     </div>
                   )}
@@ -2011,7 +2045,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                     className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700 transition hover:border-[#0072BB] hover:bg-sky-50 hover:text-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-sky-400 dark:hover:text-sky-300"
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
-                    Reingreso por garantía
+                    {tr('Reingreso por garantía', 'Warranty re-entry', 'Reingresso por garantia')}
                   </button>
                 )}
               </div>
@@ -2020,16 +2054,16 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
                 <h4 className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                  Equipo y seguimiento
+                  {tr('Equipo y seguimiento', 'Device & tracking', 'Aparelho e acompanhamento')}
                 </h4>
                 <dl className="space-y-1 text-xs">
                   <div className="flex justify-between">
-                    <dt className="text-slate-500">Tipo:</dt>
+                    <dt className="text-slate-500">{tr('Tipo:', 'Type:', 'Tipo:')}</dt>
                     <dd className="font-medium text-slate-900 dark:text-white">{repair.deviceType}</dd>
                   </div>
                   {repair.color && (
                     <div className="flex justify-between">
-                      <dt className="text-slate-500">Color:</dt>
+                      <dt className="text-slate-500">{tr('Color:', 'Color:', 'Cor:')}</dt>
                       <dd className="font-medium text-slate-900 dark:text-white">{repair.color}</dd>
                     </div>
                   )}
@@ -2037,42 +2071,42 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                     <div className="flex justify-between">
                       <dt className="text-slate-500">
                         {repair.deviceType === 'Parlante' || repair.deviceType === 'Auriculares'
-                          ? 'Tipo / Formato:'
+                          ? tr('Tipo / Formato:', 'Type / Format:', 'Tipo / Formato:')
                           : repair.deviceType === 'Consola / joystick'
-                            ? 'Edición / Capacidad:'
+                            ? tr('Edición / Capacidad:', 'Edition / Capacity:', 'Edição / Capacidade:')
                             : repair.deviceType === 'Smartwatch'
-                              ? 'Medida / Caja:'
+                              ? tr('Medida / Caja:', 'Size / Case:', 'Tamanho / Caixa:')
                               : repair.deviceType === 'Notebook'
-                                ? 'Almacenamiento:'
+                                ? tr('Almacenamiento:', 'Storage:', 'Armazenamento:')
                                 : repair.deviceType === 'Otros equipos'
-                                  ? 'Categoría / Tipo:'
-                                  : 'Capacidad:'}
+                                  ? tr('Categoría / Tipo:', 'Category / Type:', 'Categoria / Tipo:')
+                                  : tr('Capacidad:', 'Capacity:', 'Capacidade:')}
                       </dt>
                       <dd className="font-medium text-slate-900 dark:text-white">{repair.capacity}</dd>
                     </div>
                   )}
                   {repair.imei && (
                     <div className="flex justify-between">
-                      <dt className="text-slate-500">IMEI / Serie:</dt>
+                      <dt className="text-slate-500">{tr('IMEI / Serie:', 'IMEI / Serial:', 'IMEI / Série:')}</dt>
                       <dd className="font-mono-num font-medium text-slate-900 dark:text-white">
                         {repair.imei}
                       </dd>
                     </div>
                   )}
                   <div className="flex justify-between">
-                    <dt className="text-slate-500">Ingreso:</dt>
+                    <dt className="text-slate-500">{tr('Ingreso:', 'Check-in:', 'Entrada:')}</dt>
                     <dd className="font-medium text-slate-900 dark:text-white">
                       {formatDateShort(repair.dateIn)}
                     </dd>
                   </div>
                   <div className="flex justify-between">
-                    <dt className="text-slate-500">Entrega est.:</dt>
+                    <dt className="text-slate-500">{tr('Entrega est.:', 'Est. delivery:', 'Prev. entrega:')}</dt>
                     <dd className="font-medium text-slate-900 dark:text-white">
                       {formatDateShort(repair.dateEst)}
                     </dd>
                   </div>
                   <div className="flex justify-between">
-                    <dt className="text-slate-500">Código público:</dt>
+                    <dt className="text-slate-500">{tr('Código público:', 'Tracking code:', 'Código público:')}</dt>
                     <dd className="font-mono-num font-bold text-[#0072BB] dark:text-sky-400">
                       {repair.trackingCode}
                     </dd>
@@ -2081,32 +2115,34 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
               </div>
 
               <div className="space-y-2 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
-                <h4 className="text-xs font-bold text-slate-500 dark:text-slate-400">Cliente</h4>
+                <h4 className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                  {tr('Cliente', 'Client', 'Cliente')}
+                </h4>
                 <dl className="space-y-1 text-xs">
                   <div className="flex justify-between">
-                    <dt className="text-slate-500">Nombre:</dt>
+                    <dt className="text-slate-500">{tr('Nombre:', 'Name:', 'Nome:')}</dt>
                     <dd className="font-medium text-slate-900 dark:text-white">{repair.clientName}</dd>
                   </div>
                   <div className="flex justify-between">
-                    <dt className="text-slate-500">Teléfono:</dt>
+                    <dt className="text-slate-500">{tr('Teléfono:', 'Phone:', 'Telefone:')}</dt>
                     <dd className="font-mono-num font-medium text-slate-900 dark:text-white">
                       {repair.clientPhone || '—'}
                     </dd>
                   </div>
                   <div className="flex justify-between">
-                    <dt className="text-slate-500">DNI:</dt>
+                    <dt className="text-slate-500">{tr('DNI:', 'ID:', 'CPF/RG:')}</dt>
                     <dd className="font-mono-num font-medium text-slate-900 dark:text-white">
                       {repair.clientDni || '—'}
                     </dd>
                   </div>
                   <div className="flex justify-between">
-                    <dt className="text-slate-500">Email:</dt>
+                    <dt className="text-slate-500">{tr('Email:', 'Email:', 'E-mail:')}</dt>
                     <dd className="truncate font-medium text-slate-900 dark:text-white">
                       {repair.clientEmail || '—'}
                     </dd>
                   </div>
                   <div className="flex justify-between">
-                    <dt className="text-slate-500">Dirección:</dt>
+                    <dt className="text-slate-500">{tr('Dirección:', 'Address:', 'Endereço:')}</dt>
                     <dd className="truncate font-medium text-slate-900 dark:text-white">
                       {repair.clientAddress || '—'}
                     </dd>
@@ -2117,13 +2153,13 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
 
             <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
               <h4 className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                Problema reportado
+                {tr('Problema reportado', 'Reported issue', 'Problema relatado')}
               </h4>
               <p className="mt-1 text-sm text-slate-900 dark:text-white">{repair.problem}</p>
               {detailWork.text && (
                 <div className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-800">
                   <h5 className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                    Trabajo realizado
+                    {tr('Trabajo realizado', 'Work performed', 'Serviço realizado')}
                   </h5>
                   <p className="mt-1 whitespace-pre-line text-sm text-slate-800 dark:text-slate-200">
                     {detailWork.text}
@@ -2134,7 +2170,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                 <div className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-800">
                   <div className="mb-2 flex items-center justify-between">
                     <h5 className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                      Fotos y videos enviados al seguimiento
+                      {tr('Fotos y videos enviados al seguimiento', 'Photos & videos shared on tracking', 'Fotos e vídeos enviados ao acompanhamento')}
                     </h5>
                     <span className="font-mono-num text-[11px] text-slate-400">
                       {detailWork.media.length}
@@ -2196,7 +2232,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                             >
                               <Video className="h-5 w-5" />
                               <span className="inline-flex items-center gap-1">
-                                Abrir video
+                                {tr('Abrir video', 'Open video', 'Abrir vídeo')}
                                 <ExternalLink className="h-3 w-3" />
                               </span>
                             </a>
@@ -2214,7 +2250,9 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
               )}
               {repair.notes && (
                 <div className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-800">
-                  <h5 className="text-xs font-bold text-slate-500 dark:text-slate-400">Notas</h5>
+                  <h5 className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                    {tr('Notas', 'Notes', 'Notas')}
+                  </h5>
                   <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">{repair.notes}</p>
                 </div>
               )}
@@ -2229,7 +2267,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                     Object.keys(repair.consoleAccessories).length > 0)) && (
                   <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
                     <h4 className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                      Accesorios entregados
+                      {tr('Accesorios entregados', 'Accessories included', 'Acessórios entregues')}
                     </h4>
                     <p className="mt-1.5 text-xs text-slate-800 dark:text-slate-200">
                       {repair.accessories && repair.accessories.length > 0
@@ -2244,7 +2282,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                 {repair.partNames && repair.partNames.length > 0 && (
                   <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
                     <h4 className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                      Repuestos asignados
+                      {tr('Repuestos asignados', 'Assigned parts', 'Peças atribuídas')}
                     </h4>
                     <p className="mt-1.5 text-xs text-slate-800 dark:text-slate-200">
                       {repair.partNames.join(', ')}
@@ -2260,7 +2298,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                 {repair.physicalCheck && Object.keys(repair.physicalCheck).length > 0 && (
                   <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
                     <h4 className="mb-2 text-xs font-bold text-slate-500 dark:text-slate-400">
-                      CHECK OUT · Estado físico
+                      {tr('CHECK OUT · Estado físico', 'CHECK OUT · Physical condition', 'CHECK OUT · Estado físico')}
                     </h4>
                     <div className="space-y-1 text-xs">
                       {Object.entries(repair.physicalCheck).map(([k, v]) => (
@@ -2276,7 +2314,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                 {repair.functionalCheck && Object.keys(repair.functionalCheck).length > 0 && (
                   <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
                     <h4 className="mb-2 text-xs font-bold text-slate-500 dark:text-slate-400">
-                      CHECK OUT · Estado funcional
+                      {tr('CHECK OUT · Estado funcional', 'CHECK OUT · Functional condition', 'CHECK OUT · Estado funcional')}
                     </h4>
                     <div className="space-y-1 text-xs">
                       {Object.entries(repair.functionalCheck).map(([k, v]) => (
@@ -2294,7 +2332,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
             {repair.securityType && repair.securityType !== 'none' && (
               <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
                 <h4 className="mb-2 text-xs font-bold text-slate-500 dark:text-slate-400">
-                  Seguridad del equipo
+                  {tr('Seguridad del equipo', 'Device security', 'Segurança do aparelho')}
                 </h4>
                 {repair.securityType === 'pattern' &&
                 repair.securityPattern &&
@@ -2302,12 +2340,12 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   <div className="flex flex-col items-center gap-2 sm:flex-row sm:items-center sm:gap-5">
                     <PatternLock value={repair.securityPattern} readOnly size={150} />
                     <div className="font-mono-num text-xs text-slate-600 dark:text-slate-300">
-                      Secuencia: {repair.securityPattern.join(' → ')}
+                      {tr('Secuencia:', 'Sequence:', 'Sequência:')} {repair.securityPattern.join(' → ')}
                     </div>
                   </div>
                 ) : (
                   <div className="font-mono-num text-sm font-bold text-slate-900 dark:text-white">
-                    PIN / Clave: {repair.securityPin}
+                    {tr('PIN / Clave:', 'PIN / Password:', 'PIN / Senha:')} {repair.securityPin}
                   </div>
                 )}
               </div>
@@ -2317,7 +2355,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
               <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
                 <h4 className="mb-3 flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400">
                   <Clock className="h-3.5 w-3.5" />
-                  Historial de avances
+                  {tr('Historial de avances', 'Progress timeline', 'Histórico de progresso')}
                 </h4>
                 <div className="space-y-2.5">
                   {[...detailMeta.timeline].reverse().map((ev, idx) => (
@@ -2356,26 +2394,26 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   className="inline-flex h-10 items-center gap-1.5 rounded-xl px-3 text-xs font-semibold text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
                 >
                   <Trash2 className="h-4 w-4" />
-                  Eliminar orden
+                  {tr('Eliminar orden', 'Delete order', 'Excluir ordem')}
                 </button>
               ) : (
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-medium text-red-600 dark:text-red-400">
-                    ¿Confirmar eliminación?
+                    {tr('¿Confirmar eliminación?', 'Confirm deletion?', 'Confirmar exclusão?')}
                   </span>
                   <button
                     type="button"
                     onClick={handleDelete}
                     className="h-9 rounded-lg bg-red-600 px-3 text-xs font-semibold text-white hover:bg-red-700"
                   >
-                    Sí, eliminar
+                    {tr('Sí, eliminar', 'Yes, delete', 'Sim, excluir')}
                   </button>
                   <button
                     type="button"
                     onClick={() => setConfirmDelete(false)}
                     className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 dark:border-slate-700 dark:text-slate-300"
                   >
-                    Cancelar
+                    {tr('Cancelar', 'Cancel', 'Cancelar')}
                   </button>
                 </div>
               )}
@@ -2386,7 +2424,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                 className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-xs font-semibold text-white hover:bg-[#005f9c]"
               >
                 <Edit3 className="h-3.5 w-3.5" />
-                Técnico
+                {tr('Técnico', 'Technician', 'Técnico')}
               </button>
             </div>
           </div>
@@ -2397,7 +2435,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Estado
+                  {tr('Estado', 'Status', 'Status')}
                 </label>
                 <select
                   value={status}
@@ -2408,17 +2446,17 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   }}
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 >
-                  <option value="recibido">Recibido</option>
-                  <option value="diagnostico">Diagnóstico</option>
-                  <option value="espera_repuesto">Espera repuesto</option>
-                  <option value="en_progreso">En progreso</option>
-                  <option value="listo">Listo para entregar</option>
-                  <option value="entregado">Entregado</option>
+                  <option value="recibido">{tr('Recibido', 'Received', 'Recebido')}</option>
+                  <option value="diagnostico">{tr('Diagnóstico', 'Diagnosis', 'Diagnóstico')}</option>
+                  <option value="espera_repuesto">{tr('Espera repuesto', 'Waiting for part', 'Aguardando peça')}</option>
+                  <option value="en_progreso">{tr('En progreso', 'In progress', 'Em andamento')}</option>
+                  <option value="listo">{tr('Listo para entregar', 'Ready for pickup', 'Pronto para entrega')}</option>
+                  <option value="entregado">{tr('Entregado', 'Delivered', 'Entregue')}</option>
                 </select>
               </div>
               <div>
                 <div className="mb-1 flex justify-between text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  <span>Progreso</span>
+                  <span>{tr('Progreso', 'Progress', 'Progresso')}</span>
                   <span className="font-mono-num">{progress}%</span>
                 </div>
                 <input
@@ -2433,14 +2471,16 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
               {canAssignTechnician && (
                 <div className="sm:col-span-2">
                   <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                    Técnico asignado (opcional)
+                    {tr('Técnico asignado (opcional)', 'Assigned technician (optional)', 'Técnico responsável (opcional)')}
                   </label>
                   <select
                     value={technician}
                     onChange={(e) => setTechnician(e.target.value)}
                     className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   >
-                    <option value="">Sin asignar / Dueño del taller</option>
+                    <option value="">
+                      {tr('Sin asignar / Dueño del taller', 'Unassigned / Shop owner', 'Sem atribuição / Dono da oficina')}
+                    </option>
                     {technicianOptions.map((techName) => (
                       <option key={techName} value={techName}>
                         {techName}
@@ -2453,13 +2493,13 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
 
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Trabajo realizado
+                {tr('Trabajo realizado', 'Work performed', 'Serviço realizado')}
               </label>
               <textarea
                 rows={2}
                 value={workDetail}
                 onChange={(e) => setWorkDetail(e.target.value)}
-                placeholder="Describí el trabajo técnico efectuado..."
+                placeholder={tr('Describí el trabajo técnico efectuado...', 'Describe technical work done...', 'Descreva o serviço técnico realizado...')}
                 className="w-full rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
@@ -2469,10 +2509,20 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                 <div>
                   <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-100">
                     <Camera className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
-                    <span>Enviar imagen o video al Seguimiento en línea</span>
+                    <span>
+                      {tr(
+                        'Enviar imagen o video al Seguimiento en línea',
+                        'Send image or video to Online Tracking',
+                        'Enviar imagem ou vídeo ao Acompanhamento online'
+                      )}
+                    </span>
                   </div>
                   <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                    Fotos o videos cortos (hasta 6 MB) o un enlace externo para que el cliente lo vea en vivo.
+                    {tr(
+                      'Fotos o videos cortos (hasta 6 MB) o un enlace externo para que el cliente lo vea en vivo.',
+                      'Photos or short videos (up to 6 MB) or an external link for live client viewing.',
+                      'Fotos ou vídeos curtos (até 6 MB) ou um link externo para o cliente ver ao vivo.'
+                    )}
                   </p>
                 </div>
                 <button
@@ -2487,14 +2537,16 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-xl bg-[#0072BB] px-3 text-xs font-semibold text-white transition hover:bg-[#005f9c] disabled:opacity-60"
                 >
                   <Send className="h-3.5 w-3.5" />
-                  {sendingMedia ? 'Enviando...' : 'Enviar al seguimiento'}
+                  {sendingMedia
+                    ? tr('Enviando...', 'Sending...', 'Enviando...')
+                    : tr('Enviar al seguimiento', 'Send to tracking', 'Enviar ao acompanhamento')}
                 </button>
               </div>
 
               <div className="flex flex-wrap gap-2">
                 <label className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
                   <ImageIcon className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
-                  <span>{mediaBusy ? 'Procesando...' : 'Subir / sacar foto'}</span>
+                  <span>{mediaBusy ? tr('Procesando...', 'Processing...', 'Processando...') : tr('Subir / sacar foto', 'Upload / take photo', 'Enviar / tirar foto')}</span>
                   <input
                     type="file"
                     accept="image/*"
@@ -2507,7 +2559,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
 
                 <label className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
                   <Video className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
-                  <span>{mediaBusy ? 'Procesando...' : 'Subir / grabar video'}</span>
+                  <span>{mediaBusy ? tr('Procesando...', 'Processing...', 'Processando...') : tr('Subir / grabar video', 'Upload / record video', 'Enviar / gravar vídeo')}</span>
                   <input
                     type="file"
                     accept="video/*"
@@ -2523,7 +2575,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                 >
                   <Link2 className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
-                  <span>Pegar enlace</span>
+                  <span>{tr('Pegar enlace', 'Paste link', 'Colar link')}</span>
                 </button>
               </div>
 
@@ -2534,14 +2586,14 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                     onChange={(e) => setMediaLinkType(e.target.value as 'video' | 'image')}
                     className="h-9 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs font-medium text-slate-800 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   >
-                    <option value="video">Video</option>
-                    <option value="image">Imagen</option>
+                    <option value="video">{tr('Video', 'Video', 'Vídeo')}</option>
+                    <option value="image">{tr('Imagen', 'Image', 'Imagem')}</option>
                   </select>
                   <input
                     type="url"
                     value={mediaLinkUrl}
                     onChange={(e) => setMediaLinkUrl(e.target.value)}
-                    placeholder="https://... (YouTube, Google Drive o URL directa)"
+                    placeholder="https://... (YouTube, Google Drive, URL)"
                     className="h-9 min-w-[200px] flex-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
                   <button
@@ -2549,7 +2601,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                     onClick={handleAddMediaLink}
                     className="h-9 rounded-lg bg-[#0072BB] px-3 text-xs font-semibold text-white hover:bg-[#005f9c]"
                   >
-                    Agregar
+                    {tr('Agregar', 'Add', 'Adicionar')}
                   </button>
                 </div>
               )}
@@ -2612,7 +2664,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                             >
                               <Video className="h-5 w-5" />
                               <span className="inline-flex items-center gap-1">
-                                Enlace de video
+                                {tr('Enlace de video', 'Video link', 'Link do vídeo')}
                                 <ExternalLink className="h-3 w-3" />
                               </span>
                             </a>
@@ -2623,7 +2675,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                             onClick={() =>
                               setMediaItems((prev) => prev.filter((m) => m.id !== item.id))
                             }
-                            aria-label="Quitar archivo"
+                            aria-label={tr('Quitar archivo', 'Remove file', 'Remover arquivo')}
                             className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-lg bg-slate-900/75 text-white transition hover:bg-red-600"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -2643,7 +2695,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                                 )
                               );
                             }}
-                            placeholder="Descripción opcional para el cliente..."
+                            placeholder={tr('Descripción opcional para el cliente...', 'Optional client caption...', 'Descrição opcional para o cliente...')}
                             className="h-8 w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                           />
                         </div>
@@ -2656,7 +2708,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
 
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Notas internas
+                {tr('Notas internas', 'Internal notes', 'Notas internas')}
               </label>
               <textarea
                 rows={2}
@@ -2669,7 +2721,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="space-y-2.5 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
                 <div className="text-xs font-bold uppercase tracking-wide text-slate-700 dark:text-slate-300">
-                  CHECK OUT · Estado físico
+                  {tr('CHECK OUT · Estado físico', 'CHECK OUT · Physical condition', 'CHECK OUT · Estado físico')}
                 </div>
                 {getPhysicalCheckFields(repair.deviceType).map((field) => (
                   <div
@@ -2714,7 +2766,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
 
               <div className="space-y-2.5 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
                 <div className="text-xs font-bold uppercase tracking-wide text-slate-700 dark:text-slate-300">
-                  CHECK OUT · Estado funcional
+                  {tr('CHECK OUT · Estado funcional', 'CHECK OUT · Functional condition', 'CHECK OUT · Estado funcional')}
                 </div>
                 {getFunctionalCheckFields(repair.deviceType).map((field) => (
                   <div
@@ -2765,10 +2817,14 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                     <Package className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
                     <div>
                       <div className="text-xs font-bold text-slate-700 dark:text-slate-200">
-                        Repuestos del inventario ({selectedPartIds.length})
+                        {tr(`Repuestos del inventario (${selectedPartIds.length})`, `Inventory parts (${selectedPartIds.length})`, `Peças do estoque (${selectedPartIds.length})`)}
                       </div>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Agregá o quitá repuestos de la orden; el stock se ajusta automáticamente al guardar.
+                        {tr(
+                          'Agregá o quitá repuestos de la orden; el stock se ajusta automáticamente al guardar.',
+                          'Add or remove parts from this order; stock adjusts automatically when saved.',
+                          'Adicione ou remova peças da ordem; o estoque ajusta automaticamente ao salvar.'
+                        )}
                       </p>
                     </div>
                   </div>
@@ -2779,7 +2835,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                       onChange={(e) => setSyncPartPrice(e.target.checked)}
                       className="h-3.5 w-3.5 rounded accent-[#0072BB]"
                     />
-                    Ajustar presupuesto al marcar
+                    {tr('Ajustar presupuesto al marcar', 'Adjust estimate on selection', 'Ajustar orçamento ao selecionar')}
                   </label>
                 </div>
 
@@ -2790,7 +2846,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                       type="search"
                       value={partSearch}
                       onChange={(e) => setPartSearch(e.target.value)}
-                      placeholder="Buscar repuesto por nombre, marca o SKU..."
+                      placeholder={tr('Buscar repuesto por nombre, marca o SKU...', 'Search part by name, brand or SKU...', 'Buscar peça por nome, marca ou SKU...')}
                       className="h-9 w-full rounded-xl border border-slate-200 bg-slate-50 pl-8 pr-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     />
                   </div>
@@ -2799,7 +2855,11 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                 {missingAssignedParts.length > 0 && (
                   <div className="space-y-1.5">
                     <div className="text-[11px] font-semibold text-amber-700 dark:text-amber-300">
-                      Repuestos ya asignados (no figuran en inventario actual)
+                      {tr(
+                        'Repuestos ya asignados (no figuran en inventario actual)',
+                        'Already assigned parts (not in current inventory)',
+                        'Peças já atribuídas (não constam no estoque atual)'
+                      )}
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2">
                       {missingAssignedParts.map((item) => {
@@ -2864,11 +2924,11 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                             >
                               {part.trackStock
                                 ? outOfStock
-                                  ? 'Sin stock (no descontará)'
+                                  ? tr('Sin stock (no descontará)', 'Out of stock (won\'t deduct)', 'Sem estoque (não descontará)')
                                   : lowStock
-                                    ? `Stock bajo: ${part.stock} u.`
-                                    : `Stock: ${part.stock} u.`
-                                : 'Sin control de stock'}
+                                    ? tr(`Stock bajo: ${part.stock} u.`, `Low stock: ${part.stock} u.`, `Estoque baixo: ${part.stock} un.`)
+                                    : tr(`Stock: ${part.stock} u.`, `Stock: ${part.stock} u.`, `Estoque: ${part.stock} un.`)
+                                : tr('Sin control de stock', 'No stock tracking', 'Sem controle de estoque')}
                             </div>
                           </div>
                           <span className="flex shrink-0 items-center gap-1.5 font-mono-num font-semibold">
@@ -2882,7 +2942,11 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                 ) : (
                   spareParts.length > 0 && (
                     <p className="text-xs text-slate-500">
-                      No hay repuestos que coincidan con "{partSearch}".
+                      {tr(
+                        `No hay repuestos que coincidan con "${partSearch}".`,
+                        `No parts matching "${partSearch}".`,
+                        `Nenhuma peça correspondente a "${partSearch}".`
+                      )}
                     </p>
                   )
                 )}
@@ -2892,9 +2956,9 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                     <div className="flex items-start gap-2">
                       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
                       <span>
-                        Sin stock en inventario para:{' '}
-                        <strong>{selectedOutOfStockParts.map((p) => p.name).join(', ')}</strong>. No
-                        se descontará unidad hasta reponer.
+                        {tr('Sin stock en inventario para:', 'Out of stock in inventory for:', 'Sem estoque para:')}{' '}
+                        <strong>{selectedOutOfStockParts.map((p) => p.name).join(', ')}</strong>.{' '}
+                        {tr('No se descontará unidad hasta reponer.', 'Units won\'t deduct until restocked.', 'Não será descontado até repor.')}
                       </span>
                     </div>
                     {status !== 'espera_repuesto' && (
@@ -2906,7 +2970,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                         }}
                         className="h-8 shrink-0 rounded-lg border border-amber-400 bg-white px-2.5 text-[11px] font-bold text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:bg-slate-900 dark:text-amber-200 dark:hover:bg-amber-950/60"
                       >
-                        Pasar a Espera repuesto
+                        {tr('Pasar a Espera repuesto', 'Move to Waiting for part', 'Mover para Aguardando peça')}
                       </button>
                     )}
                   </div>
@@ -2914,19 +2978,21 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
 
                 {(addedPartIds.length > 0 || removedPartIds.length > 0) && (
                   <div className="flex flex-wrap items-center gap-2 rounded-xl border border-sky-200 bg-sky-50/70 px-3 py-2 text-[11px] font-semibold text-[#0072BB] dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-300">
-                    <span>Cambios pendientes al guardar:</span>
+                    <span>{tr('Cambios pendientes al guardar:', 'Pending changes on save:', 'Alterações pendentes ao salvar:')}</span>
                     {addedPartIds.length > 0 && (
                       <span>
                         +{addedPartIds.length}{' '}
-                        {addedPartIds.length === 1 ? 'repuesto a descontar' : 'repuestos a descontar'}
+                        {addedPartIds.length === 1
+                          ? tr('repuesto a descontar', 'part to deduct', 'peça a descontar')
+                          : tr('repuestos a descontar', 'parts to deduct', 'peças a descontar')}
                       </span>
                     )}
                     {removedPartIds.length > 0 && (
                       <span>
                         -{removedPartIds.length}{' '}
                         {removedPartIds.length === 1
-                          ? 'repuesto a devolver al stock'
-                          : 'repuestos a devolver al stock'}
+                          ? tr('repuesto a devolver al stock', 'part to restock', 'peça a devolver ao estoque')
+                          : tr('repuestos a devolver al stock', 'parts to restock', 'peças a devolver ao estoque')}
                       </span>
                     )}
                   </div>
@@ -2937,18 +3003,18 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
             <div className="space-y-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                  Presupuesto y pagos
+                  {tr('Presupuesto y pagos', 'Estimate & payments', 'Orçamento e pagamentos')}
                 </div>
                 {editSelectableCurrencies.length > 1 && (
                   <div className="flex items-center gap-1.5">
                     <Coins className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
                     <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                      Moneda:
+                      {tr('Moneda:', 'Currency:', 'Moeda:')}
                     </span>
                     <select
                       value={editCurrency}
                       onChange={(e) => handleEditCurrencyChange(e.target.value)}
-                      aria-label="Moneda del presupuesto"
+                      aria-label={tr('Moneda del presupuesto', 'Estimate currency', 'Moeda do orçamento')}
                       className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-800 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     >
                       {editSelectableCurrencies.map((code) => {
@@ -2966,7 +3032,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
               <div className="grid gap-3 sm:grid-cols-3">
                 <div>
                   <label className="mb-1 block text-xs text-slate-500">
-                    Presupuesto ({editCurrencySymbol})
+                    {tr(`Presupuesto (${editCurrencySymbol})`, `Estimate (${editCurrencySymbol})`, `Orçamento (${editCurrencySymbol})`)}
                   </label>
                   <input
                     type="number"
@@ -2979,7 +3045,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-slate-500">
-                    Anticipo / Pagado ({editCurrencySymbol})
+                    {tr(`Anticipo / Pagado (${editCurrencySymbol})`, `Deposit / Paid (${editCurrencySymbol})`, `Sinal / Pago (${editCurrencySymbol})`)}
                   </label>
                   <input
                     type="number"
@@ -2991,7 +3057,9 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs text-slate-500">Total pendiente</label>
+                  <label className="mb-1 block text-xs text-slate-500">
+                    {tr('Total pendiente', 'Balance due', 'Saldo pendente')}
+                  </label>
                   <input
                     type="text"
                     readOnly
@@ -3003,12 +3071,12 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
               {isEditSecondary && (
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200/80 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
                   <span>
-                    Tasa: 1 {editCurrency} = {formatCurrency(editRate, baseCurrency)}
+                    {tr('Tasa:', 'Rate:', 'Taxa:')} 1 {editCurrency} = {formatCurrency(editRate, baseCurrency)}
                   </span>
                   <span className="font-mono-num font-bold">
-                    Equivalente en {baseCurrency}: Presup.{' '}
-                    {formatCurrency(editBaseBudgetPreview, baseCurrency)} · Pagado{' '}
-                    {formatCurrency(editBaseDepositPreview, baseCurrency)}
+                    {tr('Equivalente en', 'Equivalent in', 'Equivalente em')} {baseCurrency}:{' '}
+                    {tr('Presup.', 'Est.', 'Orçam.')} {formatCurrency(editBaseBudgetPreview, baseCurrency)} ·{' '}
+                    {tr('Pagado', 'Paid', 'Pago')} {formatCurrency(editBaseDepositPreview, baseCurrency)}
                   </span>
                 </div>
               )}
@@ -3016,10 +3084,12 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
               <div className="border-t border-slate-100 pt-3 dark:border-slate-800">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
-                    Garantía del trabajo (días desde la entrega)
+                    {tr('Garantía del trabajo (días desde la entrega)', 'Service warranty (days from delivery)', 'Garantia do serviço (dias após entrega)')}
                   </label>
                   <span className="font-mono-num text-xs font-bold text-[#0072BB] dark:text-sky-400">
-                    {warrantyDays > 0 ? `${warrantyDays} días` : 'Sin garantía'}
+                    {warrantyDays > 0
+                      ? `${warrantyDays} ${tr('días', 'days', 'dias')}`
+                      : tr('Sin garantía', 'No warranty', 'Sem garantia')}
                   </span>
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -3034,7 +3104,9 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                           : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
                       }`}
                     >
-                      {preset === 0 ? 'Sin garantía' : `${preset} días`}
+                      {preset === 0
+                        ? tr('Sin garantía', 'No warranty', 'Sem garantia')
+                        : `${preset} ${tr('días', 'days', 'dias')}`}
                     </button>
                   ))}
                   <input
@@ -3047,7 +3119,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                         Math.max(0, Math.min(3650, Math.round(Number(e.target.value) || 0)))
                       )
                     }
-                    aria-label="Días de garantía personalizados"
+                    aria-label={tr('Días de garantía personalizados', 'Custom warranty days', 'Dias personalizados de garantia')}
                     className="h-8 w-24 rounded-lg border border-slate-200 bg-white px-2.5 font-mono-num text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
                 </div>
@@ -3056,49 +3128,49 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
 
             <div className="space-y-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
               <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                Datos del cliente y entrega
+                {tr('Datos del cliente y entrega', 'Client & delivery details', 'Dados do cliente e entrega')}
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <input
                   type="text"
                   value={clientName}
                   onChange={(e) => setClientName(e.target.value)}
-                  placeholder="Nombre y apellido"
+                  placeholder={tr('Nombre y apellido', 'Full name', 'Nome e sobrenome')}
                   className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
                 <input
                   type="tel"
                   value={clientPhone}
                   onChange={(e) => setClientPhone(e.target.value)}
-                  placeholder="Celular"
+                  placeholder={tr('Celular', 'Phone', 'Celular')}
                   className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
                 <input
                   type="text"
                   value={clientDni}
                   onChange={(e) => setClientDni(e.target.value)}
-                  placeholder="DNI"
+                  placeholder={tr('DNI', 'ID Number', 'CPF / RG')}
                   className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
                 <input
                   type="email"
                   value={clientEmail}
                   onChange={(e) => setClientEmail(e.target.value)}
-                  placeholder="Email"
+                  placeholder={tr('Email', 'Email', 'E-mail')}
                   className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
                 <input
                   type="text"
                   value={clientAddress}
                   onChange={(e) => setClientAddress(e.target.value)}
-                  placeholder="Dirección"
+                  placeholder={tr('Dirección', 'Address', 'Endereço')}
                   className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 sm:col-span-2 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
                 <input
                   type="text"
                   value={checkoutState}
                   onChange={(e) => setCheckoutState(e.target.value)}
-                  placeholder="Estado de entrega / conformidad del cliente"
+                  placeholder={tr('Estado de entrega / conformidad del cliente', 'Delivery condition / client sign-off', 'Estado de entrega / conformidade do cliente')}
                   className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 sm:col-span-2 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
@@ -3110,14 +3182,16 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                 onClick={() => setTab('detail')}
                 className="h-11 flex-1 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
               >
-                Cancelar
+                {tr('Cancelar', 'Cancel', 'Cancelar')}
               </button>
               <button
                 type="submit"
                 disabled={saving}
                 className="h-11 flex-1 rounded-xl bg-[#0072BB] text-sm font-semibold text-white hover:bg-[#005f9c] disabled:opacity-60"
               >
-                {saving ? 'Guardando...' : 'Guardar cambios'}
+                {saving
+                  ? tr('Guardando...', 'Saving...', 'Salvando...')
+                  : tr('Guardar cambios', 'Save changes', 'Salvar alterações')}
               </button>
             </div>
           </form>
@@ -3142,14 +3216,14 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
           <button
             type="button"
             onClick={() => setLightboxImage(null)}
-            aria-label="Cerrar vista ampliada"
+            aria-label={tr('Cerrar vista ampliada', 'Close enlarged view', 'Fechar visualização ampliada')}
             className="absolute top-4 right-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"
           >
             <X className="h-5 w-5" />
           </button>
           <img
             src={lightboxImage}
-            alt="Vista ampliada"
+            alt={tr('Vista ampliada', 'Enlarged view', 'Visualização ampliada')}
             onClick={(e) => e.stopPropagation()}
             className="max-h-[88vh] max-w-full rounded-2xl object-contain shadow-2xl"
           />

@@ -33,6 +33,7 @@ import {
 } from '../utils/validation';
 import { ModalShell } from './ModalShell';
 import { useToast } from './ToastProvider';
+import { useI18n } from '../utils/i18n';
 
 interface ProductModalProps {
   open: boolean;
@@ -52,6 +53,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   editProduct,
 }) => {
   const { notify } = useToast();
+  const { tr } = useI18n();
   const activeCurrency = useActiveCurrency();
   const currencySymbol = getCurrencyOption(activeCurrency).symbol;
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -387,18 +389,22 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     <ModalShell
       open={open}
       onClose={onClose}
-      title={editProduct ? 'Editar producto' : 'Nuevo producto'}
+      title={
+        editProduct
+          ? tr('Editar producto', 'Edit product', 'Editar produto')
+          : tr('Nuevo producto', 'New product', 'Novo produto')
+      }
       maxWidth="3xl"
     >
       <form onSubmit={handleSubmit} className="space-y-6">
         <section className="space-y-3">
           <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400">
-            Información básica
+            {tr('Información básica', 'Basic information', 'Informações básicas')}
           </h3>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Nombre del producto *
+                {tr('Nombre del producto *', 'Product name *', 'Nome do produto *')}
               </label>
               <input
                 type="text"
@@ -406,7 +412,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 list="product-suggestions-list"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Producto o repuesto"
+                placeholder={tr('Producto o repuesto', 'Product or spare part', 'Produto ou peça')}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
               <datalist id="product-suggestions-list">
@@ -417,32 +423,32 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Descripción
+                {tr('Descripción', 'Description', 'Descrição')}
               </label>
               <textarea
                 rows={2}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Detalles del producto"
+                placeholder={tr('Detalles del producto', 'Product details', 'Detalhes do produto')}
                 className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Meta descripción SEO ({metaDescription.length}/160)
+                {tr('Meta descripción SEO', 'SEO meta description', 'Meta descrição SEO')} ({metaDescription.length}/160)
               </label>
               <textarea
                 rows={2}
                 maxLength={160}
                 value={metaDescription}
                 onChange={(e) => setMetaDescription(e.target.value)}
-                placeholder="Descripción breve para buscadores"
+                placeholder={tr('Descripción breve para buscadores', 'Short description for search', 'Breve descrição para buscas')}
                 className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Tipo *
+                {tr('Tipo *', 'Type *', 'Tipo *')}
               </label>
               <select
                 value={productType}
@@ -453,19 +459,23 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 }}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               >
-                <option value="Fisico">Físico</option>
-                <option value="Servicio">Servicio</option>
-                <option value="Licencia digital">Licencia digital</option>
+                <option value="Fisico">{tr('Físico', 'Physical', 'Físico')}</option>
+                <option value="Servicio">{tr('Servicio', 'Service', 'Serviço')}</option>
+                <option value="Licencia digital">{tr('Licencia digital', 'Digital license', 'Licença digital')}</option>
               </select>
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Imagen del producto
+                {tr('Imagen del producto', 'Product image', 'Imagem do produto')}
               </label>
               <div className="flex items-center gap-3">
                 <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
                   <Upload className="h-3.5 w-3.5" />
-                  <span>{imageDataUrl ? 'Cambiar imagen' : 'Seleccionar imagen'}</span>
+                  <span>
+                    {imageDataUrl
+                      ? tr('Cambiar imagen', 'Change image', 'Alterar imagem')
+                      : tr('Seleccionar imagen', 'Select image', 'Selecionar imagem')}
+                  </span>
                   <input
                     type="file"
                     accept="image/jpeg,image/png,image/webp"
@@ -476,7 +486,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 {imageDataUrl && (
                   <img
                     src={imageDataUrl}
-                    alt="Vista previa"
+                    alt={tr('Vista previa', 'Preview', 'Pré-visualização')}
                     referrerPolicy="no-referrer"
                     className="h-10 w-10 rounded-lg border border-slate-200 object-cover dark:border-slate-700"
                   />
@@ -487,11 +497,13 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         </section>
 
         <section className="space-y-3 border-t border-slate-100 pt-4 dark:border-slate-800">
-          <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400">Clasificación</h3>
+          <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400">
+            {tr('Clasificación', 'Classification', 'Classificação')}
+          </h3>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Categoría *
+                {tr('Categoría *', 'Category *', 'Categoria *')}
               </label>
               <select
                 value={category}
@@ -511,7 +523,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Subcategoría
+                {tr('Subcategoría', 'Subcategory', 'Subcategoria')}
               </label>
               <select
                 value={subcategory}
@@ -527,14 +539,14 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Marca
+                {tr('Marca', 'Brand', 'Marca')}
               </label>
               <input
                 type="text"
                 list="product-brand-list"
                 value={brand}
                 onChange={(e) => setBrand(e.target.value)}
-                placeholder="Sin marca"
+                placeholder={tr('Sin marca', 'No brand', 'Sem marca')}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
               <datalist id="product-brand-list">
@@ -545,14 +557,14 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Proveedor
+                {tr('Proveedor', 'Supplier', 'Fornecedor')}
               </label>
               <select
                 value={supplierId}
                 onChange={(e) => setSupplierId(e.target.value)}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               >
-                <option value="">Sin proveedor</option>
+                <option value="">{tr('Sin proveedor', 'No supplier', 'Sem fornecedor')}</option>
                 {suppliers.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
@@ -565,7 +577,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
         <section className="space-y-3 border-t border-slate-100 pt-4 dark:border-slate-800">
           <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400">
-            Identificación y ubicación
+            {tr('Identificación y ubicación', 'Identification & location', 'Identificação e localização')}
           </h3>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
@@ -576,13 +588,13 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 type="text"
                 value={sku}
                 onChange={(e) => setSku(e.target.value)}
-                placeholder="Código propio"
+                placeholder={tr('Código propio', 'Custom code', 'Código próprio')}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-mono-num text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Código de barras
+                {tr('Código de barras', 'Barcode', 'Código de barras')}
               </label>
               <div className="flex gap-2">
                 <input
@@ -596,13 +608,13 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                       handleLookupCode();
                     }
                   }}
-                  placeholder="Escanear o escribir"
+                  placeholder={tr('Escanear o escribir', 'Scan or type', 'Escanear ou digitar')}
                   className="h-10 flex-1 rounded-xl border border-slate-200 bg-white px-3 font-mono-num text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
                 <button
                   type="button"
                   onClick={startScanner}
-                  title="Leer código con cámara"
+                  title={tr('Leer código con cámara', 'Scan code with camera', 'Ler código com a câmera')}
                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                 >
                   {scanning ? <StopCircle className="h-4 w-4 text-red-500" /> : <Camera className="h-4 w-4" />}
@@ -620,19 +632,19 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Ubicación
+                {tr('Ubicación', 'Location', 'Localização')}
               </label>
               <input
                 type="text"
                 value={location}
                 onChange={(e) => setLocation(e.target.value)}
-                placeholder="Estante, caja o depósito"
+                placeholder={tr('Estante, caja o depósito', 'Shelf, bin, or storage', 'Prateleira, caixa ou depósito')}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Código interno
+                {tr('Código interno', 'Internal code', 'Código interno')}
               </label>
               <input
                 type="text"
@@ -645,11 +657,13 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         </section>
 
         <section className="space-y-3 border-t border-slate-100 pt-4 dark:border-slate-800">
-          <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400">Precios</h3>
+          <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400">
+            {tr('Precios', 'Pricing', 'Preços')}
+          </h3>
           <div className="grid gap-3 sm:grid-cols-3">
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Costo de compra ({currencySymbol})
+                {tr('Costo de compra', 'Purchase cost', 'Custo de compra')} ({currencySymbol})
               </label>
               <input
                 type="number"
@@ -662,20 +676,22 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Tipo de ganancia
+                {tr('Tipo de ganancia', 'Markup type', 'Tipo de lucro')}
               </label>
               <select
                 value={marginMode}
                 onChange={(e) => setMarginMode(e.target.value as 'percent' | 'fixed')}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               >
-                <option value="percent">Porcentaje sobre costo</option>
-                <option value="fixed">Monto fijo sobre costo</option>
+                <option value="percent">{tr('Porcentaje sobre costo', 'Percentage over cost', 'Percentual sobre custo')}</option>
+                <option value="fixed">{tr('Monto fijo sobre costo', 'Fixed amount over cost', 'Valor fixo sobre custo')}</option>
               </select>
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                {marginMode === 'percent' ? 'Ganancia (%)' : `Ganancia (${currencySymbol})`}
+                {marginMode === 'percent'
+                  ? tr('Ganancia (%)', 'Markup (%)', 'Lucro (%)')
+                  : `${tr('Ganancia', 'Markup', 'Lucro')} (${currencySymbol})`}
               </label>
               <input
                 type="number"
@@ -687,37 +703,37 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                IVA
+                {tr('IVA', 'Tax / VAT', 'Imposto')}
               </label>
               <select
                 value={vat}
                 onChange={(e) => setVat(e.target.value)}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               >
-                <option value="0">0% (Exento)</option>
+                <option value="0">{tr('0% (Exento)', '0% (Exempt)', '0% (Isento)')}</option>
                 <option value="10.5">10.5%</option>
                 <option value="21">21%</option>
               </select>
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Redondeo
+                {tr('Redondeo', 'Rounding', 'Arredondamento')}
               </label>
               <select
                 value={rounding}
                 onChange={(e) => setRounding(e.target.value)}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               >
-                <option value="0">Ninguno</option>
-                <option value="1">Entero</option>
-                <option value="10">Decena</option>
-                <option value="100">Centena</option>
-                <option value="1000">Mil</option>
+                <option value="0">{tr('Ninguno', 'None', 'Nenhum')}</option>
+                <option value="1">{tr('Entero', 'Integer', 'Inteiro')}</option>
+                <option value="10">{tr('Decena', 'Tens', 'Dezena')}</option>
+                <option value="100">{tr('Centena', 'Hundreds', 'Centena')}</option>
+                <option value="1000">{tr('Mil', 'Thousands', 'Milhar')}</option>
               </select>
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Precio final de venta
+                {tr('Precio final de venta', 'Final selling price', 'Preço final de venda')}
               </label>
               <input
                 type="text"
@@ -731,7 +747,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
         <section className="space-y-3 border-t border-slate-100 pt-4 dark:border-slate-800">
           <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400">
-            Control de stock y dimensiones
+            {tr('Control de stock y dimensiones', 'Stock control & dimensions', 'Controle de estoque e dimensões')}
           </h3>
           <div className="flex flex-wrap gap-4 text-xs font-medium text-slate-700 dark:text-slate-300">
             <label className="flex cursor-pointer items-center gap-2">
@@ -741,7 +757,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 onChange={(e) => setTrackStock(e.target.checked)}
                 className="h-4 w-4 rounded accent-[#0072BB]"
               />
-              Controlar stock
+              {tr('Controlar stock', 'Track stock', 'Controlar estoque')}
             </label>
             <label className="flex cursor-pointer items-center gap-2">
               <input
@@ -750,7 +766,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 onChange={(e) => setAllowNoStock(e.target.checked)}
                 className="h-4 w-4 rounded accent-[#0072BB]"
               />
-              Permitir venta sin stock
+              {tr('Permitir venta sin stock', 'Allow sale out of stock', 'Permitir venda sem estoque')}
             </label>
             <label className="flex cursor-pointer items-center gap-2">
               <input
@@ -759,14 +775,14 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 onChange={(e) => setUsesSerial(e.target.checked)}
                 className="h-4 w-4 rounded accent-[#0072BB]"
               />
-              Usa series / IMEI
+              {tr('Usa series / IMEI', 'Uses serial / IMEI', 'Usa série / IMEI')}
             </label>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-3">
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Stock actual
+                {tr('Stock actual', 'Current stock', 'Estoque atual')}
               </label>
               <input
                 type="number"
@@ -779,7 +795,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Stock mínimo
+                {tr('Stock mínimo', 'Minimum stock', 'Estoque mínimo')}
               </label>
               <input
                 type="number"
@@ -792,7 +808,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Tope de recompra
+                {tr('Tope de recompra', 'Reorder cap', 'Limite de recompra')}
               </label>
               <input
                 type="number"
@@ -800,7 +816,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 step="1"
                 value={reorderCap}
                 onChange={(e) => setReorderCap(e.target.value)}
-                placeholder="Opcional"
+                placeholder={tr('Opcional', 'Optional', 'Opcional')}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-mono-num text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
@@ -813,7 +829,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               step="0.001"
               value={weight}
               onChange={(e) => setWeight(e.target.value)}
-              placeholder="Peso (kg)"
+              placeholder={tr('Peso (kg)', 'Weight (kg)', 'Peso (kg)')}
               className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
             <input
@@ -822,7 +838,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               step="0.1"
               value={height}
               onChange={(e) => setHeight(e.target.value)}
-              placeholder="Alto (cm)"
+              placeholder={tr('Alto (cm)', 'Height (cm)', 'Altura (cm)')}
               className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
             <input
@@ -831,7 +847,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               step="0.1"
               value={width}
               onChange={(e) => setWidth(e.target.value)}
-              placeholder="Ancho (cm)"
+              placeholder={tr('Ancho (cm)', 'Width (cm)', 'Largura (cm)')}
               className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
             <input
@@ -840,7 +856,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               step="0.1"
               value={depth}
               onChange={(e) => setDepth(e.target.value)}
-              placeholder="Profundidad (cm)"
+              placeholder={tr('Profundidad (cm)', 'Depth (cm)', 'Profundidade (cm)')}
               className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
           </div>
@@ -852,14 +868,16 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             onClick={onClose}
             className="h-11 flex-1 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
           >
-            Cancelar
+            {tr('Cancelar', 'Cancel', 'Cancelar')}
           </button>
           <button
             type="submit"
             disabled={saving}
             className="h-11 flex-1 rounded-xl bg-[#0072BB] text-sm font-semibold text-white hover:bg-[#005f9c] disabled:opacity-60"
           >
-            {saving ? 'Guardando...' : 'Guardar producto'}
+            {saving
+              ? tr('Guardando...', 'Saving...', 'Salvando...')
+              : tr('Guardar producto', 'Save product', 'Salvar produto')}
           </button>
         </div>
       </form>

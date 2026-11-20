@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Eraser, PenTool, Trash2, X } from 'lucide-react';
 import { sanitizeImageDataUrl } from '../utils/validation';
+import { useI18n } from '../utils/i18n';
 
 interface SignaturePadModalProps {
   open: boolean;
@@ -86,6 +87,7 @@ export const SignaturePadModal: React.FC<SignaturePadModalProps> = ({
   onClose,
   onSave,
 }) => {
+  const { tr } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const activePointerIdRef = useRef<number | null>(null);
   const lastPointRef = useRef<Point | null>(null);
@@ -292,7 +294,7 @@ export const SignaturePadModal: React.FC<SignaturePadModalProps> = ({
       className="no-print fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/65 p-0 backdrop-blur-xs sm:items-center sm:p-4"
       role="dialog"
       aria-modal="true"
-      aria-label="Firma del cliente"
+      aria-label={tr('Firma del cliente', 'Client signature', 'Assinatura do cliente')}
       onClick={(e) => {
         if (e.target === e.currentTarget && !saving) onClose();
       }}
@@ -304,7 +306,7 @@ export const SignaturePadModal: React.FC<SignaturePadModalProps> = ({
           <div className="min-w-0">
             <h3 className="flex items-center gap-2 truncate text-base font-bold text-slate-900 dark:text-white font-display">
               <PenTool className="h-4 w-4 shrink-0 text-[#0072BB] dark:text-sky-400" />
-              <span>Firma del cliente</span>
+              <span>{tr('Firma del cliente', 'Client signature', 'Assinatura do cliente')}</span>
             </h3>
             <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
               {clientName} · {orderLabel}
@@ -314,7 +316,7 @@ export const SignaturePadModal: React.FC<SignaturePadModalProps> = ({
             type="button"
             onClick={onClose}
             disabled={saving}
-            aria-label="Cerrar firma"
+            aria-label={tr('Cerrar firma', 'Close signature', 'Fechar assinatura')}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
           >
             <X className="h-5 w-5" />
@@ -323,7 +325,11 @@ export const SignaturePadModal: React.FC<SignaturePadModalProps> = ({
 
         <div className="space-y-4 p-5 sm:p-6">
           <div className="text-xs text-slate-600 dark:text-slate-300">
-            Firmá con el dedo, lápiz táctil o mouse dentro del recuadro. Al guardar se agrega automáticamente a la boleta A4, térmico 80mm y PDF.
+            {tr(
+              'Firmá con el dedo, lápiz táctil o mouse dentro del recuadro. Al guardar se agrega automáticamente a la boleta A4, térmico 80mm y PDF.',
+              'Sign with your finger, stylus, or mouse inside the box. When saved, it is automatically added to the A4 receipt, 80mm thermal slip, and PDF.',
+              'Assine com o dedo, caneta tátil ou mouse dentro do quadro. Ao salvar, é adicionada automaticamente ao comprovante A4, térmico 80mm e PDF.'
+            )}
           </div>
 
           <div className="relative overflow-hidden rounded-2xl border-2 border-dashed border-slate-300 bg-white shadow-inner">
@@ -338,11 +344,11 @@ export const SignaturePadModal: React.FC<SignaturePadModalProps> = ({
             <div className="pointer-events-none absolute inset-x-8 bottom-8 border-b border-slate-300/90" />
             {!hasInk && (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm font-medium text-slate-300 select-none">
-                Firmá aquí
+                {tr('Firmá aquí', 'Sign here', 'Assine aqui')}
               </div>
             )}
             <div className="pointer-events-none absolute inset-x-0 bottom-2 text-center text-[10px] font-medium text-slate-400 select-none">
-              Firma y aclaración del cliente
+              {tr('Firma y aclaración del cliente', 'Client signature and printed name', 'Assinatura e nome do cliente')}
             </div>
           </div>
 
@@ -355,7 +361,7 @@ export const SignaturePadModal: React.FC<SignaturePadModalProps> = ({
                 className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-45 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 <Eraser className="h-3.5 w-3.5" />
-                Limpiar
+                {tr('Limpiar', 'Clear', 'Limpar')}
               </button>
               {initialSignatureUrl && (
                 <button
@@ -365,7 +371,7 @@ export const SignaturePadModal: React.FC<SignaturePadModalProps> = ({
                   className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-red-200 px-3 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-45 dark:border-red-900/60 dark:text-red-400 dark:hover:bg-red-950/30"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  Quitar firma
+                  {tr('Quitar firma', 'Remove signature', 'Remover assinatura')}
                 </button>
               )}
             </div>
@@ -377,7 +383,7 @@ export const SignaturePadModal: React.FC<SignaturePadModalProps> = ({
                 disabled={saving}
                 className="h-10 rounded-xl border border-slate-200 px-4 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-45 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
               >
-                Cancelar
+                {tr('Cancelar', 'Cancel', 'Cancelar')}
               </button>
               <button
                 type="button"
@@ -386,7 +392,9 @@ export const SignaturePadModal: React.FC<SignaturePadModalProps> = ({
                 className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-xs font-bold text-white hover:bg-[#005f9c] disabled:opacity-50"
               >
                 <Check className="h-4 w-4" />
-                {saving ? 'Guardando...' : 'Guardar firma'}
+                {saving
+                  ? tr('Guardando...', 'Saving...', 'Salvando...')
+                  : tr('Guardar firma', 'Save signature', 'Salvar assinatura')}
               </button>
             </div>
           </div>

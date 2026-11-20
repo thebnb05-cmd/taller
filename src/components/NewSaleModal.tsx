@@ -83,6 +83,7 @@ import {
   sanitizeSafeUrl,
   sanitizeText,
 } from '../utils/validation';
+import { useI18n } from '../utils/i18n';
 import { ModalShell } from './ModalShell';
 import { PaymentSettingsModal } from './PaymentSettingsPanel';
 import { useToast } from './ToastProvider';
@@ -135,6 +136,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   onSaved,
 }) => {
   const { notify } = useToast();
+  const { tr } = useI18n();
   const activeCurrency = useActiveCurrency();
   const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
   const baseCurrency: CurrencyCode = profile ? workshopMeta.currency : activeCurrency;
@@ -684,11 +686,23 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     );
     if (matched) {
       addProductToCart(matched);
-      setScannerStatus(`Agregado al carrito: ${matched.name}`);
-      notify(`Escaneado: ${matched.name}`);
+      setScannerStatus(
+        tr(
+          `Agregado al carrito: ${matched.name}`,
+          `Added to cart: ${matched.name}`,
+          `Adicionado ao carrinho: ${matched.name}`
+        )
+      );
+      notify(tr(`Escaneado: ${matched.name}`, `Scanned: ${matched.name}`, `Escaneado: ${matched.name}`));
     } else {
       setProductQuery(code);
-      setScannerStatus(`Código ${code} leído (sin coincidencia exacta en inventario).`);
+      setScannerStatus(
+        tr(
+          `Código ${code} leído (sin coincidencia exacta en inventario).`,
+          `Code ${code} scanned (no exact match in inventory).`,
+          `Código ${code} lido (sem correspondência exata no estoque).`
+        )
+      );
     }
     stopScanner();
   };
@@ -699,7 +713,13 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
-      setScannerStatus('Cámara no disponible en este navegador. Usá lector USB o buscador.');
+      setScannerStatus(
+        tr(
+          'Cámara no disponible en este navegador. Usá lector USB o buscador.',
+          'Camera unavailable in this browser. Use a USB scanner or search.',
+          'Câmera indisponível neste navegador. Use leitor USB ou busca.'
+        )
+      );
       return;
     }
     try {
@@ -708,7 +728,13 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       });
       streamRef.current = stream;
       setScanning(true);
-      setScannerStatus('Apuntá la cámara al código de barras...');
+      setScannerStatus(
+        tr(
+          'Apuntá la cámara al código de barras...',
+          'Point the camera at the barcode...',
+          'Aponte a câmera para o código de barras...'
+        )
+      );
 
       window.setTimeout(() => {
         if (videoRef.current) {
@@ -726,7 +752,13 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       ).BarcodeDetector;
 
       if (!BarcodeDetectorCtor) {
-        setScannerStatus('Cámara activa, pero este navegador no soporta BarcodeDetector nativo.');
+        setScannerStatus(
+          tr(
+            'Cámara activa, pero este navegador no soporta BarcodeDetector nativo.',
+            'Camera active, but this browser does not support native BarcodeDetector.',
+            'Câmera ativa, mas este navegador não suporta BarcodeDetector nativo.'
+          )
+        );
         return;
       }
 
@@ -746,7 +778,13 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         }
       }, 350);
     } catch {
-      setScannerStatus('No se pudo acceder a la cámara. Verificá los permisos.');
+      setScannerStatus(
+        tr(
+          'No se pudo acceder a la cámara. Verificá los permisos.',
+          'Could not access the camera. Check permissions.',
+          'Não foi possível acessar a câmera. Verifique as permissões.'
+        )
+      );
     }
   };
 
@@ -1221,8 +1259,16 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         status: res.isPaid ? 'paid' : 'pending',
         statusText:
           mode === 'qr'
-            ? 'QR dinámico activo · Esperando que el cliente escanee y pague...'
-            : `Orden enviada a ${mpConfig.terminalId} · Esperando tarjeta en el Point...`,
+            ? tr(
+                'QR dinámico activo · Esperando que el cliente escanee y pague...',
+                'Dynamic QR active · Waiting for customer to scan and pay...',
+                'QR dinâmico ativo · Aguardando o cliente escanear e pagar...'
+              )
+            : tr(
+                `Orden enviada a ${mpConfig.terminalId} · Esperando tarjeta en el Point...`,
+                `Order sent to ${mpConfig.terminalId} · Waiting for card on Point...`,
+                `Pedido enviado para ${mpConfig.terminalId} · Aguardando cartão no Point...`
+              ),
       });
 
       notify(
@@ -1257,7 +1303,11 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
             ? {
                 ...prev,
                 status: 'paid',
-                statusText: 'Pago aprobado y acreditado en Mercado Pago.',
+                statusText: tr(
+                  'Pago aprobado y acreditado en Mercado Pago.',
+                  'Payment approved and credited in Mercado Pago.',
+                  'Pagamento aprovado e creditado no Mercado Pago.'
+                ),
               }
             : prev
         );
@@ -1270,7 +1320,11 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
             ? {
                 ...prev,
                 status: 'canceled',
-                statusText: 'Orden cancelada o vencida.',
+                statusText: tr(
+                  'Orden cancelada o vencida.',
+                  'Order canceled or expired.',
+                  'Pedido cancelado ou expirado.'
+                ),
               }
             : prev
         );
@@ -1280,7 +1334,11 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
             ? {
                 ...prev,
                 status: 'failed',
-                statusText: 'Pago rechazado o con error.',
+                statusText: tr(
+                  'Pago rechazado o con error.',
+                  'Payment declined or failed.',
+                  'Pagamento recusado ou com erro.'
+                ),
               }
             : prev
         );
@@ -1321,7 +1379,11 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     <ModalShell
       open={open}
       onClose={onClose}
-      title={editSale ? `Editar venta · ${editSale.invoice}` : 'Nueva venta de mostrador'}
+      title={
+        editSale
+          ? tr(`Editar venta · ${editSale.invoice}`, `Edit sale · ${editSale.invoice}`, `Editar venda · ${editSale.invoice}`)
+          : tr('Nueva venta de mostrador', 'New counter sale', 'Nova venda de balcão')
+      }
       maxWidth="2xl"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -1330,7 +1392,13 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-100">
               <ScanBarcode className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
-              <span>Productos e ítems ({cartItems.length})</span>
+              <span>
+                {tr(
+                  `Productos e ítems (${cartItems.length})`,
+                  `Products & items (${cartItems.length})`,
+                  `Produtos e itens (${cartItems.length})`
+                )}
+              </span>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
               <button
@@ -1343,7 +1411,9 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                 }`}
               >
                 <Camera className="h-3.5 w-3.5" />
-                {scanning ? 'Detener cámara' : 'Escanear código'}
+                {scanning
+                  ? tr('Detener cámara', 'Stop camera', 'Parar câmera')
+                  : tr('Escanear código', 'Scan barcode', 'Escanear código')}
               </button>
               <button
                 type="button"
@@ -1351,7 +1421,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                 className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
               >
                 <Plus className="h-3.5 w-3.5" />
-                Ítem manual
+                {tr('Ítem manual', 'Manual item', 'Item manual')}
               </button>
             </div>
           </div>
@@ -1375,7 +1445,11 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                 value={productQuery}
                 onChange={(e) => setProductQuery(e.target.value)}
                 onKeyDown={handleSearchKeyDown}
-                placeholder="Buscar por nombre, SKU o escanear código de barras (Enter)..."
+                placeholder={tr(
+                  'Buscar por nombre, SKU o escanear código de barras (Enter)...',
+                  'Search by name, SKU, or scan barcode (Enter)...',
+                  'Buscar por nome, SKU ou escanear código de barras (Enter)...'
+                )}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
               />
               {productQuery && (
@@ -1394,7 +1468,11 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
             <div className="max-h-44 overflow-y-auto divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-700 dark:bg-slate-900">
               {filteredProducts.length === 0 ? (
                 <div className="px-3 py-2.5 text-xs text-slate-500">
-                  No encontramos productos para &ldquo;{productQuery}&rdquo;. Podés agregarlo como ítem manual.
+                  {tr(
+                    `No encontramos productos para "${productQuery}". Podés agregarlo como ítem manual.`,
+                    `No products found for "${productQuery}". You can add it as a manual item.`,
+                    `Não encontramos produtos para "${productQuery}". Você pode adicionar como item manual.`
+                  )}
                 </div>
               ) : (
                 filteredProducts.map((p) => {
@@ -1416,8 +1494,10 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                         </div>
                         <div className="text-[11px] text-slate-500 dark:text-slate-400">
                           {p.sku || p.barcode ? `${p.sku || p.barcode} · ` : ''}
-                          {p.trackStock ? `Stock: ${p.stock} u.` : 'Sin control de stock'}
-                          {outOfStock ? ' · Agotado' : ''}
+                          {p.trackStock
+                            ? tr(`Stock: ${p.stock} u.`, `Stock: ${p.stock} u.`, `Estoque: ${p.stock} un.`)
+                            : tr('Sin control de stock', 'No stock tracking', 'Sem controle de estoque')}
+                          {outOfStock ? tr(' · Agotado', ' · Out of stock', ' · Esgotado') : ''}
                         </div>
                       </div>
                       <span className="shrink-0 font-mono-num font-bold text-[#0072BB] dark:text-sky-400">
@@ -1437,7 +1517,11 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   type="text"
                   value={manualName}
                   onChange={(e) => setManualName(e.target.value)}
-                  placeholder="Descripción del servicio o producto..."
+                  placeholder={tr(
+                    'Descripción del servicio o producto...',
+                    'Service or product description...',
+                    'Descrição do serviço ou produto...'
+                  )}
                   className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
@@ -1447,7 +1531,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   min="1"
                   value={manualQty}
                   onChange={(e) => setManualQty(e.target.value)}
-                  placeholder="Cant."
+                  placeholder={tr('Cant.', 'Qty', 'Qtd.')}
                   className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-center font-mono-num text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
@@ -1458,7 +1542,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   step="0.01"
                   value={manualPrice}
                   onChange={(e) => setManualPrice(e.target.value)}
-                  placeholder={`Precio (${currencySymbol})`}
+                  placeholder={tr(`Precio (${currencySymbol})`, `Price (${currencySymbol})`, `Preço (${currencySymbol})`)}
                   className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-right font-mono-num text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
@@ -1468,7 +1552,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   onClick={handleAddManualItem}
                   className="h-9 w-full rounded-lg bg-[#0072BB] px-2 text-xs font-semibold text-white hover:bg-[#005f9c]"
                 >
-                  Sumar
+                  {tr('Sumar', 'Add', 'Adicionar')}
                 </button>
               </div>
             </div>
@@ -1493,7 +1577,9 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                           {item.name}
                         </div>
                         <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                          {prod?.trackStock ? `Stock: ${prod.stock} u.` : 'Ítem manual'}
+                          {prod?.trackStock
+                            ? tr(`Stock: ${prod.stock} u.`, `Stock: ${prod.stock} u.`, `Estoque: ${prod.stock} un.`)
+                            : tr('Ítem manual', 'Manual item', 'Item manual')}
                           {item.sku ? ` · ${item.sku}` : ''}
                         </div>
                       </div>
@@ -1505,7 +1591,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                           type="button"
                           onClick={() => handleUpdateCartQty(item.id, item.quantity - 1)}
                           className="flex h-full w-7 items-center justify-center text-slate-600 hover:text-slate-900 dark:text-slate-300"
-                          aria-label="Restar cantidad"
+                          aria-label={tr('Restar cantidad', 'Decrease quantity', 'Diminuir quantidade')}
                         >
                           <Minus className="h-3 w-3" />
                         </button>
@@ -1516,7 +1602,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                           type="button"
                           onClick={() => handleUpdateCartQty(item.id, item.quantity + 1)}
                           className="flex h-full w-7 items-center justify-center text-slate-600 hover:text-slate-900 dark:text-slate-300"
-                          aria-label="Sumar cantidad"
+                          aria-label={tr('Sumar cantidad', 'Increase quantity', 'Aumentar quantidade')}
                         >
                           <Plus className="h-3 w-3" />
                         </button>
@@ -1528,7 +1614,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                         step="0.01"
                         value={item.unitPrice}
                         onChange={(e) => handleUpdateCartUnitPrice(item.id, e.target.value)}
-                        aria-label="Precio unitario"
+                        aria-label={tr('Precio unitario', 'Unit price', 'Preço unitário')}
                         className="h-8 w-24 rounded-lg border border-slate-200 bg-white px-2 text-right font-mono-num text-xs font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                       />
 
@@ -1539,7 +1625,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                       <button
                         type="button"
                         onClick={() => handleRemoveCartItem(item.id)}
-                        aria-label="Quitar ítem"
+                        aria-label={tr('Quitar ítem', 'Remove item', 'Remover item')}
                         className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -1556,7 +1642,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         <div className="grid gap-3 sm:grid-cols-12">
           <div className="sm:col-span-6">
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Nombre del cliente *
+              {tr('Nombre del cliente *', 'Client name *', 'Nome do cliente *')}
             </label>
             <input
               type="text"
@@ -1564,7 +1650,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
               list="sale-clients-datalist"
               value={clientName}
               onChange={(e) => setClientName(e.target.value)}
-              placeholder="Escribí o seleccioná un cliente"
+              placeholder={tr('Escribí o seleccioná un cliente', 'Type or select a client', 'Digite ou selecione um cliente')}
               className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
             <datalist id="sale-clients-datalist">
@@ -1574,13 +1660,13 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
             </datalist>
             <p className="mt-1 text-[11px] text-slate-500">
               {matchedClient
-                ? 'Cliente existente seleccionado.'
-                : 'Si es nuevo, se guardará automáticamente.'}
+                ? tr('Cliente existente seleccionado.', 'Existing client selected.', 'Cliente existente selecionado.')
+                : tr('Si es nuevo, se guardará automáticamente.', 'If new, it will be saved automatically.', 'Se for novo, será salvo automaticamente.')}
             </p>
           </div>
           <div className="sm:col-span-3">
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Comprobante
+              {tr('Comprobante', 'Receipt #', 'Comprovante')}
             </label>
             <input
               type="text"
@@ -1591,7 +1677,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           </div>
           <div className="sm:col-span-3">
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Fecha
+              {tr('Fecha', 'Date', 'Data')}
             </label>
             <input
               type="date"
@@ -1612,7 +1698,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   htmlFor="new-sale-currency-select"
                   className="text-xs font-bold text-slate-800 dark:text-slate-100"
                 >
-                  Divisa de la transacción
+                  {tr('Divisa de la transacción', 'Transaction currency', 'Moeda da transação')}
                 </label>
               </div>
               {isSecondaryCurrency && (
@@ -1647,7 +1733,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
               <div>
                 <div className="mb-1 flex items-center justify-between">
                   <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                    Descuento
+                    {tr('Descuento', 'Discount', 'Desconto')}
                   </label>
                   <button
                     type="button"
@@ -1673,7 +1759,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
               <div>
                 <div className="mb-1 flex items-center justify-between">
                   <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                    Recargo
+                    {tr('Recargo', 'Surcharge', 'Acréscimo')}
                   </label>
                   <button
                     type="button"
@@ -1699,14 +1785,14 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
 
             <div className="mt-2.5 space-y-1 border-t border-slate-100 pt-2 text-xs dark:border-slate-800">
               <div className="flex justify-between text-slate-500">
-                <span>Subtotal ítems</span>
+                <span>{tr('Subtotal ítems', 'Items subtotal', 'Subtotal itens')}</span>
                 <span className="font-mono-num">
                   {formatCurrency(subtotalDisplay, selectedCurrency)}
                 </span>
               </div>
               {discountAmountDisplay > 0 && (
                 <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
-                  <span>Descuento</span>
+                  <span>{tr('Descuento', 'Discount', 'Desconto')}</span>
                   <span className="font-mono-num">
                     -{formatCurrency(discountAmountDisplay, selectedCurrency)}
                   </span>
@@ -1714,21 +1800,21 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
               )}
               {surchargeAmountDisplay > 0 && (
                 <div className="flex justify-between text-amber-600 dark:text-amber-400">
-                  <span>Recargo</span>
+                  <span>{tr('Recargo', 'Surcharge', 'Acréscimo')}</span>
                   <span className="font-mono-num">
                     +{formatCurrency(surchargeAmountDisplay, selectedCurrency)}
                   </span>
                 </div>
               )}
               <div className="flex justify-between pt-0.5 text-sm font-extrabold text-slate-900 dark:text-white">
-                <span>Total final</span>
+                <span>{tr('Total final', 'Final total', 'Total final')}</span>
                 <span className="font-mono-num">
                   {formatCurrency(totalDisplay, selectedCurrency)}
                 </span>
               </div>
               {isSecondaryCurrency && totalDisplay > 0 && (
                 <div className="text-right font-mono-num text-[11px] text-slate-500">
-                  Equiv. {formatCurrency(baseEquivalentAmount, baseCurrency)}
+                  {tr('Equiv.', 'Equiv.', 'Equiv.')} {formatCurrency(baseEquivalentAmount, baseCurrency)}
                 </div>
               )}
             </div>
@@ -1737,20 +1823,20 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           <div className="space-y-2.5 rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
             <div>
               <label className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                Estado del cobro
+                {tr('Estado del cobro', 'Payment status', 'Status do pagamento')}
               </label>
               <select
                 value={status}
                 onChange={(e) => handleStatusChange(e.target.value as 'pendiente' | 'cobrado')}
                 className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               >
-                <option value="cobrado">Cobrado (total)</option>
-                <option value="pendiente">Pendiente / Con seña</option>
+                <option value="cobrado">{tr('Cobrado (total)', 'Paid (full)', 'Pago (total)')}</option>
+                <option value="pendiente">{tr('Pendiente / Con seña', 'Pending / Partial', 'Pendente / Com sinal')}</option>
               </select>
             </div>
             <div>
               <label className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                Importe abonado / Seña ({currencySymbol})
+                {tr(`Importe abonado / Seña (${currencySymbol})`, `Amount paid / Deposit (${currencySymbol})`, `Valor pago / Sinal (${currencySymbol})`)}
               </label>
               <input
                 type="number"
@@ -1762,7 +1848,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                 className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 font-mono-num text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
               <div className="mt-1 flex items-center justify-between text-[11px]">
-                <span className="text-slate-500">Saldo pendiente:</span>
+                <span className="text-slate-500">{tr('Saldo pendiente:', 'Balance due:', 'Saldo pendente:')}</span>
                 <span
                   className={`font-mono-num font-bold ${
                     pendingBalance > 0
@@ -1776,13 +1862,17 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
             </div>
             <div>
               <label className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                Nota interna / garantía (opcional)
+                {tr('Nota interna / garantía (opcional)', 'Internal note / warranty (optional)', 'Nota interna / garantia (opcional)')}
               </label>
               <input
                 type="text"
                 value={saleNote}
                 onChange={(e) => setSaleNote(e.target.value)}
-                placeholder="Ej: Garantía 30 días o detalle de entrega"
+                placeholder={tr(
+                  'Ej: Garantía 30 días o detalle de entrega',
+                  'E.g.: 30-day warranty or delivery note',
+                  'Ex.: Garantia de 30 dias ou detalhe da entrega'
+                )}
                 className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
@@ -1792,14 +1882,14 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         {/* Payment Method */}
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Método de pago
+            {tr('Método de pago', 'Payment method', 'Forma de pagamento')}
           </label>
           <div className="grid grid-cols-3 gap-2">
             {(
               [
-                { id: 'efectivo', label: 'Efectivo', icon: Banknote },
-                { id: 'tarjeta', label: 'Tarjeta', icon: CreditCard },
-                { id: 'transferencia', label: 'Transferencia', icon: Landmark },
+                { id: 'efectivo', label: tr('Efectivo', 'Cash', 'Dinheiro'), icon: Banknote },
+                { id: 'tarjeta', label: tr('Tarjeta', 'Card', 'Cartão'), icon: CreditCard },
+                { id: 'transferencia', label: tr('Transferencia', 'Transfer', 'Transferência'), icon: Landmark },
               ] as const
             ).map(({ id, label, icon: Icon }) => {
               const active = paymentMethod === id;
@@ -1842,14 +1932,18 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                 className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
               >
                 <Settings2 className="h-3 w-3" />
-                Configurar Point / Token
+                {tr('Configurar Point / Token', 'Configure Point / Token', 'Configurar Point / Token')}
               </button>
             </div>
 
             {!mpConfig.accessToken.trim() || !mpConfig.terminalId.trim() ? (
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-dashed border-sky-300 bg-white/80 p-3 text-xs text-slate-600 dark:border-sky-800 dark:bg-slate-900/70 dark:text-slate-300">
                 <span>
-                  Ingresá tu Access Token y el ID de tu dispositivo Point para enviar cobros directo a la terminal.
+                  {tr(
+                    'Ingresá tu Access Token y el ID de tu dispositivo Point para enviar cobros directo a la terminal.',
+                    'Enter your Access Token and Point device ID to send charges directly to the terminal.',
+                    'Informe seu Access Token e o ID do dispositivo Point para enviar cobranças direto para a maquininha.'
+                  )}
                 </span>
                 <button
                   type="button"
@@ -1857,14 +1951,14 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#0072BB] px-3 text-[11px] font-semibold text-white hover:bg-[#005f9c]"
                 >
                   <Settings2 className="h-3.5 w-3.5" />
-                  Configurar pagos
+                  {tr('Configurar pagos', 'Payment settings', 'Configurar pagamentos')}
                 </button>
               </div>
             ) : (
               <div className="space-y-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-300">
                   <span>
-                    Terminal conectada:{' '}
+                    {tr('Terminal conectada:', 'Connected terminal:', 'Terminal conectado:')}{' '}
                     <strong className="font-mono-num text-slate-900 dark:text-white">
                       {mpConfig.terminalId}
                     </strong>
@@ -1881,7 +1975,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                       ) : (
                         <Smartphone className="h-3.5 w-3.5" />
                       )}
-                      Enviar orden al Point
+                      {tr('Enviar orden al Point', 'Send order to Point', 'Enviar pedido ao Point')}
                     </button>
                   )}
                 </div>
@@ -1919,7 +2013,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                           className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                         >
                           <RefreshCw className="h-3 w-3" />
-                          Verificar estado
+                          {tr('Verificar estado', 'Check status', 'Verificar status')}
                         </button>
                         <button
                           type="button"
@@ -1928,7 +2022,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                           className="inline-flex h-8 items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 text-[11px] font-semibold text-red-600 hover:bg-red-50 dark:border-red-900/60 dark:bg-slate-900 dark:text-red-400"
                         >
                           <X className="h-3 w-3" />
-                          Cancelar en el Point
+                          {tr('Cancelar en el Point', 'Cancel on Point', 'Cancelar no Point')}
                         </button>
                       </div>
                     )}
@@ -1946,12 +2040,16 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                 <QrCode className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
                 <div>
                   <div className="font-bold text-slate-900 dark:text-white">
-                    QR Dinámico Mercado Pago · {formatCurrency(mpChargeAmount, baseCurrency)}
+                    {tr('QR Dinámico Mercado Pago', 'Dynamic Mercado Pago QR', 'QR Dinâmico Mercado Pago')} · {formatCurrency(mpChargeAmount, baseCurrency)}
                   </div>
                   <div className="text-[11px] text-slate-500 dark:text-slate-400">
                     {mpConfig.accessToken.trim() && mpConfig.posExternalId.trim()
-                      ? `Caja POS: ${mpConfig.posExternalId}`
-                      : 'Generá un QR oficial con el monto exacto automático'}
+                      ? `${tr('Caja POS:', 'POS Box:', 'Caixa POS:')} ${mpConfig.posExternalId}`
+                      : tr(
+                          'Generá un QR oficial con el monto exacto automático',
+                          'Generate an official QR with the exact automatic amount',
+                          'Gere um QR oficial com o valor exato automático'
+                        )}
                   </div>
                 </div>
               </div>
@@ -1963,7 +2061,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                 >
                   <Settings2 className="h-3 w-3" />
-                  Configurar MP
+                  {tr('Configurar MP', 'Configure MP', 'Configurar MP')}
                 </button>
                 {mpConfig.accessToken.trim() && mpConfig.posExternalId.trim() && (
                   <button
@@ -1977,7 +2075,9 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                     ) : (
                       <QrCode className="h-3.5 w-3.5" />
                     )}
-                    {mpOrder?.mode === 'qr' ? 'Regenerar QR MP' : 'Generar QR MP'}
+                    {mpOrder?.mode === 'qr'
+                      ? tr('Regenerar QR MP', 'Regenerate MP QR', 'Gerar novo QR MP')
+                      : tr('Generar QR MP', 'Generate MP QR', 'Gerar QR MP')}
                   </button>
                 )}
               </div>
@@ -1996,7 +2096,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                 {mpOrder.qrImageDataUrl && (
                   <img
                     src={mpOrder.qrImageDataUrl}
-                    alt="QR dinámico Mercado Pago"
+                    alt={tr('QR dinámico Mercado Pago', 'Dynamic Mercado Pago QR', 'QR dinâmico Mercado Pago')}
                     className="h-28 w-28 shrink-0 rounded-xl border border-slate-200 bg-white p-1.5"
                   />
                 )}
@@ -2021,7 +2121,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                         className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                       >
                         <RefreshCw className="h-3 w-3" />
-                        Verificar pago
+                        {tr('Verificar pago', 'Verify payment', 'Verificar pagamento')}
                       </button>
                       <button
                         type="button"
@@ -2030,7 +2130,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                         className="inline-flex h-8 items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 text-[11px] font-semibold text-red-600 hover:bg-red-50 dark:border-red-900/60 dark:bg-slate-900 dark:text-red-400"
                       >
                         <X className="h-3 w-3" />
-                        Cancelar QR
+                        {tr('Cancelar QR', 'Cancel QR', 'Cancelar QR')}
                       </button>
                     </div>
                   )}
@@ -2042,14 +2142,14 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
               {transferQrDataUrl && (
                 <img
                   src={transferQrDataUrl}
-                  alt="QR de transferencia"
+                  alt={tr('QR de transferencia', 'Transfer QR', 'QR de transferência')}
                   className="h-20 w-20 shrink-0 rounded-xl border border-slate-200 bg-white object-contain p-1"
                 />
               )}
               <div className="min-w-0 flex-1 space-y-1.5 text-xs">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-bold text-slate-900 dark:text-white">
-                    Datos de transferencia · {formatCurrency(qrChargeAmount, selectedCurrency)}
+                    {tr('Datos de transferencia', 'Transfer details', 'Dados de transferência')} · {formatCurrency(qrChargeAmount, selectedCurrency)}
                   </span>
                   <button
                     type="button"
@@ -2057,7 +2157,9 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                     className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
                   >
                     <Settings2 className="h-3 w-3" />
-                    {editingTransferCfg ? 'Ocultar edición' : 'Editar Alias / CBU / QR'}
+                    {editingTransferCfg
+                      ? tr('Ocultar edición', 'Hide editor', 'Ocultar edição')
+                      : tr('Editar Alias / CBU / QR', 'Edit Alias / Bank / QR', 'Editar Chave / Conta / QR')}
                   </button>
                 </div>
 
@@ -2072,7 +2174,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                       className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
                     >
                       <Copy className="h-3 w-3" />
-                      Copiar
+                      {tr('Copiar', 'Copy', 'Copiar')}
                     </button>
                   </div>
                 )}
@@ -2088,20 +2190,24 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                       className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
                     >
                       <Copy className="h-3 w-3" />
-                      Copiar
+                      {tr('Copiar', 'Copy', 'Copiar')}
                     </button>
                   </div>
                 )}
 
                 {transferCfg.holder.trim() && (
                   <div className="text-[11px] text-slate-600 dark:text-slate-300">
-                    Titular: <strong>{transferCfg.holder}</strong>
+                    {tr('Titular:', 'Account holder:', 'Titular:')} <strong>{transferCfg.holder}</strong>
                   </div>
                 )}
 
                 {!hasTransferData && !editingTransferCfg && (
                   <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Cargá tu Alias o CBU/CVU para que aparezca en la boleta impresa.
+                    {tr(
+                      'Cargá tu Alias o CBU/CVU para que aparezca en la boleta impresa.',
+                      'Add your alias or bank details to display on the printed receipt.',
+                      'Adicione sua chave ou dados bancários para aparecer no comprovante impresso.'
+                    )}
                   </div>
                 )}
               </div>
@@ -2112,7 +2218,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                 <div className="grid gap-2 sm:grid-cols-2">
                   <div>
                     <label className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                      Alias
+                      {tr('Alias', 'Alias / Pix', 'Apelido / Pix')}
                     </label>
                     <input
                       type="text"
@@ -2134,13 +2240,13 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                       onChange={(e) =>
                         setTransferCfg((prev) => ({ ...prev, cbu: e.target.value }))
                       }
-                      placeholder="22 dígitos"
+                      placeholder={tr('22 dígitos', '22 digits', '22 dígitos')}
                       className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 font-mono-num text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     />
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                      Titular (opcional)
+                      {tr('Titular (opcional)', 'Account holder (optional)', 'Titular (opcional)')}
                     </label>
                     <input
                       type="text"
@@ -2148,13 +2254,13 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                       onChange={(e) =>
                         setTransferCfg((prev) => ({ ...prev, holder: e.target.value }))
                       }
-                      placeholder="Nombre o razón social"
+                      placeholder={tr('Nombre o razón social', 'Name or business', 'Nome ou razão social')}
                       className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     />
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                      Link de pago MP (opcional)
+                      {tr('Link de pago MP (opcional)', 'MP payment link (optional)', 'Link de pagamento MP (opcional)')}
                     </label>
                     <input
                       type="url"
@@ -2172,7 +2278,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   <div className="flex items-center gap-2">
                     <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
                       <Upload className="h-3.5 w-3.5" />
-                      Subir QR (MP / Banco)
+                      {tr('Subir QR (MP / Banco)', 'Upload QR (MP / Bank)', 'Enviar QR (MP / Banco)')}
                       <input
                         type="file"
                         accept="image/png,image/jpeg,image/webp"
@@ -2190,7 +2296,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                         }}
                         className="text-[11px] font-semibold text-red-600 hover:underline dark:text-red-400"
                       >
-                        Quitar QR
+                        {tr('Quitar QR', 'Remove QR', 'Remover QR')}
                       </button>
                     )}
                   </div>
@@ -2200,7 +2306,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                     onClick={handleSaveTransferCfg}
                     className="h-8 rounded-lg bg-[#0072BB] px-3 text-[11px] font-semibold text-white hover:bg-[#005f9c]"
                   >
-                    Guardar datos
+                    {tr('Guardar datos', 'Save details', 'Salvar dados')}
                   </button>
                 </div>
               </div>
@@ -2214,14 +2320,18 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
             onClick={onClose}
             className="h-11 flex-1 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300"
           >
-            Cancelar
+            {tr('Cancelar', 'Cancel', 'Cancelar')}
           </button>
           <button
             type="submit"
             disabled={saving}
             className="h-11 flex-1 rounded-xl border border-[#0072BB] px-3 text-sm font-semibold text-[#0072BB] hover:bg-sky-50 dark:border-sky-500 dark:text-sky-400 dark:hover:bg-sky-950/40"
           >
-            {saving ? 'Guardando...' : editSale ? 'Guardar cambios' : 'Guardar'}
+            {saving
+              ? tr('Guardando...', 'Saving...', 'Salvando...')
+              : editSale
+                ? tr('Guardar cambios', 'Save changes', 'Salvar alterações')
+                : tr('Guardar', 'Save', 'Salvar')}
           </button>
           <button
             type="button"
@@ -2230,7 +2340,11 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
             className="inline-flex h-11 flex-[1.3] items-center justify-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-sm font-semibold text-white hover:bg-[#005f9c]"
           >
             <Printer className="h-4 w-4 shrink-0" />
-            <span>{saving ? 'Guardando...' : editSale ? 'Guardar e imprimir' : 'Guardar e imprimir'}</span>
+            <span>
+              {saving
+                ? tr('Guardando...', 'Saving...', 'Salvando...')
+                : tr('Guardar e imprimir', 'Save & print', 'Salvar e imprimir')}
+            </span>
           </button>
         </div>
       </form>

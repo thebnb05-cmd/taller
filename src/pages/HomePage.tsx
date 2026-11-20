@@ -200,7 +200,14 @@ export const HomePage: React.FC<HomePageProps> = ({
     const lowStockCount = products.filter((p) => p.trackStock && p.stock <= p.minStock).length;
 
     // Weekly breakdown (Lun - Sáb) based on repair createdAt
-    const dayLabels = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+    const dayLabels = [
+      tr('Lun', 'Mon', 'Seg'),
+      tr('Mar', 'Tue', 'Ter'),
+      tr('Mié', 'Wed', 'Qua'),
+      tr('Jue', 'Thu', 'Qui'),
+      tr('Vie', 'Fri', 'Sex'),
+      tr('Sáb', 'Sat', 'Sáb'),
+    ];
     const dayCounts = [0, 0, 0, 0, 0, 0];
     repairs.forEach((r) => {
       const d = new Date(r.createdAt || Date.now());
@@ -781,7 +788,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                     <button
                       type="button"
                       onClick={() => onNavigate('reports')}
-                      aria-label="Ir a Reportes"
+                      aria-label={tr('Ir a Reportes', 'Go to Reports', 'Ir para Relatórios')}
                       className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 transition hover:bg-emerald-600 hover:text-white dark:bg-emerald-950/60 dark:text-emerald-400 dark:hover:bg-emerald-500 dark:hover:text-white"
                     >
                       <Scale className="h-4 w-4" />
@@ -794,29 +801,36 @@ export const HomePage: React.FC<HomePageProps> = ({
                   {selectedBalanceBar === 'income' ? (
                     <>
                       <span className="font-semibold text-emerald-700 dark:text-emerald-300">
-                        Rep: {formatCompactCurrency(repairPart)}
+                        {tr('Rep:', 'Rep:', 'Rep:')} {formatCompactCurrency(repairPart)}
                       </span>
                       <span className="font-semibold text-[#0072BB] dark:text-sky-300">
-                        Ventas: {formatCompactCurrency(salesPart)}
+                        {tr('Ventas:', 'Sales:', 'Vendas:')} {formatCompactCurrency(salesPart)}
                       </span>
                     </>
                   ) : selectedBalanceBar === 'expense' ? (
                     <>
                       <span className="font-semibold text-rose-700 dark:text-rose-300">
-                        Gastos en compras
+                        {tr('Gastos en compras', 'Purchase expenses', 'Gastos em compras')}
                       </span>
                       <span className="font-mono-num font-bold text-rose-700 dark:text-rose-300">
-                        {purchasesCount} {purchasesCount === 1 ? 'compra' : 'compras'} ·{' '}
-                        {formatCurrency(expenseVal)}
+                        {purchasesCount}{' '}
+                        {purchasesCount === 1
+                          ? tr('compra', 'purchase', 'compra')
+                          : tr('compras', 'purchases', 'compras')}{' '}
+                        · {formatCurrency(expenseVal)}
                       </span>
                     </>
                   ) : (
                     <>
                       <span className="text-slate-500 dark:text-slate-400">
-                        Tocá una barra para desglosar
+                        {tr(
+                          'Tocá una barra para desglosar',
+                          'Tap a bar for breakdown',
+                          'Toque em uma barra para detalhar'
+                        )}
                       </span>
                       <span className="font-mono-num font-bold text-slate-700 dark:text-slate-200">
-                        Ing. vs. Gas.
+                        {tr('Ing. vs. Gas.', 'Inc. vs. Exp.', 'Rec. vs. Desp.')}
                       </span>
                     </>
                   )}
@@ -839,7 +853,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   >
                     <div className="mb-1.5 flex items-center justify-between text-xs">
                       <span className="font-semibold text-slate-700 dark:text-slate-200">
-                        Ingresos
+                        {tr('Ingresos', 'Income', 'Receitas')}
                       </span>
                       <span className="font-mono-num font-bold text-emerald-600 dark:text-emerald-400">
                         {formatCurrency(incomeVal)}
@@ -868,7 +882,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   >
                     <div className="mb-1.5 flex items-center justify-between text-xs">
                       <span className="font-semibold text-slate-700 dark:text-slate-200">
-                        Gastos (compras)
+                        {tr('Gastos (compras)', 'Expenses (purchases)', 'Despesas (compras)')}
                       </span>
                       <span className="font-mono-num font-bold text-rose-600 dark:text-rose-400">
                         {formatCurrency(expenseVal)}
@@ -886,14 +900,18 @@ export const HomePage: React.FC<HomePageProps> = ({
 
               <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs dark:border-slate-800">
                 <span className="text-slate-500 dark:text-slate-400">
-                  Ingresos vs. compras registradas
+                  {tr(
+                    'Ingresos vs. compras registradas',
+                    'Income vs. recorded purchases',
+                    'Receitas vs. compras registradas'
+                  )}
                 </span>
                 <button
                   type="button"
                   onClick={() => onNavigate('reports')}
                   className="inline-flex items-center gap-1 font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
                 >
-                  Ver reportes <ArrowRight className="h-3.5 w-3.5" />
+                  {tr('Ver reportes', 'View reports', 'Ver relatórios')} <ArrowRight className="h-3.5 w-3.5" />
                 </button>
               </div>
             </div>
@@ -905,13 +923,17 @@ export const HomePage: React.FC<HomePageProps> = ({
         <div className="rounded-2xl border border-slate-200 bg-white p-5 lg:col-span-2 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <div className="text-xs font-medium text-slate-500 dark:text-slate-400">Operación</div>
+              <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                {tr('Operación', 'Operations', 'Operação')}
+              </div>
               <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display">
-                Panel del taller
+                {tr('Panel del taller', 'Workshop overview', 'Painel da oficina')}
               </h2>
             </div>
             <div className="text-right">
-              <div className="text-xs text-slate-500 dark:text-slate-400">Facturación estimada</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                {tr('Facturación estimada', 'Estimated revenue', 'Faturamento estimado')}
+              </div>
               <div className="font-mono-num text-xl font-extrabold text-slate-900 dark:text-white">
                 {formatCompactCurrency(stats.totalRevenue)}
               </div>
@@ -920,13 +942,17 @@ export const HomePage: React.FC<HomePageProps> = ({
 
           <div className="mt-5 grid grid-cols-2 gap-4 border-y border-slate-100 py-4 dark:border-slate-800">
             <div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">Tasa de cierre</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                {tr('Tasa de cierre', 'Completion rate', 'Taxa de conclusão')}
+              </div>
               <div className="mt-0.5 font-mono-num text-2xl font-bold text-slate-900 dark:text-white">
                 {stats.closureRate}%
               </div>
             </div>
             <div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">Total órdenes</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                {tr('Total órdenes', 'Total orders', 'Total de ordens')}
+              </div>
               <div className="mt-0.5 font-mono-num text-2xl font-bold text-slate-900 dark:text-white">
                 {repairs.length}
               </div>
@@ -936,17 +962,17 @@ export const HomePage: React.FC<HomePageProps> = ({
           <div className="mt-4 space-y-3">
             {[
               {
-                label: 'Activas en taller',
+                label: tr('Activas en taller', 'Active in workshop', 'Ativas na oficina'),
                 count: stats.activeCount,
                 color: 'bg-[#0072BB] dark:bg-sky-500',
               },
               {
-                label: 'Listas para entregar',
+                label: tr('Listas para entregar', 'Ready for pickup', 'Prontas para entrega'),
                 count: stats.readyCount,
                 color: 'bg-emerald-600',
               },
               {
-                label: 'Entregadas',
+                label: tr('Entregadas', 'Delivered', 'Entregues'),
                 count: stats.deliveredCount,
                 color: 'bg-slate-500',
               },
@@ -976,9 +1002,11 @@ export const HomePage: React.FC<HomePageProps> = ({
         <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-sm font-bold text-slate-900 dark:text-white font-display">
-              Flujo semanal
+              {tr('Flujo semanal', 'Weekly flow', 'Fluxo semanal')}
             </h2>
-            <span className="text-xs text-slate-500 dark:text-slate-400">Ingresos</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              {tr('Ingresos', 'Intake', 'Entradas')}
+            </span>
           </div>
           <div className="flex h-40 items-end justify-between gap-2 pt-4">
             {stats.dayLabels.map((label, idx) => {
@@ -1014,14 +1042,25 @@ export const HomePage: React.FC<HomePageProps> = ({
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-base font-bold text-slate-900 dark:text-white font-display">
-              Reparaciones recibidas (últimos 7 días)
+              {tr(
+                'Reparaciones recibidas (últimos 7 días)',
+                'Received repairs (last 7 days)',
+                'Reparos recebidos (últimos 7 dias)'
+              )}
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Evolución diaria de ingresos al taller
+              {tr(
+                'Evolución diaria de ingresos al taller',
+                'Daily workshop intake trend',
+                'Evolução diária de entradas na oficina'
+              )}
             </p>
           </div>
           <div className="rounded-xl bg-sky-50 px-3 py-1.5 font-mono-num text-xs font-bold text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300">
-            {stats.last7DaysTotal} {stats.last7DaysTotal === 1 ? 'equipo' : 'equipos'}
+            {stats.last7DaysTotal}{' '}
+            {stats.last7DaysTotal === 1
+              ? tr('equipo', 'device', 'aparelho')
+              : tr('equipos', 'devices', 'aparelhos')}
           </div>
         </div>
 
@@ -1059,7 +1098,10 @@ export const HomePage: React.FC<HomePageProps> = ({
                         {point.fullDate}
                       </div>
                       <div className="mt-0.5 font-mono-num font-bold text-[#0072BB] dark:text-sky-400">
-                        {point.count} {point.count === 1 ? 'reparación' : 'reparaciones'}
+                        {point.count}{' '}
+                        {point.count === 1
+                          ? tr('reparación', 'repair', 'reparo')
+                          : tr('reparaciones', 'repairs', 'reparos')}
                       </div>
                     </div>
                   );
@@ -1068,7 +1110,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               <Line
                 type="monotone"
                 dataKey="count"
-                name="Recibidas"
+                name={tr('Recibidas', 'Received', 'Recebidas')}
                 stroke="#0072BB"
                 strokeWidth={2.5}
                 dot={{ r: 4, fill: '#0072BB', stroke: '#ffffff', strokeWidth: 2 }}
@@ -1083,21 +1125,25 @@ export const HomePage: React.FC<HomePageProps> = ({
         <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-base font-bold text-slate-900 dark:text-white font-display">
-              Reparaciones activas
+              {tr('Reparaciones activas', 'Active repairs', 'Reparos ativos')}
             </h2>
             <button
               type="button"
               onClick={() => onNavigate('repairs')}
               className="inline-flex items-center gap-1 text-xs font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
             >
-              Ver todas <ArrowRight className="h-3.5 w-3.5" />
+              {tr('Ver todas', 'View all', 'Ver todos')} <ArrowRight className="h-3.5 w-3.5" />
             </button>
           </div>
 
           {stats.activeList.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center dark:border-slate-800">
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                No hay reparaciones activas en este momento.
+                {tr(
+                  'No hay reparaciones activas en este momento.',
+                  'No active repairs at the moment.',
+                  'Não há reparos ativos no momento.'
+                )}
               </p>
               <button
                 type="button"
@@ -1105,7 +1151,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                 className="mt-3 inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0072BB] px-3.5 text-xs font-semibold text-white hover:bg-[#005f9c]"
               >
                 <Plus className="h-3.5 w-3.5" />
-                Ingresar primer equipo
+                {tr('Ingresar primer equipo', 'Check in first device', 'Registrar primeiro aparelho')}
               </button>
             </div>
           ) : (
@@ -1146,14 +1192,14 @@ export const HomePage: React.FC<HomePageProps> = ({
         <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-base font-bold text-slate-900 dark:text-white font-display">
-              Clientes recientes y actividad
+              {tr('Clientes recientes y actividad', 'Recent clients & activity', 'Clientes recentes e atividade')}
             </h2>
             <button
               type="button"
               onClick={() => onNavigate('clients')}
               className="inline-flex items-center gap-1 text-xs font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
             >
-              Ver todos <ArrowRight className="h-3.5 w-3.5" />
+              {tr('Ver todos', 'View all', 'Ver todos')} <ArrowRight className="h-3.5 w-3.5" />
             </button>
           </div>
 
@@ -1161,7 +1207,11 @@ export const HomePage: React.FC<HomePageProps> = ({
             <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center dark:border-slate-800">
               <Users className="mx-auto h-6 w-6 text-slate-400" />
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                Los clientes y movimientos aparecerán acá.
+                {tr(
+                  'Los clientes y movimientos aparecerán acá.',
+                  'Clients and recent movements will appear here.',
+                  'Os clientes e movimentações aparecerão aqui.'
+                )}
               </p>
             </div>
           ) : (
@@ -1182,11 +1232,13 @@ export const HomePage: React.FC<HomePageProps> = ({
                         {c.name}
                       </div>
                       <div className="truncate text-xs text-slate-500 dark:text-slate-400">
-                        {c.phone || c.email || 'Sin contacto'}
+                        {c.phone || c.email || tr('Sin contacto', 'No contact', 'Sem contato')}
                       </div>
                     </div>
                   </div>
-                  <span className="shrink-0 text-xs text-slate-400">Ver ficha</span>
+                  <span className="shrink-0 text-xs text-slate-400">
+                    {tr('Ver ficha', 'View profile', 'Ver ficha')}
+                  </span>
                 </button>
               ))}
             </div>

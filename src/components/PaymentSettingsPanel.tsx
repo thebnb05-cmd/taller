@@ -27,6 +27,7 @@ import {
 import type { WorkshopProfile } from '../types/workshop';
 import { ModalShell } from './ModalShell';
 import { useToast } from './ToastProvider';
+import { useI18n } from '../utils/i18n';
 
 interface PaymentSettingsPanelProps {
   ownerId: string;
@@ -42,6 +43,7 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
   compact = false,
 }) => {
   const { notify } = useToast();
+  const { tr } = useI18n();
   const [config, setConfig] = useState<MercadoPagoConfig>(() => loadMercadoPagoConfig(ownerId));
   const [showToken, setShowToken] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -199,17 +201,25 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h4 className="text-xs font-bold text-slate-900 dark:text-white">
-                Configuración de pagos · Mercado Pago (Point y QR)
+                {tr(
+                  'Configuración de pagos · Mercado Pago (Point y QR)',
+                  'Payment settings · Mercado Pago (Point & QR)',
+                  'Configuração de pagamentos · Mercado Pago (Point e QR)'
+                )}
               </h4>
               {isConfigured && (
                 <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300">
                   <CheckCircle2 className="h-3 w-3" />
-                  Configurado
+                  {tr('Configurado', 'Configured', 'Configurado')}
                 </span>
               )}
             </div>
             <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-              Conectá tu Access Token de producción/prueba y tu ID de dispositivo Point o Caja POS para cobrar directo desde Nueva venta.
+              {tr(
+                'Conectá tu Access Token de producción/prueba y tu ID de dispositivo Point o Caja POS para cobrar directo desde Nueva venta.',
+                'Connect your production/test Access Token and Point or POS terminal ID to charge directly from New sale.',
+                'Conecte seu Access Token de produção/teste e o ID do dispositivo Point ou Caixa POS para cobrar direto em Nova venda.'
+              )}
             </p>
           </div>
         </div>
@@ -221,7 +231,7 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
             className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
           >
             <Trash2 className="h-3 w-3" />
-            Limpiar
+            {tr('Limpiar', 'Clear', 'Limpar')}
           </button>
         )}
       </div>
@@ -231,7 +241,7 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
           htmlFor="mp-access-token"
           className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300"
         >
-          Access Token de Mercado Pago
+          {tr('Access Token de Mercado Pago', 'Mercado Pago Access Token', 'Access Token do Mercado Pago')}
         </label>
         <div className="relative">
           <input
@@ -261,7 +271,7 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
             className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300"
           >
             <Smartphone className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
-            <span>ID dispositivo físico (Point)</span>
+            <span>{tr('ID dispositivo físico (Point)', 'Physical terminal ID (Point)', 'ID do dispositivo físico (Point)')}</span>
           </label>
           <input
             id="mp-terminal-id"
@@ -279,7 +289,7 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
             className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300"
           >
             <QrCode className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
-            <span>ID punto de venta / Caja (QR)</span>
+            <span>{tr('ID punto de venta / Caja (QR)', 'POS / Cash Register ID (QR)', 'ID ponto de venda / Caixa (QR)')}</span>
           </label>
           <input
             id="mp-pos-id"
@@ -301,7 +311,13 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
           }
           className="h-4 w-4 rounded accent-[#0072BB]"
         />
-        <span>Imprimir comprobante físico en la terminal Point Smart al aprobar</span>
+        <span>
+          {tr(
+            'Imprimir comprobante físico en la terminal Point Smart al aprobar',
+            'Print physical receipt on Point Smart terminal upon approval',
+            'Imprimir comprovante físico na maquininha Point Smart ao aprovar'
+          )}
+        </span>
       </label>
 
       {connectionMessage && (
@@ -391,7 +407,11 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
           ) : (
             <RefreshCw className="h-3.5 w-3.5" />
           )}
-          Probar y detectar dispositivos
+          {tr(
+            'Probar y detectar dispositivos',
+            'Test & detect devices',
+            'Testar e detectar dispositivos'
+          )}
         </button>
 
         <button
@@ -401,7 +421,9 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
           className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0072BB] px-3.5 text-xs font-semibold text-white transition hover:bg-[#005f9c] disabled:opacity-60"
         >
           <Save className="h-3.5 w-3.5" />
-          {savingConfig ? 'Guardando...' : 'Guardar pagos'}
+          {savingConfig
+            ? tr('Guardando...', 'Saving...', 'Salvando...')
+            : tr('Guardar pagos', 'Save payments', 'Salvar pagamentos')}
         </button>
       </div>
     </div>
@@ -423,8 +445,18 @@ export const PaymentSettingsModal: React.FC<PaymentSettingsModalProps> = ({
   profile,
   onSaved,
 }) => {
+  const { tr } = useI18n();
   return (
-    <ModalShell open={open} onClose={onClose} title="Configuración de pagos · Mercado Pago" maxWidth="lg">
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      title={tr(
+        'Configuración de pagos · Mercado Pago',
+        'Payment settings · Mercado Pago',
+        'Configuração de pagamentos · Mercado Pago'
+      )}
+      maxWidth="lg"
+    >
       <div className="space-y-4">
         <PaymentSettingsPanel
           ownerId={ownerId}

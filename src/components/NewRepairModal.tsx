@@ -78,6 +78,7 @@ import {
   sanitizePlainLine,
   sanitizeText,
 } from '../utils/validation';
+import { useI18n } from '../utils/i18n';
 import { ModalShell } from './ModalShell';
 import { PatternLock } from './PatternLock';
 import { useToast } from './ToastProvider';
@@ -391,6 +392,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   warrantyFromRepair,
 }) => {
   const { notify } = useToast();
+  const { tr } = useI18n();
   const activeCurrency = useActiveCurrency();
   const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
   const baseCurrency: CurrencyCode = profile ? workshopMeta.currency : activeCurrency;
@@ -1109,12 +1111,15 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
           <div className="flex items-center gap-2">
             <Layers className="h-4 w-4 text-emerald-700 dark:text-emerald-300" />
             <span className="text-xs font-bold text-emerald-950 dark:text-emerald-200">
-              Lote para {clientName.trim() || 'este cliente'} · {queuedItems.length}{' '}
-              {queuedItems.length === 1 ? 'equipo agregado' : 'equipos agregados'}
+              {tr(
+                `Lote para ${clientName.trim() || 'este cliente'} · ${queuedItems.length} ${queuedItems.length === 1 ? 'equipo agregado' : 'equipos agregados'}`,
+                `Batch for ${clientName.trim() || 'this client'} · ${queuedItems.length} ${queuedItems.length === 1 ? 'device added' : 'devices added'}`,
+                `Lote para ${clientName.trim() || 'este cliente'} · ${queuedItems.length} ${queuedItems.length === 1 ? 'aparelho adicionado' : 'aparelhos adicionados'}`
+              )}
             </span>
           </div>
           <span className="font-mono-num text-xs font-bold text-emerald-800 dark:text-emerald-300">
-            Subtotal lote: {formatCurrency(queuedTotalBudget, baseCurrency)}
+            {tr('Subtotal lote:', 'Batch subtotal:', 'Subtotal do lote:')} {formatCurrency(queuedTotalBudget, baseCurrency)}
           </span>
         </div>
         <div className="mt-2 space-y-1.5">
@@ -1145,7 +1150,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                 <button
                   type="button"
                   onClick={() => handleRemoveQueuedItem(item.id)}
-                  title="Quitar equipo del lote"
+                  title={tr('Quitar equipo del lote', 'Remove device from batch', 'Remover aparelho do lote')}
                   className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -1164,19 +1169,39 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
       onClose={onClose}
       title={
         warrantyFromRepair
-          ? `Reingreso por garantía (${warrantyFromRepair.code})`
+          ? tr(
+              `Reingreso por garantía (${warrantyFromRepair.code})`,
+              `Warranty re-entry (${warrantyFromRepair.code})`,
+              `Reingresso por garantia (${warrantyFromRepair.code})`
+            )
           : queuedItems.length > 0
-            ? `Nueva reparación · Lote (${queuedItems.length + (step === 'details' ? 1 : 0)} equipos)`
-            : 'Nueva reparación'
+            ? tr(
+                `Nueva reparación · Lote (${queuedItems.length + (step === 'details' ? 1 : 0)} equipos)`,
+                `New repair · Batch (${queuedItems.length + (step === 'details' ? 1 : 0)} devices)`,
+                `Novo reparo · Lote (${queuedItems.length + (step === 'details' ? 1 : 0)} aparelhos)`
+              )
+            : tr('Nueva reparación', 'New repair', 'Novo reparo')
       }
       subtitle={
         warrantyFromRepair
-          ? `Equipo vinculado a la orden ${warrantyFromRepair.code}`
+          ? tr(
+              `Equipo vinculado a la orden ${warrantyFromRepair.code}`,
+              `Device linked to order ${warrantyFromRepair.code}`,
+              `Aparelho vinculado à ordem ${warrantyFromRepair.code}`
+            )
           : step === 'device'
             ? queuedItems.length > 0
-              ? `Paso 1 de 2 · Elegí el próximo equipo para ${clientName.trim() || 'el mismo cliente'}`
-              : 'Paso 1 de 2 · Seleccioná el tipo de equipo'
-            : `Paso 2 de 2 · ${deviceIcon} ${deviceType}`
+              ? tr(
+                  `Paso 1 de 2 · Elegí el próximo equipo para ${clientName.trim() || 'el mismo cliente'}`,
+                  `Step 1 of 2 · Choose next device for ${clientName.trim() || 'the same client'}`,
+                  `Etapa 1 de 2 · Escolha o próximo aparelho para ${clientName.trim() || 'o mesmo cliente'}`
+                )
+              : tr(
+                  'Paso 1 de 2 · Seleccioná el tipo de equipo',
+                  'Step 1 of 2 · Select device type',
+                  'Etapa 1 de 2 · Selecione o tipo de aparelho'
+                )
+            : tr(`Paso 2 de 2 · ${deviceIcon} ${deviceType}`, `Step 2 of 2 · ${deviceIcon} ${deviceType}`, `Etapa 2 de 2 · ${deviceIcon} ${deviceType}`)
       }
       maxWidth="3xl"
     >
@@ -1187,8 +1212,12 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
           <div>
             <p className="mb-3 text-sm font-semibold text-slate-800 dark:text-slate-200">
               {queuedItems.length > 0
-                ? `¿Qué otro equipo querés agregar para ${clientName.trim() || 'este cliente'}?`
-                : '¿Qué equipo querés arreglar?'}
+                ? tr(
+                    `¿Qué otro equipo querés agregar para ${clientName.trim() || 'este cliente'}?`,
+                    `What other device do you want to add for ${clientName.trim() || 'this client'}?`,
+                    `Qual outro aparelho deseja adicionar para ${clientName.trim() || 'este cliente'}?`
+                  )
+                : tr('¿Qué equipo querés arreglar?', 'What device are you repairing?', 'Qual aparelho deseja consertar?')}
             </p>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               {DEVICE_OPTIONS.map((opt) => {
@@ -1246,7 +1275,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               onClick={onClose}
               className="h-11 rounded-xl border border-slate-200 px-5 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             >
-              Cancelar
+              {tr('Cancelar', 'Cancel', 'Cancelar')}
             </button>
             {queuedItems.length > 0 && (
               <button
@@ -1257,8 +1286,12 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               >
                 <Layers className="h-4 w-4" />
                 {saving
-                  ? 'Guardando...'
-                  : `Finalizar y emitir boleta (${queuedItems.length})`}
+                  ? tr('Guardando...', 'Saving...', 'Salvando...')
+                  : tr(
+                      `Finalizar y emitir boleta (${queuedItems.length})`,
+                      `Finish & issue receipt (${queuedItems.length})`,
+                      `Finalizar e emitir comprovante (${queuedItems.length})`
+                    )}
               </button>
             )}
             <button
@@ -1267,7 +1300,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               onClick={() => setStep('details')}
               className="h-11 rounded-xl bg-[#0072BB] px-6 text-sm font-semibold text-white transition hover:bg-[#005f9c] disabled:cursor-not-allowed disabled:opacity-45"
             >
-              Continuar
+              {tr('Continuar', 'Continue', 'Continuar')}
             </button>
           </div>
         </div>
@@ -1281,8 +1314,12 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               <div>
                 <div className="text-xs text-slate-500 dark:text-slate-400">
                   {queuedItems.length > 0
-                    ? `Equipo #${queuedItems.length + 1} del lote`
-                    : 'Equipo seleccionado'}
+                    ? tr(
+                        `Equipo #${queuedItems.length + 1} del lote`,
+                        `Device #${queuedItems.length + 1} in batch`,
+                        `Aparelho #${queuedItems.length + 1} do lote`
+                      )
+                    : tr('Equipo seleccionado', 'Selected device', 'Aparelho selecionado')}
                 </div>
                 <div className="text-sm font-bold text-slate-900 dark:text-white">{deviceType}</div>
               </div>
@@ -1294,7 +1331,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                 className="inline-flex items-center gap-1 rounded-lg border border-[#0072BB]/30 bg-white px-3 py-1.5 text-xs font-semibold text-[#0072BB] hover:bg-sky-100 dark:border-sky-700/60 dark:bg-slate-900 dark:text-sky-300 dark:hover:bg-sky-900/40"
               >
                 <Plus className="h-3.5 w-3.5" />
-                Sumar otro equipo
+                {tr('Sumar otro equipo', 'Add another device', 'Adicionar outro aparelho')}
               </button>
               <button
                 type="button"
@@ -1302,7 +1339,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                 className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-[#0072BB] hover:bg-sky-100 dark:text-sky-300 dark:hover:bg-sky-900/40"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
-                Cambiar tipo
+                {tr('Cambiar tipo', 'Change type', 'Trocar tipo')}
               </button>
             </div>
           </div>
@@ -1310,7 +1347,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
           <section className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white font-display">
-                Datos del cliente
+                {tr('Datos del cliente', 'Client details', 'Dados do cliente')}
               </h3>
               {clients.length > 0 && (
                 <div className="flex items-center gap-2">
@@ -1320,7 +1357,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                     onChange={(e) => handleSelectExistingClient(e.target.value)}
                     className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                   >
-                    <option value="">Cliente nuevo / elegir existente...</option>
+                    <option value="">
+                      {tr('Cliente nuevo / elegir existente...', 'New client / pick existing...', 'Cliente novo / escolher existente...')}
+                    </option>
                     {clients.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name} {c.phone ? `(${c.phone})` : ''}
@@ -1334,11 +1373,16 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Tipo de cliente
+                  {tr('Tipo de cliente', 'Client type', 'Tipo de cliente')}
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   {(['particular', 'empresa', 'gremio'] as const).map((type) => {
                     const active = clientType === type;
+                    const labelMap = {
+                      particular: tr('Particular', 'Individual', 'Particular'),
+                      empresa: tr('Empresa', 'Business', 'Empresa'),
+                      gremio: tr('Gremio / Revendedor', 'Trade / Reseller', 'Lojista / Revendedor'),
+                    };
                     return (
                       <button
                         key={type}
@@ -1350,7 +1394,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                             : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
                         }`}
                       >
-                        {CLIENT_TYPE_LABELS[type]}
+                        {labelMap[type] || CLIENT_TYPE_LABELS[type]}
                       </button>
                     );
                   })}
@@ -1358,7 +1402,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               </div>
               <div className="sm:col-span-2">
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  {clientType === 'empresa' ? 'Nombre / Razón social *' : 'Nombre completo *'}
+                  {clientType === 'empresa'
+                    ? tr('Nombre / Razón social *', 'Company / Business name *', 'Nome / Razão social *')
+                    : tr('Nombre completo *', 'Full name *', 'Nome completo *')}
                 </label>
                 <input
                   type="text"
@@ -1368,13 +1414,17 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                     setClientName(e.target.value);
                     if (clientId) setClientId('');
                   }}
-                  placeholder={clientType === 'empresa' ? 'Ej: TechStore SRL' : 'Nombre completo'}
+                  placeholder={
+                    clientType === 'empresa'
+                      ? tr('Ej: TechStore SRL', 'E.g.: TechStore LLC', 'Ex.: TechStore Ltda')
+                      : tr('Nombre completo', 'Full name', 'Nome completo')
+                  }
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Teléfono principal
+                  {tr('Teléfono principal', 'Primary phone', 'Telefone principal')}
                 </label>
                 <input
                   type="tel"
@@ -1386,19 +1436,19 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Teléfono alternativo
+                  {tr('Teléfono alternativo', 'Alternate phone', 'Telefone alternativo')}
                 </label>
                 <input
                   type="tel"
                   value={clientAltPhone}
                   onChange={(e) => setClientAltPhone(e.target.value)}
-                  placeholder="Familiar o contacto secundario"
+                  placeholder={tr('Familiar o contacto secundario', 'Family or secondary contact', 'Familiar ou contato secundário')}
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  DNI
+                  {tr('DNI', 'ID Number', 'CPF / RG')}
                 </label>
                 <input
                   type="text"
@@ -1410,7 +1460,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  CUIT / CUIL
+                  {tr('CUIT / CUIL', 'Tax ID', 'CNPJ / CPF')}
                 </label>
                 <input
                   type="text"
@@ -1422,7 +1472,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               </div>
               <div className="sm:col-span-2">
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Email
+                  {tr('Email', 'Email', 'E-mail')}
                 </label>
                 <input
                   type="email"
@@ -1434,25 +1484,25 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Dirección
+                  {tr('Dirección', 'Address', 'Endereço')}
                 </label>
                 <input
                   type="text"
                   value={clientAddress}
                   onChange={(e) => setClientAddress(e.target.value)}
-                  placeholder="Calle y altura"
+                  placeholder={tr('Calle y altura', 'Street address', 'Rua e número')}
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Localidad / Barrio
+                  {tr('Localidad / Barrio', 'City / Neighborhood', 'Cidade / Bairro')}
                 </label>
                 <input
                   type="text"
                   value={clientNeighborhood}
                   onChange={(e) => setClientNeighborhood(e.target.value)}
-                  placeholder="Ej: Centro, Palermo..."
+                  placeholder={tr('Ej: Centro, Palermo...', 'E.g.: Downtown...', 'Ex.: Centro...')}
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
@@ -1461,12 +1511,12 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
 
           <section className="space-y-3 border-t border-slate-100 pt-5 dark:border-slate-800">
             <h3 className="text-sm font-bold text-slate-900 dark:text-white font-display">
-              Datos del equipo
+              {tr('Datos del equipo', 'Device details', 'Dados do aparelho')}
             </h3>
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Marca
+                  {tr('Marca', 'Brand', 'Marca')}
                 </label>
                 {isNotebookOrCustom ? (
                   <>
@@ -1570,7 +1620,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                         type="text"
                         value={customBrand}
                         onChange={(e) => setCustomBrand(e.target.value)}
-                        placeholder="Especificar marca"
+                        placeholder={tr('Especificar marca', 'Specify brand', 'Especificar marca')}
                         className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                       />
                     )}
@@ -1580,7 +1630,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
 
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Modelo
+                  {tr('Modelo', 'Model', 'Modelo')}
                 </label>
                 {isNotebookOrCustom ? (
                   <>
@@ -1614,7 +1664,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                                   ? 'Ej: IdeaPad 3, Pavilion 15, Inspiron, MacBook Air...'
                                   : isOtherDevice
                                     ? 'Ej: Smart TV 43", L3250, Archer C6, Fuente 12V...'
-                                    : `Modelo de ${deviceType}`
+                                    : `${tr('Modelo de', 'Model of', 'Modelo de')} ${deviceType}`
                       }
                       className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     />
@@ -1661,7 +1711,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                       onChange={(e) => setModelSelect(e.target.value)}
                       className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     >
-                      <option value="">Seleccioná un modelo</option>
+                      <option value="">{tr('Seleccioná un modelo', 'Select a model', 'Selecione um modelo')}</option>
                       {(MODELS_BY_BRAND[brand] || ['Otro modelo']).map((m) => (
                         <option key={m} value={m}>
                           {m}
@@ -1673,7 +1723,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                         type="text"
                         value={customModel}
                         onChange={(e) => setCustomModel(e.target.value)}
-                        placeholder="O escribí el modelo exacto"
+                        placeholder={tr('O escribí el modelo exacto', 'Or enter exact model', 'Ou digite o modelo exato')}
                         className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                       />
                     )}
@@ -1683,13 +1733,13 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
 
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Color
+                  {tr('Color', 'Color', 'Cor')}
                 </label>
                 <input
                   type="text"
                   value={color}
                   onChange={(e) => setColor(e.target.value)}
-                  placeholder="Negro / Blanco"
+                  placeholder={tr('Negro / Blanco', 'Black / White', 'Preto / Branco')}
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
@@ -1698,16 +1748,16 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
                     {isSpeaker || isHeadphones
-                      ? 'Tipo / Formato'
+                      ? tr('Tipo / Formato', 'Type / Format', 'Tipo / Formato')
                       : isConsole
-                        ? 'Edición / Capacidad'
+                        ? tr('Edición / Capacidad', 'Edition / Capacity', 'Edição / Capacidade')
                         : isSmartwatch
-                          ? 'Medida / Caja'
+                          ? tr('Medida / Caja', 'Size / Case', 'Tamanho / Caixa')
                           : isNotebook
-                            ? 'Almacenamiento'
+                            ? tr('Almacenamiento', 'Storage', 'Armazenamento')
                             : isOtherDevice
-                              ? 'Categoría / Tipo de equipo'
-                              : 'Capacidad'}
+                              ? tr('Categoría / Tipo de equipo', 'Category / Device type', 'Categoria / Tipo de aparelho')
+                              : tr('Capacidad', 'Capacity', 'Capacidade')}
                   </label>
                   {isOtherDevice ? (
                     <>
@@ -1762,13 +1812,13 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
                   {deviceType === 'Celular' || deviceType === 'Tablet'
                     ? 'IMEI'
-                    : 'Número de serie'}
+                    : tr('Número de serie', 'Serial number', 'Número de série')}
                 </label>
                 <input
                   type="text"
                   value={imei}
                   onChange={(e) => setImei(e.target.value)}
-                  placeholder="IMEI o número de serie"
+                  placeholder={tr('IMEI o número de serie', 'IMEI or serial number', 'IMEI ou número de série')}
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-mono-num text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
@@ -1778,18 +1828,18 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
           <section className="space-y-3 border-t border-slate-100 pt-5 dark:border-slate-800">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white font-display">
-                Falla, prioridad y presupuesto
+                {tr('Falla, prioridad y presupuesto', 'Issue, priority & estimate', 'Defeito, prioridade e orçamento')}
               </h3>
               {secondaryCurrencies.length > 0 && (
                 <div className="flex items-center gap-1.5">
                   <Coins className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
                   <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
-                    Moneda:
+                    {tr('Moneda:', 'Currency:', 'Moeda:')}
                   </span>
                   <select
                     value={selectedCurrency}
                     onChange={(e) => handleCurrencyChange(e.target.value)}
-                    aria-label="Moneda de la reparación"
+                    aria-label={tr('Moneda de la reparación', 'Repair currency', 'Moeda do reparo')}
                     className="h-9 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-800 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   >
                     {[baseCurrency, ...secondaryCurrencies.map((c) => c.code)].map((code) => {
@@ -1807,14 +1857,14 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
 
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Problema reportado *
+                {tr('Problema reportado *', 'Reported issue *', 'Problema relatado *')}
               </label>
               <textarea
                 rows={3}
                 required
                 value={problem}
                 onChange={(e) => setProblem(e.target.value)}
-                placeholder="Describí la falla del equipo"
+                placeholder={tr('Describí la falla del equipo', 'Describe the device issue', 'Descreva o defeito do aparelho')}
                 className="w-full rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
@@ -1822,21 +1872,21 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
             <div className="grid gap-3 sm:grid-cols-3">
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Prioridad
+                  {tr('Prioridad', 'Priority', 'Prioridade')}
                 </label>
                 <select
                   value={priority}
                   onChange={(e) => setPriority(e.target.value as 'alta' | 'media' | 'baja')}
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 >
-                  <option value="alta">Alta</option>
-                  <option value="media">Media</option>
-                  <option value="baja">Baja</option>
+                  <option value="alta">{tr('Alta', 'High', 'Alta')}</option>
+                  <option value="media">{tr('Media', 'Medium', 'Média')}</option>
+                  <option value="baja">{tr('Baja', 'Low', 'Baixa')}</option>
                 </select>
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Fecha de ingreso
+                  {tr('Fecha de ingreso', 'Check-in date', 'Data de entrada')}
                 </label>
                 <input
                   type="date"
@@ -1847,7 +1897,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Entrega estimada
+                  {tr('Entrega estimada', 'Estimated delivery', 'Previsão de entrega')}
                 </label>
                 <input
                   type="date"
@@ -1861,14 +1911,16 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
             {workshopMeta.techniciansEnabled && workshopMeta.technicians.length > 0 && (
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Técnico asignado (opcional)
+                  {tr('Técnico asignado (opcional)', 'Assigned technician (optional)', 'Técnico responsável (opcional)')}
                 </label>
                 <select
                   value={technician}
                   onChange={(e) => setTechnician(e.target.value)}
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 >
-                  <option value="">Sin asignar / Dueño del taller</option>
+                  <option value="">
+                    {tr('Sin asignar / Dueño del taller', 'Unassigned / Shop owner', 'Sem atribuição / Dono da oficina')}
+                  </option>
                   {workshopMeta.technicians.map((techName) => (
                     <option key={techName} value={techName}>
                       {techName}
@@ -1881,12 +1933,15 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
             {spareParts.length > 0 && (
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  <span>Repuestos asociados del inventario</span>
+                  <span>{tr('Repuestos asociados del inventario', 'Linked inventory parts', 'Peças associadas do estoque')}</span>
                   {selectedPartIds.length > 0 && (
                     <span className="font-mono-num text-[#0072BB] dark:text-sky-300">
                       {selectedPartIds.length}{' '}
-                      {selectedPartIds.length === 1 ? 'repuesto' : 'repuestos'} ·{' '}
-                      {formatCurrency(selectedPartsTotalDisplay, selectedCurrency)} sumado al total
+                      {selectedPartIds.length === 1
+                        ? tr('repuesto', 'part', 'peça')
+                        : tr('repuestos', 'parts', 'peças')}{' '}
+                      · {formatCurrency(selectedPartsTotalDisplay, selectedCurrency)}{' '}
+                      {tr('sumado al total', 'added to total', 'somado ao total')}
                     </span>
                   )}
                 </div>
@@ -1928,11 +1983,11 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                           >
                             {part.trackStock
                               ? outOfStock
-                                ? 'Sin stock (no descontará)'
+                                ? tr('Sin stock (no descontará)', 'Out of stock (won\'t deduct)', 'Sem estoque (não descontará)')
                                 : lowStock
-                                  ? `Stock bajo: ${part.stock} u.`
-                                  : `Stock: ${part.stock} u.`
-                              : 'Sin control de stock'}
+                                  ? tr(`Stock bajo: ${part.stock} u.`, `Low stock: ${part.stock} u.`, `Estoque baixo: ${part.stock} un.`)
+                                  : tr(`Stock: ${part.stock} u.`, `Stock: ${part.stock} u.`, `Estoque: ${part.stock} un.`)
+                              : tr('Sin control de stock', 'No stock tracking', 'Sem controle de estoque')}
                           </div>
                         </div>
                         <span className="flex shrink-0 items-center gap-1.5 font-mono-num font-semibold">
@@ -1949,9 +2004,13 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                     <div className="flex items-start gap-2">
                       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
                       <span>
-                        Sin stock en inventario para:{' '}
-                        <strong>{selectedOutOfStockParts.map((p) => p.name).join(', ')}</strong>. No
-                        se descontará unidad hasta reponer.
+                        {tr('Sin stock en inventario para:', 'Out of stock in inventory for:', 'Sem estoque para:')}{' '}
+                        <strong>{selectedOutOfStockParts.map((p) => p.name).join(', ')}</strong>.{' '}
+                        {tr(
+                          'No se descontará unidad hasta reponer.',
+                          'Units will not be deducted until restocked.',
+                          'Não será descontado até repor.'
+                        )}
                       </span>
                     </div>
                     {status !== 'espera_repuesto' && (
@@ -1960,7 +2019,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                         onClick={() => setStatus('espera_repuesto')}
                         className="h-8 shrink-0 rounded-lg border border-amber-400 bg-white px-2.5 text-[11px] font-bold text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:bg-slate-900 dark:text-amber-200 dark:hover:bg-amber-950/60"
                       >
-                        Pasar a Espera repuesto
+                        {tr('Pasar a Espera repuesto', 'Move to Waiting for part', 'Mover para Aguardando peça')}
                       </button>
                     )}
                   </div>
@@ -1971,7 +2030,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
             <div className="grid gap-3 sm:grid-cols-4">
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Presupuesto ({currencySymbol})
+                  {tr(`Presupuesto (${currencySymbol})`, `Estimate (${currencySymbol})`, `Orçamento (${currencySymbol})`)}
                 </label>
                 <input
                   type="number"
@@ -1985,7 +2044,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Anticipo / Seña ({currencySymbol})
+                  {tr(`Anticipo / Seña (${currencySymbol})`, `Deposit / Advance (${currencySymbol})`, `Sinal / Adiantamento (${currencySymbol})`)}
                 </label>
                 <input
                   type="number"
@@ -1999,7 +2058,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Total pendiente
+                  {tr('Total pendiente', 'Balance due', 'Saldo pendente')}
                 </label>
                 <input
                   type="text"
@@ -2010,18 +2069,18 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Estado inicial
+                  {tr('Estado inicial', 'Initial status', 'Status inicial')}
                 </label>
                 <select
                   value={status}
                   onChange={(e) => setStatus(e.target.value as RepairStatus)}
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 >
-                  <option value="recibido">Recibido</option>
-                  <option value="diagnostico">Diagnóstico</option>
-                  <option value="espera_repuesto">Espera repuesto</option>
-                  <option value="en_progreso">En progreso</option>
-                  <option value="listo">Listo para entregar</option>
+                  <option value="recibido">{tr('Recibido', 'Received', 'Recebido')}</option>
+                  <option value="diagnostico">{tr('Diagnóstico', 'Diagnosis', 'Diagnóstico')}</option>
+                  <option value="espera_repuesto">{tr('Espera repuesto', 'Waiting for part', 'Aguardando peça')}</option>
+                  <option value="en_progreso">{tr('En progreso', 'In progress', 'Em andamento')}</option>
+                  <option value="listo">{tr('Listo para entregar', 'Ready for pickup', 'Pronto para entrega')}</option>
                 </select>
               </div>
             </div>
@@ -2029,11 +2088,21 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
             {depositDisplay > 0 && (
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200/80 bg-emerald-50/50 px-3 py-2.5 dark:border-emerald-900/50 dark:bg-emerald-950/20">
                 <span className="text-xs font-semibold text-emerald-900 dark:text-emerald-200">
-                  Medio de pago de la seña ({formatCurrency(depositDisplay, selectedCurrency)}):
+                  {tr(
+                    `Medio de pago de la seña (${formatCurrency(depositDisplay, selectedCurrency)}):`,
+                    `Deposit payment method (${formatCurrency(depositDisplay, selectedCurrency)}):`,
+                    `Forma de pagamento do sinal (${formatCurrency(depositDisplay, selectedCurrency)}):`
+                  )}
                 </span>
                 <div className="grid grid-cols-3 gap-1 rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900">
                   {(['efectivo', 'transferencia', 'tarjeta'] as const).map((methodKey) => {
                     const active = depositMethod === methodKey;
+                    const methodLabel =
+                      methodKey === 'efectivo'
+                        ? tr('Efectivo', 'Cash', 'Dinheiro')
+                        : methodKey === 'transferencia'
+                          ? tr('Transferencia', 'Transfer', 'Transferência')
+                          : tr('Tarjeta', 'Card', 'Cartão');
                     return (
                       <button
                         key={methodKey}
@@ -2045,7 +2114,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                             : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
                         }`}
                       >
-                        {PAYMENT_METHOD_LABELS[methodKey]}
+                        {methodLabel || PAYMENT_METHOD_LABELS[methodKey]}
                       </button>
                     );
                   })}
@@ -2056,11 +2125,11 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
             {isSecondaryCurrency && (
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200/80 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
                 <span>
-                  Conversión (1 {selectedCurrency} = {formatCurrency(activeRate, baseCurrency)}):
+                  {tr('Conversión', 'Conversion', 'Conversão')} (1 {selectedCurrency} = {formatCurrency(activeRate, baseCurrency)}):
                 </span>
                 <span className="font-mono-num font-bold">
-                  Presup. base {formatCurrency(baseBudget, baseCurrency)}
-                  {baseDeposit > 0 ? ` · Seña ${formatCurrency(baseDeposit, baseCurrency)}` : ''}
+                  {tr('Presup. base', 'Base est.', 'Orçam. base')} {formatCurrency(baseBudget, baseCurrency)}
+                  {baseDeposit > 0 ? ` · ${tr('Seña', 'Deposit', 'Sinal')} ${formatCurrency(baseDeposit, baseCurrency)}` : ''}
                 </span>
               </div>
             )}
@@ -2068,11 +2137,11 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
             {selectedPartIds.length > 0 && (
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-200 bg-sky-50/70 px-3 py-2 text-xs text-slate-700 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-slate-200">
                 <span>
-                  Presupuesto (
+                  {tr('Presupuesto', 'Estimate', 'Orçamento')} (
                   <strong className="font-mono-num">
                     {formatCurrency(manualBudget, selectedCurrency)}
                   </strong>
-                  ) + Repuestos (
+                  ) + {tr('Repuestos', 'Parts', 'Peças')} (
                   <strong className="font-mono-num">
                     {formatCurrency(selectedPartsTotalDisplay, selectedCurrency)}
                   </strong>
@@ -2087,14 +2156,14 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
             <div className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-                  Garantía del trabajo (se activa al entregar)
+                  {tr('Garantía del trabajo (se activa al entregar)', 'Service warranty (starts on delivery)', 'Garantia do serviço (ativa na entrega)')}
                 </span>
                 <div className="flex flex-wrap items-center gap-1.5">
                   {[
-                    { days: 0, label: 'Sin garantía' },
-                    { days: 30, label: '30 días' },
-                    { days: 60, label: '60 días' },
-                    { days: 90, label: '90 días' },
+                    { days: 0, label: tr('Sin garantía', 'No warranty', 'Sem garantia') },
+                    { days: 30, label: tr('30 días', '30 days', '30 dias') },
+                    { days: 60, label: tr('60 días', '60 days', '60 dias') },
+                    { days: 90, label: tr('90 días', '90 days', '90 dias') },
                   ].map((opt) => {
                     const active = warrantyDays === opt.days;
                     return (
@@ -2120,8 +2189,8 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                     onChange={(e) =>
                       setWarrantyDays(Math.max(0, Math.min(3650, Math.round(Number(e.target.value) || 0))))
                     }
-                    placeholder="Días"
-                    aria-label="Días personalizados de garantía"
+                    placeholder={tr('Días', 'Days', 'Dias')}
+                    aria-label={tr('Días personalizados de garantía', 'Custom warranty days', 'Dias personalizados de garantia')}
                     className="h-8 w-16 rounded-lg border border-slate-200 bg-white px-2 text-center font-mono-num text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
                 </div>
@@ -2131,7 +2200,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
 
           <section className="space-y-3 border-t border-slate-100 pt-5 dark:border-slate-800">
             <h3 className="text-sm font-bold text-slate-900 dark:text-white font-display">
-              Accesorios entregados
+              {tr('Accesorios entregados', 'Accessories included', 'Acessórios entregues')}
             </h3>
             {isConsole ? (
               <div className="grid gap-3 sm:grid-cols-2">
@@ -2157,7 +2226,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                               : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
                           }`}
                         >
-                          {opt}
+                          {opt === 'Sí' ? tr('Sí', 'Yes', 'Sim') : tr('No', 'No', 'Não')}
                         </button>
                       ))}
                     </div>
@@ -2203,11 +2272,15 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
           <section className="space-y-4 border-t border-slate-100 pt-5 dark:border-slate-800">
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white font-display">
-                Check-in · Estado físico y funcional
+                {tr('Check-in · Estado físico y funcional', 'Check-in · Physical & functional condition', 'Check-in · Estado físico e funcional')}
               </h3>
               {isOtherDevice && (
                 <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                  Marcá solo los ítems que apliquen a este equipo (podés usar «No tiene» o dejar sin marcar los que no correspondan).
+                  {tr(
+                    'Marcá solo los ítems que apliquen a este equipo (podés usar «No tiene» o dejar sin marcar los que no correspondan).',
+                    'Check only items that apply to this device (leave unrelated ones unchecked).',
+                    'Marque apenas os itens aplicáveis a este aparelho.'
+                  )}
                 </p>
               )}
             </div>
@@ -2215,7 +2288,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="space-y-2.5 rounded-2xl border border-slate-200 p-3.5 dark:border-slate-800">
                 <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                  Estado físico
+                  {tr('Estado físico', 'Physical condition', 'Estado físico')}
                 </div>
                 {physicalFields.map((field) => (
                   <div key={field.key} className="flex flex-wrap items-center justify-between gap-2">
@@ -2252,7 +2325,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
 
               <div className="space-y-2.5 rounded-2xl border border-slate-200 p-3.5 dark:border-slate-800">
                 <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                  Estado funcional
+                  {tr('Estado funcional', 'Functional condition', 'Estado funcional')}
                 </div>
                 {functionalFields.map((field) => (
                   <div key={field.key} className="flex flex-wrap items-center justify-between gap-2">
@@ -2290,13 +2363,13 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
 
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Notas internas o de entrega
+                {tr('Notas internas o de entrega', 'Internal or delivery notes', 'Notas internas ou de entrega')}
               </label>
               <textarea
                 rows={2}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="Observaciones adicionales..."
+                placeholder={tr('Observaciones adicionales...', 'Additional notes...', 'Observações adicionais...')}
                 className="w-full rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
@@ -2305,7 +2378,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
           <section className="space-y-3 border-t border-slate-100 pt-5 dark:border-slate-800">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white font-display">
-                {isOtherDevice ? 'Clave / Acceso del equipo (opcional)' : 'Seguridad del equipo'}
+                {isOtherDevice
+                  ? tr('Clave / Acceso del equipo (opcional)', 'Device PIN / Access (optional)', 'Senha / Acesso do aparelho (opcional)')
+                  : tr('Seguridad del equipo', 'Device security', 'Segurança do aparelho')}
               </h3>
               {!isOtherDevice && (
                 <div className="flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
@@ -2318,7 +2393,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                         : 'text-slate-500 dark:text-slate-400'
                     }`}
                   >
-                    PIN / Clave
+                    {tr('PIN / Clave', 'PIN / Password', 'PIN / Senha')}
                   </button>
                   <button
                     type="button"
@@ -2329,7 +2404,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                         : 'text-slate-500 dark:text-slate-400'
                     }`}
                   >
-                    Patrón
+                    {tr('Patrón', 'Pattern', 'Padrão')}
                   </button>
                 </div>
               )}
@@ -2342,8 +2417,12 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                 onChange={(e) => setSecurityPin(e.target.value)}
                 placeholder={
                   isOtherDevice
-                    ? 'Solo si aplica (ej: clave WiFi, PIN de menú o admin), sino dejar vacío'
-                    : 'PIN, contraseña o sin clave'
+                    ? tr(
+                        'Solo si aplica (ej: clave WiFi, PIN de menú o admin), sino dejar vacío',
+                        'Only if applicable (e.g. WiFi password, admin PIN), otherwise leave blank',
+                        'Apenas se aplicável (ex: senha WiFi, PIN admin), senão deixe vazio'
+                      )
+                    : tr('PIN, contraseña o sin clave', 'PIN, password or none', 'PIN, senha ou sem senha')
                 }
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
@@ -2360,7 +2439,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               onClick={onClose}
               className="h-11 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             >
-              Cancelar
+              {tr('Cancelar', 'Cancel', 'Cancelar')}
             </button>
             <button
               type="button"
@@ -2369,7 +2448,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               className="inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-xl border border-[#0072BB] bg-sky-50 px-4 text-sm font-semibold text-[#0072BB] transition hover:bg-sky-100 disabled:opacity-60 dark:border-sky-400 dark:bg-sky-950/40 dark:text-sky-300 dark:hover:bg-sky-950/70"
             >
               <Plus className="h-4 w-4" />
-              Agregar otro equipo
+              {tr('Agregar otro equipo', 'Add another device', 'Adicionar outro aparelho')}
             </button>
             <button
               type="submit"
@@ -2377,10 +2456,14 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               className="inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-sm font-semibold text-white transition hover:bg-[#005f9c] disabled:opacity-60"
             >
               {saving
-                ? 'Guardando...'
+                ? tr('Guardando...', 'Saving...', 'Salvando...')
                 : queuedItems.length > 0
-                  ? `Guardar lote (${queuedItems.length + 1} equipos)`
-                  : 'Guardar reparación'}
+                  ? tr(
+                      `Guardar lote (${queuedItems.length + 1} equipos)`,
+                      `Save batch (${queuedItems.length + 1} devices)`,
+                      `Salvar lote (${queuedItems.length + 1} aparelhos)`
+                    )
+                  : tr('Guardar reparación', 'Save repair', 'Salvar reparo')}
             </button>
           </div>
         </form>

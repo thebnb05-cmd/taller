@@ -24,6 +24,7 @@ import { ModalShell } from './ModalShell';
 import type { PrintFormat } from './RepairPrintDocuments';
 import { useToast } from './ToastProvider';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
+import { useI18n } from '../utils/i18n';
 
 interface SalePrintModalProps {
   sale: SaleRecord | null;
@@ -39,6 +40,7 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
   clients = [],
 }) => {
   const { notify } = useToast();
+  const { tr } = useI18n();
   const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
   const baseCurrency = workshopMeta.currency;
   const baseCurrencyOption = getCurrencyOption(baseCurrency);
@@ -202,10 +204,10 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
   const displayDeposit = toDisplayMoney(paymentInfo.deposit);
   const displayPending = Math.max(0, roundDisplay(displayAmount - displayDeposit));
   const statusLabel = paymentInfo.isPaid
-    ? 'Cobrado'
+    ? tr('Cobrado', 'Paid', 'Pago')
     : paymentInfo.deposit > 0
-      ? 'Señado'
-      : 'Pendiente';
+      ? tr('Señado', 'Deposit', 'Com sinal')
+      : tr('Pendiente', 'Pending', 'Pendente');
 
   const isTransfer = paymentInfo.method === 'transferencia';
   const transferAmount = displayPending > 0 ? displayPending : displayAmount;
@@ -221,9 +223,9 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
-      notify(`${label} copiado.`);
+      notify(tr(`${label} copiado.`, `${label} copied.`, `${label} copiado.`));
     } catch {
-      notify('No se pudo copiar al portapapeles.', 'error');
+      notify(tr('No se pudo copiar al portapapeles.', 'Could not copy to clipboard.', 'Não foi possível copiar para a área de transferência.'), 'error');
     }
   };
 
@@ -250,7 +252,7 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-4">
         <div className="flex flex-col items-start gap-1.5">
           <div className="inline-block rounded-md bg-sky-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#0072BB]">
-            Boleta de Venta · Comprobante
+            {tr('Boleta de Venta · Comprobante', 'Sales Receipt · Voucher', 'Comprovante de Venda')}
           </div>
           <div>
             <BrandMark profile={profile} size="lg" forceLight />
@@ -261,15 +263,15 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
             </div>
           )}
           <div className="flex flex-col gap-0.5 text-xs text-slate-600">
-            <span>{profile?.businessAddress || 'Servicio técnico especializado y accesorios'}</span>
+            <span>{profile?.businessAddress || tr('Servicio técnico especializado y accesorios', 'Specialized repair service and accessories', 'Assistência técnica especializada e acessórios')}</span>
             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
-              {profile?.businessPhone && <span>Tel: {profile.businessPhone}</span>}
+              {profile?.businessPhone && <span>{tr('Tel:', 'Phone:', 'Tel:')} {profile.businessPhone}</span>}
               {workshopMeta.businessEmail && <span>{workshopMeta.businessEmail}</span>}
               {workshopMeta.taxId && <span>{workshopMeta.taxId}</span>}
             </div>
             {(workshopMeta.hours || workshopMeta.social) && (
               <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] text-slate-500">
-                {workshopMeta.hours && <span>Horarios: {workshopMeta.hours}</span>}
+                {workshopMeta.hours && <span>{tr('Horarios:', 'Hours:', 'Horários:')} {workshopMeta.hours}</span>}
                 {workshopMeta.social && <span>{workshopMeta.social}</span>}
               </div>
             )}
@@ -278,13 +280,13 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
 
         <div className="text-right">
           <div className="font-mono-num text-lg font-extrabold text-slate-900">
-            {sale.invoice || 'Boleta de venta'}
+            {sale.invoice || tr('Boleta de venta', 'Sales receipt', 'Comprovante de venda')}
           </div>
           <div className="mt-0.5 text-xs text-slate-500">
-            Fecha: {formatDateShort(sale.dueDate)}
+            {tr('Fecha:', 'Date:', 'Data:')} {formatDateShort(sale.dueDate)}
           </div>
           <div className="mt-1 inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-700">
-            Estado: {statusLabel}
+            {tr('Estado:', 'Status:', 'Status:')} {statusLabel}
           </div>
         </div>
       </div>
@@ -292,28 +294,28 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
       <div className="mt-4 grid gap-4 text-xs sm:grid-cols-2">
         <div className="rounded-xl border border-slate-200/80 p-3">
           <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
-            Datos del cliente
+            {tr('Datos del cliente', 'Client details', 'Dados do cliente')}
           </div>
           <div className="mt-1 text-sm font-bold text-slate-900">{sale.clientName}</div>
-          {matchedClient?.phone && <div>Tel: {matchedClient.phone}</div>}
-          {matchedClient?.dni && <div>DNI: {matchedClient.dni}</div>}
-          {matchedClient?.address && <div>Dir: {matchedClient.address}</div>}
+          {matchedClient?.phone && <div>{tr('Tel:', 'Phone:', 'Tel:')} {matchedClient.phone}</div>}
+          {matchedClient?.dni && <div>{tr('DNI:', 'ID:', 'Doc:')} {matchedClient.dni}</div>}
+          {matchedClient?.address && <div>{tr('Dir:', 'Addr:', 'End:')} {matchedClient.address}</div>}
         </div>
 
         <div className="rounded-xl border border-slate-200/80 p-3">
           <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
-            Condición y medio de pago
+            {tr('Condición y medio de pago', 'Payment terms & method', 'Condição e forma de pagamento')}
           </div>
           <div className="mt-1 text-sm font-bold text-slate-900">
-            {paymentInfo.methodLabel || 'A confirmar'}
+            {paymentInfo.methodLabel || tr('A confirmar', 'To confirm', 'A confirmar')}
           </div>
           <div className="mt-0.5 text-slate-600">
-            Comprobante: <span className="font-mono-num font-semibold">{sale.invoice}</span>
+            {tr('Comprobante:', 'Receipt:', 'Comprovante:')} <span className="font-mono-num font-semibold">{sale.invoice}</span>
           </div>
-          <div className="text-slate-600">Estado de cobro: {statusLabel}</div>
+          <div className="text-slate-600">{tr('Estado de cobro:', 'Payment status:', 'Status do pagamento:')} {statusLabel}</div>
           {isConvertedCurrency && (
             <div className="mt-0.5 text-[11px] font-medium text-slate-500">
-              Divisa: {selectedCurrencyOption.code} (1 {selectedCurrencyOption.symbol} ={' '}
+              {tr('Divisa:', 'Currency:', 'Moeda:')} {selectedCurrencyOption.code} (1 {selectedCurrencyOption.symbol} ={' '}
               {formatCurrency(activeRate, baseCurrency)})
             </div>
           )}
@@ -324,10 +326,10 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
         <table className="w-full border-collapse text-left text-xs">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-              <th className="px-3 py-2">Detalle / Producto</th>
-              <th className="px-3 py-2 text-center">Cant.</th>
-              <th className="px-3 py-2 text-right">Unitario</th>
-              <th className="px-3 py-2 text-right">Subtotal</th>
+              <th className="px-3 py-2">{tr('Detalle / Producto', 'Item / Product', 'Item / Produto')}</th>
+              <th className="px-3 py-2 text-center">{tr('Cant.', 'Qty.', 'Qtd.')}</th>
+              <th className="px-3 py-2 text-right">{tr('Unitario', 'Unit price', 'Unitário')}</th>
+              <th className="px-3 py-2 text-right">{tr('Subtotal', 'Subtotal', 'Subtotal')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -393,19 +395,19 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
       <div className="mt-4 border-y border-slate-200 py-3">
         <div className="grid grid-cols-3 gap-2 text-center text-xs">
           <div>
-            <div className="text-slate-500">Total venta</div>
+            <div className="text-slate-500">{tr('Total venta', 'Sale total', 'Total da venda')}</div>
             <div className="font-mono-num text-sm font-bold text-slate-900">
               {formatCurrency(displayAmount, selectedCurrency)}
             </div>
           </div>
           <div>
-            <div className="text-slate-500">Anticipo / Seña</div>
+            <div className="text-slate-500">{tr('Anticipo / Seña', 'Deposit / Paid', 'Sinal / Adiantamento')}</div>
             <div className="font-mono-num text-sm font-bold text-emerald-700">
               {formatCurrency(displayDeposit, selectedCurrency)}
             </div>
           </div>
           <div>
-            <div className="text-slate-500">Saldo pendiente</div>
+            <div className="text-slate-500">{tr('Saldo pendiente', 'Balance due', 'Saldo pendente')}</div>
             <div className="font-mono-num text-sm font-bold text-slate-900">
               {formatCurrency(displayPending, selectedCurrency)}
             </div>
@@ -572,9 +574,9 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
       )}
 
       <div className="mt-6 flex flex-wrap items-end justify-between gap-4 border-t border-dashed border-slate-300 pt-4 text-[11px] text-slate-500">
-        <div>Gracias por su compra · Conserve este comprobante</div>
+        <div>{tr('Gracias por su compra · Conserve este comprobante', 'Thank you for your purchase · Keep this receipt', 'Obrigado pela compra · Guarde este comprovante')}</div>
         <div className="w-56 border-t border-slate-400 pt-1 text-center text-[10px] text-slate-600">
-          Firma y aclaración del cliente
+          {tr('Firma y aclaración del cliente', 'Client signature and printed name', 'Assinatura e nome do cliente')}
         </div>
       </div>
     </div>
@@ -830,7 +832,7 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
       <ModalShell
         open={Boolean(sale)}
         onClose={onClose}
-        title={`Boleta de venta · ${sale.invoice}`}
+        title={tr(`Boleta de venta · ${sale.invoice}`, `Sales receipt · ${sale.invoice}`, `Comprovante de venda · ${sale.invoice}`)}
         maxWidth="3xl"
       >
         <div className="space-y-4">
@@ -847,7 +849,7 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
                   }`}
                 >
                   <FileText className="h-3.5 w-3.5" />
-                  Hoja A4
+                  {tr('Hoja A4', 'A4 Sheet', 'Folha A4')}
                 </button>
                 <button
                   type="button"
@@ -859,14 +861,14 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
                   }`}
                 >
                   <ReceiptText className="h-3.5 w-3.5" />
-                  Térmico 80mm
+                  {tr('Térmico 80mm', 'Thermal 80mm', 'Térmica 80mm')}
                 </button>
               </div>
 
               <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1 dark:border-slate-700 dark:bg-slate-900">
                 <Coins className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
                 <select
-                  aria-label="Divisa de la boleta"
+                  aria-label={tr('Divisa de la boleta', 'Receipt currency', 'Moeda do comprovante')}
                   value={selectedCurrency}
                   onChange={(e) => setSelectedCurrency(sanitizeCurrencyCode(e.target.value))}
                   className="bg-transparent text-xs font-semibold text-slate-800 outline-none dark:text-slate-100"
@@ -895,7 +897,7 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
               className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0072BB] px-4 text-xs font-semibold text-white hover:bg-[#005f9c]"
             >
               <Printer className="h-4 w-4" />
-              Imprimir boleta
+              {tr('Imprimir boleta', 'Print receipt', 'Imprimir comprovante')}
             </button>
           </div>
 

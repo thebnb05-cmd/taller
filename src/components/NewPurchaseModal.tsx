@@ -46,6 +46,7 @@ import {
 } from '../utils/validation';
 import { ModalShell } from './ModalShell';
 import { useToast } from './ToastProvider';
+import { useI18n } from '../utils/i18n';
 
 interface NewPurchaseModalProps {
   open: boolean;
@@ -74,6 +75,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
   editPurchase = null,
 }) => {
   const { notify } = useToast();
+  const { tr } = useI18n();
   const activeCurrency = useActiveCurrency();
   const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
   const baseCurrency: CurrencyCode = profile ? workshopMeta.currency : activeCurrency;
@@ -440,7 +442,11 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
     <ModalShell
       open={open}
       onClose={onClose}
-      title={editPurchase ? 'Editar compra o gasto' : 'Nueva compra o gasto'}
+      title={
+        editPurchase
+          ? tr('Editar compra o gasto', 'Edit purchase or expense', 'Editar compra ou despesa')
+          : tr('Nueva compra o gasto', 'New purchase or expense', 'Nova compra ou despesa')
+      }
       maxWidth="lg"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -453,7 +459,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
                   htmlFor="new-purchase-currency-select"
                   className="text-xs font-bold text-slate-800 dark:text-slate-100"
                 >
-                  Divisa de la compra
+                  {tr('Divisa de la compra', 'Purchase currency', 'Moeda da compra')}
                 </label>
               </div>
               {isSecondaryCurrency && (
@@ -495,7 +501,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Proveedor / Comercio *
+              {tr('Proveedor / Comercio *', 'Supplier / Merchant *', 'Fornecedor / Loja *')}
             </label>
             <input
               type="text"
@@ -503,7 +509,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
               list="purchase-suppliers-datalist"
               value={supplierName}
               onChange={(e) => setSupplierName(e.target.value)}
-              placeholder="Ej: Mayorista Repuestos, Edesur, Alquiler"
+              placeholder={tr('Ej: Mayorista Repuestos, Edesur, Alquiler', 'e.g. Parts Wholesale, Rent, Utilities', 'Ex: Atacado de Peças, Energia, Aluguel')}
               className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
             <datalist id="purchase-suppliers-datalist">
@@ -515,7 +521,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
 
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Categoría del gasto
+              {tr('Categoría del gasto', 'Expense category', 'Categoria da despesa')}
             </label>
             <select
               value={category}
@@ -532,7 +538,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
 
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Comprobante / Factura
+              {tr('Comprobante / Factura', 'Receipt / Invoice', 'Comprovante / Fatura')}
             </label>
             <input
               type="text"
@@ -544,7 +550,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
 
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Fecha / Vencimiento
+              {tr('Fecha / Vencimiento', 'Date / Due date', 'Data / Vencimento')}
             </label>
             <input
               type="date"
@@ -556,7 +562,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
 
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Monto total ({currencySymbol}) *
+              {tr('Monto total', 'Total amount', 'Valor total')} ({currencySymbol}) *
             </label>
             <input
               type="number"
@@ -570,22 +576,22 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
             />
             {isSecondaryCurrency && numericAmount > 0 && (
               <div className="mt-1 font-mono-num text-[11px] text-slate-500 dark:text-slate-400">
-                Equivale a {formatCurrency(baseEquivalentAmount, baseCurrency)} ({baseCurrencyOption.code})
+                {tr('Equivale a', 'Equals', 'Equivale a')} {formatCurrency(baseEquivalentAmount, baseCurrency)} ({baseCurrencyOption.code})
               </div>
             )}
           </div>
 
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Estado
+              {tr('Estado', 'Status', 'Status')}
             </label>
             <select
               value={status}
               onChange={(e) => setStatus(e.target.value as 'pendiente' | 'pagado')}
               className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             >
-              <option value="pendiente">Pendiente</option>
-              <option value="pagado">Pagado</option>
+              <option value="pendiente">{tr('Pendiente', 'Pending', 'Pendente')}</option>
+              <option value="pagado">{tr('Pagado', 'Paid', 'Pago')}</option>
             </select>
           </div>
         </div>
@@ -596,7 +602,11 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
               <span className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-100">
                 <Banknote className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
                 <span>
-                  Registrar egreso en la caja diaria abierta ({openShift.shiftDate})
+                  {tr(
+                    `Registrar egreso en la caja diaria abierta (${openShift.shiftDate})`,
+                    `Record expense in open cash register (${openShift.shiftDate})`,
+                    `Registrar saída no caixa aberto (${openShift.shiftDate})`
+                  )}
                 </span>
               </span>
               <input
@@ -610,7 +620,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-sky-200/80 pt-2 text-xs dark:border-sky-900/50">
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-slate-600 dark:text-slate-300">
-                    Medio de pago:
+                    {tr('Medio de pago:', 'Payment method:', 'Forma de pagamento:')}
                   </span>
                   <select
                     value={cashMethod}
@@ -639,7 +649,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
           <div className="space-y-2.5 rounded-2xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/40">
             <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-100">
               <PackagePlus className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
-              <span>Ingresar mercadería al stock (opcional)</span>
+              <span>{tr('Ingresar mercadería al stock (opcional)', 'Add items to inventory stock (optional)', 'Adicionar itens ao estoque (opcional)')}</span>
             </div>
 
             <div className="grid gap-2 sm:grid-cols-12">
@@ -661,10 +671,10 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
                   }}
                   className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                 >
-                  <option value="">Elegir producto del inventario...</option>
+                  <option value="">{tr('Elegir producto del inventario...', 'Choose product from inventory...', 'Escolher produto do estoque...')}</option>
                   {products.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name} (Stock actual: {p.stock})
+                      {p.name} ({tr('Stock actual:', 'Current stock:', 'Estoque atual:')} {p.stock})
                     </option>
                   ))}
                 </select>
@@ -675,7 +685,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
                   min="1"
                   value={pickedQty}
                   onChange={(e) => setPickedQty(e.target.value)}
-                  placeholder="Cant."
+                  placeholder={tr('Cant.', 'Qty', 'Qtd.')}
                   className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-center font-mono-num text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                 />
               </div>
@@ -686,7 +696,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
                   step="0.01"
                   value={pickedCost}
                   onChange={(e) => setPickedCost(e.target.value)}
-                  placeholder={`Costo ${currencySymbol}`}
+                  placeholder={`${tr('Costo', 'Cost', 'Custo')} ${currencySymbol}`}
                   className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-right font-mono-num text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                 />
               </div>
@@ -697,7 +707,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
                   className="inline-flex h-9 w-full items-center justify-center gap-1 rounded-lg bg-[#0072BB] px-2 text-xs font-semibold text-white hover:bg-[#005f9c]"
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  Sumar
+                  {tr('Sumar', 'Add', 'Somar')}
                 </button>
               </div>
             </div>
@@ -712,13 +722,13 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
                     <span className="truncate font-semibold text-slate-800 dark:text-slate-100">
                       {line.name} ·{' '}
                       <span className="font-mono-num text-[#0072BB] dark:text-sky-400">
-                        +{line.qty} u.
+                        +{line.qty} {tr('u.', 'u.', 'un.')}
                       </span>
                     </span>
                     <div className="flex items-center gap-2">
                       {line.unitCost > 0 && (
                         <span className="font-mono-num text-slate-500">
-                          Costo c/u {formatCurrency(line.unitCost, selectedCurrency)}
+                          {tr('Costo c/u', 'Unit cost', 'Custo un.')} {formatCurrency(line.unitCost, selectedCurrency)}
                         </span>
                       )}
                       <button
@@ -738,13 +748,13 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
 
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Nota / Concepto (opcional)
+            {tr('Nota / Concepto (opcional)', 'Note / Concept (optional)', 'Nota / Descrição (opcional)')}
           </label>
           <input
             type="text"
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Ej: Compra de módulos OLED, factura luz o alquiler local"
+            placeholder={tr('Ej: Compra de módulos OLED, factura luz o alquiler local', 'e.g. OLED screens purchase, electricity bill or rent', 'Ex: Compra de telas OLED, conta de luz ou aluguel')}
             className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
           />
         </div>
@@ -755,7 +765,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
             onClick={onClose}
             className="h-11 flex-1 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300"
           >
-            Cancelar
+            {tr('Cancelar', 'Cancel', 'Cancelar')}
           </button>
           <button
             type="submit"
@@ -763,10 +773,10 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
             className="h-11 flex-1 rounded-xl bg-[#0072BB] text-sm font-semibold text-white hover:bg-[#005f9c]"
           >
             {saving
-              ? 'Guardando...'
+              ? tr('Guardando...', 'Saving...', 'Salvando...')
               : editPurchase
-                ? 'Guardar cambios'
-                : 'Guardar compra'}
+                ? tr('Guardar cambios', 'Save changes', 'Salvar alterações')
+                : tr('Guardar compra', 'Save purchase', 'Salvar compra')}
           </button>
         </div>
       </form>

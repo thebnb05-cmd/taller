@@ -39,6 +39,7 @@ import { BrandMark } from './BrandMark';
 import { SignaturePadModal } from './SignaturePadModal';
 import { useToast } from './ToastProvider';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
+import { getTranslatedStatusLabel, useI18n } from '../utils/i18n';
 
 export type PrintDocKey = 'client' | 'workshop' | 'label';
 export type PrintFormat = 'a4' | 'thermal80' | 'label50';
@@ -116,6 +117,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
   justPaid = false,
 }) => {
   const { notify } = useToast();
+  const { tr } = useI18n();
   const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
   const paymentInfo = useMemo(() => parsePaymentInfo(repair), [repair]);
   const availableCurrencies = useMemo(() => {
@@ -243,11 +245,25 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
       setSignatureModalOpen(false);
       notify(
         nextSignatureUrl
-          ? 'Firma guardada en la boleta, térmico 80mm y PDF.'
-          : 'Firma eliminada del comprobante.'
+          ? tr(
+              'Firma guardada en la boleta, térmico 80mm y PDF.',
+              'Signature saved on receipt, 80mm thermal slip, and PDF.',
+              'Assinatura salva no comprovante, térmico 80mm e PDF.'
+            )
+          : tr(
+              'Firma eliminada del comprobante.',
+              'Signature removed from receipt.',
+              'Assinatura removida do comprovante.'
+            )
       );
     } catch (err) {
-      notify(sanitizeDbErrorMessage(err, 'No se pudo guardar la firma.'), 'error');
+      notify(
+        sanitizeDbErrorMessage(
+          err,
+          tr('No se pudo guardar la firma.', 'Could not save signature.', 'Não foi possível salvar a assinatura.')
+        ),
+        'error'
+      );
     } finally {
       setSavingSignature(false);
     }
@@ -268,12 +284,19 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
       });
       notify(
         forWhatsApp
-          ? `PDF descargado (${fileName}). Adjuntalo en el chat de WhatsApp.`
-          : `PDF descargado (${fileName}).`
+          ? tr(
+              `PDF descargado (${fileName}). Adjuntalo en el chat de WhatsApp.`,
+              `PDF downloaded (${fileName}). Attach it in the WhatsApp chat.`,
+              `PDF baixado (${fileName}). Anexe no chat do WhatsApp.`
+            )
+          : tr(`PDF descargado (${fileName}).`, `PDF downloaded (${fileName}).`, `PDF baixado (${fileName}).`)
       );
     } catch (err) {
       console.error(err);
-      notify('No se pudo generar el PDF de la boleta.', 'error');
+      notify(
+        tr('No se pudo generar el PDF de la boleta.', 'Could not generate the receipt PDF.', 'Não foi possível gerar o PDF do comprovante.'),
+        'error'
+      );
     } finally {
       setGeneratingPdf(false);
     }
@@ -340,6 +363,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
 
   const pendingBalance = Math.max(0, Number(repair.price || 0) - Number(repair.deposit || 0));
   const statusMeta = getStatusMeta(repair.status);
+  const translatedStatusLabel = getTranslatedStatusLabel(repair.status);
 
   const selectedCount = useMemo(
     () => Object.values(selectedDocs).filter(Boolean).length,
@@ -691,7 +715,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
           <div className="text-right">
             <div className="font-mono-num text-xl font-black text-slate-900">{repair.code}</div>
             <div className="text-[11px] font-bold uppercase text-slate-700">
-              Prioridad: {repair.priority} · {statusMeta.label}
+              {tr('Prioridad:', 'Priority:', 'Prioridade:')} {repair.priority} · {translatedStatusLabel}
             </div>
             {paymentInfo.technician && (
               <div className="text-[11px] font-semibold text-slate-800">
@@ -1120,7 +1144,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
           </div>
           <div className="mt-1 text-base font-black">{repair.code}</div>
           <div className="text-[10px] font-bold uppercase">
-            Prioridad: {repair.priority} · {statusMeta.label}
+            {tr('Prioridad:', 'Priority:', 'Prioridade:')} {repair.priority} · {translatedStatusLabel || statusMeta.label}
           </div>
           {paymentInfo.technician && (
             <div className="text-[10px] font-bold">Técnico: {paymentInfo.technician}</div>
@@ -1354,10 +1378,18 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
               </span>
               <div>
                 <div className="text-sm font-bold text-emerald-950 dark:text-emerald-200">
-                  Orden {repair.code} guardada · Comprobantes listos para imprimir
+                  {tr(
+                    `Orden ${repair.code} guardada · Comprobantes listos para imprimir`,
+                    `Order ${repair.code} saved · Receipts ready to print`,
+                    `Ordem ${repair.code} salva · Comprovantes prontos para imprimir`
+                  )}
                 </div>
                 <div className="text-xs text-emerald-800 dark:text-emerald-300">
-                  Se generaron la Boleta del Cliente, la Boleta de Taller y la Etiqueta del Equipo.
+                  {tr(
+                    'Se generaron la Boleta del Cliente, la Boleta de Taller y la Etiqueta del Equipo.',
+                    'Client Receipt, Workshop Ticket, and Device Label have been generated.',
+                    'Foram gerados o Comprovante do Cliente, a Ordem da Oficina e a Etiqueta do Equipamento.'
+                  )}
                 </div>
               </div>
             </div>
@@ -1379,7 +1411,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
                 className="inline-flex h-10 items-center gap-2 rounded-xl border border-emerald-700 bg-white px-3.5 text-xs font-bold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50 dark:bg-slate-900 dark:text-emerald-300"
               >
                 <Printer className="h-4 w-4" />
-                Imprimir ({selectedCount})
+                {tr(`Imprimir (${selectedCount})`, `Print (${selectedCount})`, `Imprimir (${selectedCount})`)}
               </button>
             </div>
           </div>
@@ -1393,11 +1425,15 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
               </span>
               <div>
                 <div className="text-sm font-bold text-emerald-950 dark:text-emerald-200">
-                  Pago registrado · Boleta con sello PAGO lista para imprimir
+                  {tr(
+                    'Pago registrado · Boleta con sello PAGO lista para imprimir',
+                    'Payment recorded · PAID stamped receipt ready to print',
+                    'Pagamento registrado · Comprovante com selo PAGO pronto para imprimir'
+                  )}
                 </div>
                 <div className="text-xs text-emerald-800 dark:text-emerald-300">
-                  Cliente: {repair.clientName}
-                  {paymentInfo.methodLabel ? ` · Medio: ${paymentInfo.methodLabel}` : ''} · Total:{' '}
+                  {tr('Cliente:', 'Client:', 'Cliente:')} {repair.clientName}
+                  {paymentInfo.methodLabel ? ` · ${tr('Medio:', 'Method:', 'Forma:')} ${paymentInfo.methodLabel}` : ''} · {tr('Total:', 'Total:', 'Total:')}{' '}
                   {fmtDisplay(repair.price)}
                 </div>
               </div>
@@ -1420,7 +1456,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
                 className="inline-flex h-10 items-center gap-2 rounded-xl border border-emerald-700 bg-white px-3.5 text-xs font-bold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50 dark:bg-slate-900 dark:text-emerald-300"
               >
                 <Printer className="h-4 w-4" />
-                Imprimir boleta
+                {tr('Imprimir boleta', 'Print receipt', 'Imprimir comprovante')}
               </button>
             </div>
           </div>
@@ -1430,7 +1466,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-2.5">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Formato:
+                {tr('Formato:', 'Format:', 'Formato:')}
               </span>
               <div className="inline-flex rounded-xl border border-slate-200 bg-white p-0.5 dark:border-slate-700 dark:bg-slate-900">
                 <button
@@ -1443,7 +1479,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
                   }`}
                 >
                   <FileText className="h-3.5 w-3.5" />
-                  Hoja A4
+                  {tr('Hoja A4', 'A4 Sheet', 'Folha A4')}
                 </button>
                 <button
                   type="button"
@@ -1455,7 +1491,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
                   }`}
                 >
                   <ReceiptText className="h-3.5 w-3.5" />
-                  Térmico 80mm
+                  {tr('Térmico 80mm', 'Thermal 80mm', 'Térmica 80mm')}
                 </button>
                 <button
                   type="button"
@@ -1470,7 +1506,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
                   }`}
                 >
                   <Tag className="h-3.5 w-3.5" />
-                  Etiqueta 50×30mm
+                  {tr('Etiqueta 50×30mm', 'Label 50×30mm', 'Etiqueta 50×30mm')}
                 </button>
               </div>
               {availableCurrencies.length > 1 && (
@@ -1479,7 +1515,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
                   <select
                     value={selectedCurrency}
                     onChange={(e) => setSelectedCurrency(sanitizeCurrencyCode(e.target.value))}
-                    aria-label="Moneda del comprobante"
+                    aria-label={tr('Moneda del comprobante', 'Receipt currency', 'Moeda do comprovante')}
                     className="h-9 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-800 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                   >
                     {availableCurrencies.map((code) => {
@@ -1499,7 +1535,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
               <button
                 type="button"
                 onClick={() => setSignatureModalOpen(true)}
-                title="Capturar o actualizar la firma manuscrita del cliente"
+                title={tr('Capturar o actualizar la firma manuscrita del cliente', 'Capture or update the client’s handwritten signature', 'Capturar ou atualizar a assinatura do cliente')}
                 className={`inline-flex h-10 items-center gap-1.5 rounded-xl border px-3 text-xs font-semibold transition ${
                   savedSignature
                     ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
@@ -1507,18 +1543,22 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
                 }`}
               >
                 <PenTool className="h-4 w-4" />
-                {savedSignature ? 'Firma guardada ✓' : 'Firmar cliente'}
+                {savedSignature
+                  ? tr('Firma guardada ✓', 'Signature saved ✓', 'Assinatura salva ✓')
+                  : tr('Firmar cliente', 'Client signature', 'Assinar cliente')}
               </button>
 
               <button
                 type="button"
                 onClick={() => void handleDownloadClientPdf(false)}
                 disabled={generatingPdf}
-                title="Descargar PDF de la Boleta del Cliente"
+                title={tr('Descargar PDF de la Boleta del Cliente', 'Download Client Receipt PDF', 'Baixar PDF do Comprovante do Cliente')}
                 className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-sky-400 dark:hover:text-sky-300"
               >
                 <FileDown className="h-4 w-4" />
-                {generatingPdf ? 'Generando...' : 'PDF Cliente'}
+                {generatingPdf
+                  ? tr('Generando...', 'Generating...', 'Gerando...')
+                  : tr('PDF Cliente', 'Client PDF', 'PDF Cliente')}
               </button>
 
               {canNativeSharePdf && (
@@ -1526,11 +1566,11 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
                   type="button"
                   onClick={() => void handleNativeShareClientPdf()}
                   disabled={generatingPdf}
-                  title="Compartir archivo PDF directo a WhatsApp u otras apps"
+                  title={tr('Compartir archivo PDF directo a WhatsApp u otras apps', 'Share PDF directly to WhatsApp or other apps', 'Compartilhar PDF diretamente no WhatsApp ou outros apps')}
                   className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
                 >
                   <Share2 className="h-4 w-4" />
-                  Compartir PDF
+                  {tr('Compartir PDF', 'Share PDF', 'Compartilhar PDF')}
                 </button>
               )}
 
@@ -1539,7 +1579,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={() => void handleDownloadClientPdf(true)}
-                title="Descargar PDF de Boleta Cliente y abrir WhatsApp para enviarlo"
+                title={tr('Descargar PDF de Boleta Cliente y abrir WhatsApp para enviarlo', 'Download Client Receipt PDF and open WhatsApp to send it', 'Baixar PDF do Comprovante e abrir WhatsApp para enviar')}
                 className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700"
               >
                 <MessageCircle className="h-4 w-4" />
@@ -1554,10 +1594,10 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
               >
                 <Printer className="h-4 w-4" />
                 {printFormat === 'label50'
-                  ? 'Imprimir etiqueta 50×30mm'
+                  ? tr('Imprimir etiqueta 50×30mm', 'Print 50×30mm label', 'Imprimir etiqueta 50×30mm')
                   : printFormat === 'thermal80'
-                    ? `Imprimir 80mm (${selectedCount})`
-                    : `Imprimir seleccionados (${selectedCount})`}
+                    ? tr(`Imprimir 80mm (${selectedCount})`, `Print 80mm (${selectedCount})`, `Imprimir 80mm (${selectedCount})`)
+                    : tr(`Imprimir seleccionados (${selectedCount})`, `Print selected (${selectedCount})`, `Imprimir selecionados (${selectedCount})`)}
               </button>
             </div>
           </div>
@@ -1573,14 +1613,14 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
                     : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'
                 }`}
               >
-                Todo (3)
+                {tr('Todo (3)', 'All (3)', 'Tudo (3)')}
               </button>
 
               {(
                 [
-                  { key: 'client', label: 'Boleta Cliente', icon: FileText },
-                  { key: 'workshop', label: 'Boleta Taller', icon: Wrench },
-                  { key: 'label', label: 'Etiqueta Equipo', icon: Tag },
+                  { key: 'client', label: tr('Boleta Cliente', 'Client Receipt', 'Comprovante Cliente'), icon: FileText },
+                  { key: 'workshop', label: tr('Boleta Taller', 'Workshop Ticket', 'Ordem da Oficina'), icon: Wrench },
+                  { key: 'label', label: tr('Etiqueta Equipo', 'Device Label', 'Etiqueta Equipamento'), icon: Tag },
                 ] as const
               ).map(({ key, label, icon: Icon }) => {
                 const active = selectedDocs[key];
@@ -1594,7 +1634,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
                           ? 'bg-sky-50 text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300'
                           : 'text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800'
                       }`}
-                      title="Incluir / quitar de la impresión"
+                      title={tr('Incluir / quitar de la impresión', 'Include / exclude from print', 'Incluir / remover da impressão')}
                     >
                       <span
                         className={`flex h-3.5 w-3.5 items-center justify-center rounded border text-[10px] ${
@@ -1612,9 +1652,9 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
                       type="button"
                       onClick={() => selectOnly(key)}
                       className="h-8 border-l border-slate-200 px-2 text-[10px] font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
-                      title={`Seleccionar solo ${label}`}
+                      title={tr(`Seleccionar solo ${label}`, `Select only ${label}`, `Selecionar apenas ${label}`)}
                     >
-                      Solo
+                      {tr('Solo', 'Only', 'Apenas')}
                     </button>
                   </div>
                 );
@@ -1626,20 +1666,28 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
         {printFormat === 'label50' ? (
           <div className="space-y-2">
             <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Etiqueta adhesiva compacta (50×30mm) para impresora de etiquetas
+              {tr(
+                'Etiqueta adhesiva compacta (50×30mm) para impresora de etiquetas',
+                'Compact adhesive label (50×30mm) for label printers',
+                'Etiqueta adesiva compacta (50×30mm) para impressora de etiquetas'
+              )}
             </div>
             {renderLabel50(false)}
           </div>
         ) : selectedCount === 0 ? (
           <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-center text-xs text-slate-500">
-            Seleccioná al menos un comprobante o etiqueta para previsualizar e imprimir.
+            {tr(
+              'Seleccioná al menos un comprobante o etiqueta para previsualizar e imprimir.',
+              'Select at least one receipt or label to preview and print.',
+              'Selecione pelo menos um comprovante ou etiqueta para visualizar e imprimir.'
+            )}
           </div>
         ) : (
           <div className="space-y-5">
             {selectedDocs.client && (
               <div className="space-y-1.5">
                 <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  1 · Boleta para el cliente {printFormat === 'thermal80' ? '(80mm)' : ''}
+                  {tr('1 · Boleta para el cliente', '1 · Client receipt', '1 · Comprovante do cliente')} {printFormat === 'thermal80' ? '(80mm)' : ''}
                 </div>
                 {printFormat === 'thermal80'
                   ? renderThermalClientReceipt(false)
@@ -1650,7 +1698,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
             {selectedDocs.workshop && (
               <div className="space-y-1.5">
                 <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  2 · Boleta interna del taller {printFormat === 'thermal80' ? '(80mm)' : ''}
+                  {tr('2 · Boleta interna del taller', '2 · Internal workshop ticket', '2 · Ordem interna da oficina')} {printFormat === 'thermal80' ? '(80mm)' : ''}
                 </div>
                 {printFormat === 'thermal80'
                   ? renderThermalWorkshopReceipt(false)
@@ -1661,7 +1709,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
             {selectedDocs.label && (
               <div className="space-y-1.5">
                 <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  3 · Etiqueta adhesiva para el equipo {printFormat === 'thermal80' ? '(80mm)' : ''}
+                  {tr('3 · Etiqueta adhesiva para el equipo', '3 · Device adhesive label', '3 · Etiqueta adesiva do equipamento')} {printFormat === 'thermal80' ? '(80mm)' : ''}
                 </div>
                 {printFormat === 'thermal80'
                   ? renderThermalDeviceLabel(false)

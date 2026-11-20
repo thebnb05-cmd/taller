@@ -120,7 +120,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
     setInfoMsg('');
     if (typeof window !== 'undefined' && window.self !== window.top) {
       setErrorMsg(
-        'Google bloquea su pantalla de acceso dentro de la vista previa integrada. Usá tu correo y contraseña acá, o probá el botón de Google desde tu web publicada en Vercel / app instalada.'
+        tr(
+          'Google bloquea su pantalla de acceso dentro de la vista previa integrada. Usá tu correo y contraseña acá, o probá el botón de Google desde tu web publicada en Vercel / app instalada.',
+          'Google blocks its sign-in screen inside the embedded preview. Use your email and password here, or try the Google button from your published site or installed app.',
+          'O Google bloqueia a tela de login dentro da visualização integrada. Use seu e-mail e senha aqui, ou tente o botão do Google no seu site publicado ou app instalado.'
+        )
       );
       return;
     }
@@ -140,10 +144,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
           : '';
       if (msg.toLowerCase().includes('provider is not enabled')) {
         setErrorMsg(
-          'Falta activar Google en tu panel de Supabase (Authentication → Providers → Google).'
+          tr(
+            'Falta activar Google en tu panel de Supabase (Authentication → Providers → Google).',
+            'Google provider is not enabled yet in your Supabase dashboard (Authentication → Providers → Google).',
+            'O provedor Google ainda não foi ativado no painel do Supabase (Authentication → Providers → Google).'
+          )
         );
       } else {
-        setErrorMsg('No se pudo iniciar sesión con Google. Intentá nuevamente.');
+        setErrorMsg(
+          tr(
+            'No se pudo iniciar sesión con Google. Intentá nuevamente.',
+            'Could not sign in with Google. Try again.',
+            'Não foi possível entrar com o Google. Tente novamente.'
+          )
+        );
       }
     } finally {
       setGoogleLoading(false);
@@ -154,17 +168,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
     e.preventDefault();
     const cleanEmail = sanitizeEmail(email);
     if (!cleanEmail || !isValidEmail(cleanEmail)) {
-      setErrorMsg('Ingresá un correo electrónico válido.');
+      setErrorMsg(tr('Ingresá un correo electrónico válido.', 'Enter a valid email address.', 'Digite um e-mail válido.'));
       return;
     }
     if (!password) {
-      setErrorMsg('Ingresá tu contraseña.');
+      setErrorMsg(tr('Ingresá tu contraseña.', 'Enter your password.', 'Digite sua senha.'));
       return;
     }
     if (mode === 'signup') {
       if (password.length < 8 || !/[a-zA-Z]/.test(password) || !/\d/.test(password)) {
         setErrorMsg(
-          'Para crear una cuenta, la contraseña debe tener al menos 8 caracteres, incluyendo letras y números.'
+          tr(
+            'Para crear una cuenta, la contraseña debe tener al menos 8 caracteres, incluyendo letras y números.',
+            'To create an account, the password must have at least 8 characters, including letters and numbers.',
+            'Para criar uma conta, a senha deve ter pelo menos 8 caracteres, incluindo letras e números.'
+          )
         );
         return;
       }
@@ -177,7 +195,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
       if (mode === 'login') {
         const guard = await getLoginGuardStatus(cleanEmail);
         if (guard.requiresOtp && guard.lockedUntil) {
-          const lockMessage = `Cuenta bloqueada temporalmente por 5 minutos tras ${MAX_LOGIN_ATTEMPTS} intentos fallidos. Solicitá e ingresá un código de 6 dígitos enviado a tu correo para desbloquear.`;
+          const lockMessage = tr(
+            `Cuenta bloqueada temporalmente por 5 minutos tras ${MAX_LOGIN_ATTEMPTS} intentos fallidos. Solicitá e ingresá un código de 6 dígitos enviado a tu correo para desbloquear.`,
+            `Account temporarily locked for 5 minutes after ${MAX_LOGIN_ATTEMPTS} failed attempts. Request and enter a 6-digit code sent to your email to unlock.`,
+            `Conta bloqueada temporariamente por 5 minutos após ${MAX_LOGIN_ATTEMPTS} tentativas falhas. Solicite e digite um código de 6 dígitos enviado ao seu e-mail para desbloquear.`
+          );
           rememberLockedEmail(cleanEmail);
           setRemainingAttempts(0);
           setPassword('');
@@ -211,7 +233,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
           notify('Cuenta creada e iniciada correctamente.');
         } else {
           setInfoMsg(
-            'Cuenta creada. Revisá tu correo electrónico para confirmar la cuenta y luego iniciá sesión.'
+            tr(
+              'Cuenta creada. Revisá tu correo electrónico para confirmar la cuenta y luego iniciá sesión.',
+              'Account created. Check your email to confirm your account, then sign in.',
+              'Conta criada. Verifique seu e-mail para confirmar a conta e depois faça login.'
+            )
           );
           setMode('login');
         }
@@ -225,7 +251,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
         if (mode === 'login') {
           const nextGuard = await recordFailedPasswordAttempt(cleanEmail);
           if (nextGuard.requiresOtp && nextGuard.lockedUntil) {
-            const lockMessage = `Superaste los ${MAX_LOGIN_ATTEMPTS} errores de contraseña. Bloqueamos el acceso por 5 minutos; pedí un código de 6 dígitos a tu correo para desbloquear antes.`;
+            const lockMessage = tr(
+              `Superaste los ${MAX_LOGIN_ATTEMPTS} errores de contraseña. Bloqueamos el acceso por 5 minutos; pedí un código de 6 dígitos a tu correo para desbloquear antes.`,
+              `You exceeded ${MAX_LOGIN_ATTEMPTS} password errors. Access is locked for 5 minutes; request a 6-digit email code to unlock earlier.`,
+              `Você excedeu ${MAX_LOGIN_ATTEMPTS} erros de senha. O acesso foi bloqueado por 5 minutos; peça um código de 6 dígitos por e-mail para desbloquear antes.`
+            );
             setRemainingAttempts(0);
             setPassword('');
             setErrorMsg(lockMessage);
@@ -237,26 +267,34 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
           } else {
             setRemainingAttempts(nextGuard.remainingAttempts);
             setErrorMsg(
-              `Correo o contraseña incorrectos. Te ${
-                nextGuard.remainingAttempts === 1
-                  ? 'queda 1 intento'
-                  : `quedan ${nextGuard.remainingAttempts} intentos`
-              } antes del bloqueo temporal de 5 minutos.`
+              tr(
+                `Correo o contraseña incorrectos. Te ${
+                  nextGuard.remainingAttempts === 1
+                    ? 'queda 1 intento'
+                    : `quedan ${nextGuard.remainingAttempts} intentos`
+                } antes del bloqueo temporal de 5 minutos.`,
+                `Incorrect email or password. ${nextGuard.remainingAttempts} ${
+                  nextGuard.remainingAttempts === 1 ? 'attempt' : 'attempts'
+                } remaining before a 5-minute temporary lock.`,
+                `E-mail ou senha incorretos. Restam ${nextGuard.remainingAttempts} ${
+                  nextGuard.remainingAttempts === 1 ? 'tentativa' : 'tentativas'
+                } antes do bloqueio temporário de 5 minutos.`
+              )
             );
           }
         } else {
-          setErrorMsg('Correo o contraseña incorrectos.');
+          setErrorMsg(tr('Correo o contraseña incorrectos.', 'Incorrect email or password.', 'E-mail ou senha incorretos.'));
         }
       } else if (msg.includes('email not confirmed')) {
-        setErrorMsg('Tu correo todavía no está confirmado. Revisá tu bandeja de entrada.');
+        setErrorMsg(tr('Tu correo todavía no está confirmado. Revisá tu bandeja de entrada.', 'Your email is not confirmed yet. Check your inbox.', 'Seu e-mail ainda não foi confirmado. Verifique sua caixa de entrada.'));
       } else if (msg.includes('user already registered')) {
-        setErrorMsg('Ya existe una cuenta registrada con ese correo.');
+        setErrorMsg(tr('Ya existe una cuenta registrada con ese correo.', 'An account with this email already exists.', 'Já existe uma conta registrada com esse e-mail.'));
       } else if (msg.includes('rate limit') || msg.includes('too many')) {
-        setErrorMsg('Demasiados intentos. Esperá unos minutos e intentá nuevamente.');
+        setErrorMsg(tr('Demasiados intentos. Esperá unos minutos e intentá nuevamente.', 'Too many attempts. Wait a few minutes and try again.', 'Muitas tentativas. Aguarde alguns minutos e tente novamente.'));
       } else if (msg.includes('password')) {
-        setErrorMsg('La contraseña no cumple con los requisitos mínimos de seguridad.');
+        setErrorMsg(tr('La contraseña no cumple con los requisitos mínimos de seguridad.', 'Password does not meet the minimum security requirements.', 'A senha não atende aos requisitos mínimos de segurança.'));
       } else {
-        setErrorMsg('No se pudo completar la autenticación. Verificá tus datos e intentá otra vez.');
+        setErrorMsg(tr('No se pudo completar la autenticación. Verificá tus datos e intentá otra vez.', 'Could not complete authentication. Check your details and try again.', 'Não foi possível concluir a autenticação. Verifique seus dados e tente novamente.'));
       }
     } finally {
       setLoading(false);
@@ -528,7 +566,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
               </form>
 
               <p className="text-center text-xs text-slate-500 dark:text-slate-400">
-                Cada taller mantiene sus órdenes, clientes, inventario y finanzas aislados bajo su cuenta.
+                {tr(
+                  'Cada taller mantiene sus órdenes, clientes, inventario y finanzas aislados bajo su cuenta.',
+                  'Each workshop keeps its orders, clients, inventory, and finances isolated under its own account.',
+                  'Cada oficina mantém suas ordens, clientes, estoque e finanças isolados em sua conta.'
+                )}
               </p>
             </div>
         </div>
@@ -555,7 +597,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
           setRemainingAttempts(null);
           setErrorMsg('');
           setInfoMsg(
-            `El bloqueo temporal de 5 minutos para ${unlockedEmail} finalizó. Ya podés volver a intentar con tu contraseña.`
+            tr(
+              `El bloqueo temporal de 5 minutos para ${unlockedEmail} finalizó. Ya podés volver a intentar con tu contraseña.`,
+              `The 5-minute temporary lock for ${unlockedEmail} has ended. You can try your password again.`,
+              `O bloqueio temporário de 5 minutos para ${unlockedEmail} terminou. Você já pode tentar sua senha novamente.`
+            )
           );
         }}
       />
@@ -834,10 +880,18 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
             </span>
             <div>
               <div className="text-sm font-bold text-slate-900 dark:text-white font-display">
-                Taller · Marca y comprobantes
+                {tr(
+                  'Taller · Marca y comprobantes',
+                  'Workshop · Brand & receipts',
+                  'Oficina · Marca e comprovantes'
+                )}
               </div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                Todos estos datos se reflejan automáticamente en tus boletas A4, 80mm y PDF.
+                {tr(
+                  'Todos estos datos se reflejan automáticamente en tus boletas A4, 80mm y PDF.',
+                  'All these details are automatically reflected on your A4, 80mm, and PDF receipts.',
+                  'Todos esses dados são exibidos automaticamente nos comprovantes A4, 80mm e PDF.'
+                )}
               </div>
             </div>
           </div>
@@ -845,7 +899,7 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Nombre o marca del taller
+                {tr('Nombre o marca del taller', 'Workshop brand name', 'Nome ou marca da oficina')}
               </label>
               <input
                 type="text"
@@ -859,21 +913,25 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
 
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Subtítulo / Rubro del taller
+                {tr('Subtítulo / Rubro del taller', 'Subtitle / Workshop specialty', 'Subtítulo / Especialidade')}
               </label>
               <input
                 type="text"
                 maxLength={80}
                 value={subtitleText}
                 onChange={(e) => setSubtitleText(e.target.value)}
-                placeholder="Ej: Servicio técnico especializado"
+                placeholder={tr(
+                  'Ej: Servicio técnico especializado',
+                  'e.g. Specialized repair shop',
+                  'Ex: Assistência técnica especializada'
+                )}
                 className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
 
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Teléfono del local
+                {tr('Teléfono del local', 'Shop phone', 'Telefone da loja')}
               </label>
               <input
                 type="tel"
@@ -887,14 +945,14 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
 
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Dirección del local
+                {tr('Dirección del local', 'Shop address', 'Endereço da loja')}
               </label>
               <input
                 type="text"
                 maxLength={120}
                 value={businessAddress}
                 onChange={(e) => setBusinessAddress(e.target.value)}
-                placeholder="Av. Principal 1234"
+                placeholder={tr('Av. Principal 1234', '1234 Main Ave', 'Av. Principal 1234')}
                 className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
@@ -912,15 +970,23 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
                     htmlFor="onboarding-currency-select"
                     className="block text-xs font-bold text-slate-800 dark:text-slate-100"
                   >
-                    Moneda del taller, presupuestos y boletas
+                    {tr(
+                      'Moneda del taller, presupuestos y boletas',
+                      'Workshop, quotes, and receipts currency',
+                      'Moeda da oficina, orçamentos e comprovantes'
+                    )}
                   </label>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Se aplica en presupuestos, señas, inventario, ventas, WhatsApp y boletas A4, 80mm y PDF.
+                    {tr(
+                      'Se aplica en presupuestos, señas, inventario, ventas, WhatsApp y boletas A4, 80mm y PDF.',
+                      'Applies to quotes, deposits, inventory, sales, WhatsApp, and A4, 80mm, and PDF receipts.',
+                      'Aplica-se a orçamentos, sinais, estoque, vendas, WhatsApp e comprovantes A4, 80mm e PDF.'
+                    )}
                   </p>
                 </div>
               </div>
               <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-mono-num text-xs font-bold text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-sky-300">
-                Ej: {formatCurrency(15000, currency)}
+                {tr('Ej:', 'Ex:', 'Ex:')} {formatCurrency(15000, currency)}
               </div>
             </div>
 
@@ -944,31 +1010,43 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
           <div className="space-y-3 rounded-2xl border border-sky-200/80 bg-sky-50/40 p-4 dark:border-sky-900/50 dark:bg-sky-950/20">
             <div>
               <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                Opciones extra para mostrar en cada boleta
+                {tr(
+                  'Opciones extra para mostrar en cada boleta',
+                  'Extra details printed on receipts',
+                  'Opções extras para exibir nos comprovantes'
+                )}
               </div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                Completá las que quieras imprimir en boletas de reparación, ventas, lotes y PDF.
+                {tr(
+                  'Completá las que quieras imprimir en boletas de reparación, ventas, lotes y PDF.',
+                  'Fill in whichever fields you want on repair, sales, batch, and PDF receipts.',
+                  'Preencha os campos que deseja imprimir nos comprovantes e PDFs.'
+                )}
               </div>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Horarios de atención
+                  {tr('Horarios de atención', 'Business hours', 'Horário de atendimento')}
                 </label>
                 <input
                   type="text"
                   maxLength={100}
                   value={hours}
                   onChange={(e) => setHours(e.target.value)}
-                  placeholder="Ej: Lun a Vie 9:30 a 19:00 · Sáb 10 a 14"
+                  placeholder={tr(
+                    'Ej: Lun a Vie 9:30 a 19:00 · Sáb 10 a 14',
+                    'e.g. Mon–Fri 9:30–19:00 · Sat 10–14',
+                    'Ex: Seg a Sex 9:30–19:00 · Sáb 10–14'
+                  )}
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
 
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Instagram / Web
+                  {tr('Instagram / Web', 'Instagram / Website', 'Instagram / Site')}
                 </label>
                 <input
                   type="text"
@@ -982,42 +1060,50 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
 
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  CUIT / Documento comercial (opcional)
+                  {tr('CUIT / Documento comercial (opcional)', 'Tax ID / Business ID (optional)', 'CNPJ / Documento fiscal (opcional)')}
                 </label>
                 <input
                   type="text"
                   maxLength={60}
                   value={taxId}
                   onChange={(e) => setTaxId(e.target.value)}
-                  placeholder="Ej: CUIT 20-12345678-9"
+                  placeholder={tr('Ej: CUIT 20-12345678-9', 'e.g. Tax ID 12-3456789', 'Ex: CNPJ 12.345.678/0001-90')}
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
 
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Email de contacto
+                  {tr('Email de contacto', 'Contact email', 'E-mail de contato')}
                 </label>
                 <input
                   type="email"
                   maxLength={100}
                   value={businessEmail}
                   onChange={(e) => setBusinessEmail(e.target.value)}
-                  placeholder="Ej: contacto@tutaller.com"
+                  placeholder={tr('Ej: contacto@tutaller.com', 'e.g. contact@yourshop.com', 'Ex: contato@suaoficina.com')}
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
 
               <div className="sm:col-span-2">
                 <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Garantía o mensaje destacado al pie de boleta
+                  {tr(
+                    'Garantía o mensaje destacado al pie de boleta',
+                    'Warranty or footer note on receipts',
+                    'Garantia ou mensagem de rodapé do comprovante'
+                  )}
                 </label>
                 <input
                   type="text"
                   maxLength={180}
                   value={footerNote}
                   onChange={(e) => setFooterNote(e.target.value)}
-                  placeholder="Ej: Garantía 30 días sobre el trabajo realizado · ¡Gracias por elegirnos!"
+                  placeholder={tr(
+                    'Ej: Garantía 30 días sobre el trabajo realizado · ¡Gracias por elegirnos!',
+                    'e.g. 30-day warranty on completed work · Thank you for choosing us!',
+                    'Ex: Garantia de 30 dias no serviço realizado · Obrigado pela preferência!'
+                  )}
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
@@ -1027,7 +1113,7 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
           {/* Color por palabra y vista previa */}
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
             <div className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Color por palabra y vista previa
+              {tr('Color por palabra y vista previa', 'Color per word & preview', 'Cor por palavra e pré-visualização')}
             </div>
             <div className="flex flex-wrap items-center gap-3">
               {words.map((word, idx) => (
@@ -1069,7 +1155,7 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
                 <ImageIcon className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
-                <span>Logo del taller (opcional)</span>
+                <span>{tr('Logo del taller (opcional)', 'Workshop logo (optional)', 'Logotipo da oficina (opcional)')}</span>
               </div>
               {logoDataUrl && (
                 <button
@@ -1078,7 +1164,7 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
                   className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  Quitar logo
+                  {tr('Quitar logo', 'Remove logo', 'Remover logotipo')}
                 </button>
               )}
             </div>
@@ -1114,7 +1200,7 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
                 >
                   <img
                     src={logoDataUrl}
-                    alt="Vista previa del logo"
+                    alt={tr('Vista previa del logo', 'Logo preview', 'Pré-visualização do logotipo')}
                     referrerPolicy="no-referrer"
                     style={{ height: `${Math.round((48 * logoScale) / 100)}px` }}
                     className="max-w-full object-contain"
@@ -1124,10 +1210,11 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
                 <>
                   <UploadCloud className="h-7 w-7 text-slate-400" />
                   <div className="text-xs text-slate-600 dark:text-slate-300">
-                    <strong>Clic para seleccionar</strong> o arrastrá una imagen
+                    <strong>{tr('Clic para seleccionar', 'Click to select', 'Clique para selecionar')}</strong>{' '}
+                    {tr('o arrastrá una imagen', 'or drag an image here', 'ou arraste uma imagem')}
                   </div>
                   <div className="text-[11px] text-slate-400">
-                    PNG transparente recomendado · Máx 2 MB
+                    {tr('PNG transparente recomendado · Máx 2 MB', 'Transparent PNG recommended · Max 2 MB', 'PNG transparente recomendado · Máx 2 MB')}
                   </div>
                 </>
               )}
@@ -1135,7 +1222,7 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
 
             <div className="space-y-1">
               <div className="flex items-center justify-between text-xs font-medium text-slate-700 dark:text-slate-300">
-                <span>Tamaño del logo</span>
+                <span>{tr('Tamaño del logo', 'Logo size', 'Tamanho do logotipo')}</span>
                 <span className="font-mono-num">{logoScale}%</span>
               </div>
               <input
@@ -1158,10 +1245,13 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
               />
               <span>
                 <strong className="block text-slate-900 dark:text-white">
-                  Mi logo tiene fondo transparente
+                  {tr('Mi logo tiene fondo transparente', 'My logo has a transparent background', 'Meu logotipo tem fundo transparente')}
                 </strong>
-                Si subiste un JPG o PNG con fondo blanco, desmarcalo para mostrarlo sobre un recuadro
-                claro.
+                {tr(
+                  'Si subiste un JPG o PNG con fondo blanco, desmarcalo para mostrarlo sobre un recuadro claro.',
+                  'If you uploaded a JPG or PNG with a white background, uncheck to display it on a light badge.',
+                  'Se você enviou um JPG ou PNG com fundo branco, desmarque para exibi-lo em um quadro claro.'
+                )}
               </span>
             </label>
           </div>
@@ -1169,14 +1259,18 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
           {/* Términos y condiciones */}
           <div>
             <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Términos y condiciones
+              {tr('Términos y condiciones', 'Terms and conditions', 'Termos e condições')}
             </label>
             <textarea
               rows={4}
               maxLength={2000}
               value={receiptTerms}
               onChange={(e) => setReceiptTerms(e.target.value)}
-              placeholder="Escribí los términos y condiciones que aparecerán en la boleta del cliente..."
+              placeholder={tr(
+                'Escribí los términos y condiciones que aparecerán en la boleta del cliente...',
+                'Write the terms and conditions shown on the customer receipt...',
+                'Escreva os termos e condições que aparecerão no comprovante do cliente...'
+              )}
               className="w-full rounded-xl border border-slate-200 bg-white p-3 text-xs leading-relaxed text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
           </div>
@@ -1184,7 +1278,11 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
           {/* URL pública de seguimiento */}
           <div>
             <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Dirección pública del sitio para links de seguimiento (opcional)
+              {tr(
+                'Dirección pública del sitio para links de seguimiento (opcional)',
+                'Public site URL for tracking links (optional)',
+                'Endereço público do site para links de acompanhamento (opcional)'
+              )}
             </label>
             <input
               type="url"

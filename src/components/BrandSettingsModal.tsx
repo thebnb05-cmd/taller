@@ -718,21 +718,25 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
 
           <div>
             <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Subtítulo / Rubro del taller
+              {tr('Subtítulo / Rubro del taller', 'Subtitle / Workshop specialty', 'Subtítulo / Ramo da oficina')}
             </label>
             <input
               type="text"
               maxLength={80}
               value={subtitleText}
               onChange={(e) => setSubtitleText(e.target.value)}
-              placeholder="Ej: Servicio técnico especializado"
+              placeholder={tr(
+                'Ej: Servicio técnico especializado',
+                'Ex: Specialized repair service',
+                'Ex: Assistência técnica especializada'
+              )}
               className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
           </div>
 
           <div>
             <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Teléfono del local
+              {tr('Teléfono del local', 'Shop phone', 'Telefone da loja')}
             </label>
             <input
               type="tel"
@@ -745,7 +749,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
 
           <div>
             <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Dirección del local
+              {tr('Dirección del local', 'Shop address', 'Endereço da loja')}
             </label>
             <input
               type="text"
@@ -768,15 +772,23 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
                   htmlFor="workshop-currency-select"
                   className="block text-xs font-bold text-slate-800 dark:text-slate-100"
                 >
-                  Moneda base del taller, presupuestos y boletas
+                  {tr(
+                    'Moneda base del taller, presupuestos y boletas',
+                    'Base currency for workshop, quotes & receipts',
+                    'Moeda base da oficina, orçamentos e comprovantes'
+                  )}
                 </label>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Se aplica en presupuestos, señas, inventario, ventas, WhatsApp y boletas A4, 80mm y PDF.
+                  {tr(
+                    'Se aplica en presupuestos, señas, inventario, ventas, WhatsApp y boletas A4, 80mm y PDF.',
+                    'Applied to quotes, deposits, inventory, sales, WhatsApp, and A4, 80mm & PDF receipts.',
+                    'Aplicada em orçamentos, sinais, estoque, vendas, WhatsApp e comprovantes A4, 80mm e PDF.'
+                  )}
                 </p>
               </div>
             </div>
             <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-mono-num text-xs font-bold text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-sky-300">
-              Ej: {formatCurrency(15000, currency)}
+              {tr('Ej:', 'Ex:', 'Ex:')} {formatCurrency(15000, currency)}
             </div>
           </div>
 
@@ -799,10 +811,18 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="text-xs font-bold text-slate-800 dark:text-slate-100">
-                  Monedas secundarias y tasas de conversión
+                  {tr(
+                    'Monedas secundarias y tasas de conversión',
+                    'Secondary currencies & exchange rates',
+                    'Moedas secundárias e taxas de conversão'
+                  )}
                 </div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Definí monedas alternativas y su equivalencia respecto a {baseCurrencyOption.code} ({baseCurrencyOption.symbol}).
+                  {tr(
+                    `Definí monedas alternativas y su equivalencia respecto a ${baseCurrencyOption.code} (${baseCurrencyOption.symbol}).`,
+                    `Set alternative currencies and their exchange rate relative to ${baseCurrencyOption.code} (${baseCurrencyOption.symbol}).`,
+                    `Defina moedas alternativas e sua equivalência em relação a ${baseCurrencyOption.code} (${baseCurrencyOption.symbol}).`
+                  )}
                 </p>
               </div>
               <button
@@ -812,13 +832,17 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#0072BB]/30 bg-white px-2.5 text-xs font-semibold text-[#0072BB] transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-sky-700/50 dark:bg-slate-900 dark:text-sky-300 dark:hover:bg-sky-950/40"
               >
                 <Plus className="h-3.5 w-3.5" />
-                Agregar moneda
+                {tr('Agregar moneda', 'Add currency', 'Adicionar moeda')}
               </button>
             </div>
 
             {secondaryRows.length === 0 ? (
               <p className="mt-2.5 rounded-xl border border-dashed border-slate-200 bg-white/70 px-3 py-2.5 text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-400">
-                No hay monedas secundarias configuradas. Podés agregar por ejemplo USD o EUR con su cotización frente a {baseCurrencyOption.code}.
+                {tr(
+                  `No hay monedas secundarias configuradas. Podés agregar por ejemplo USD o EUR con su cotización frente a ${baseCurrencyOption.code}.`,
+                  `No secondary currencies configured. You can add e.g. USD or EUR with their rate against ${baseCurrencyOption.code}.`,
+                  `Nenhuma moeda secundária configurada. Você pode adicionar por exemplo USD ou EUR com a cotação frente a ${baseCurrencyOption.code}.`
+                )}
               </p>
             ) : (
               <div className="mt-3 space-y-2.5">
@@ -909,80 +933,108 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
         <div className="space-y-3 rounded-2xl border border-sky-200/80 bg-sky-50/40 p-4 dark:border-sky-900/50 dark:bg-sky-950/20">
           <div>
             <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
-              Opciones extra para mostrar en cada boleta
+              {tr(
+                'Opciones extra para mostrar en cada boleta',
+                'Extra details shown on each receipt',
+                'Opções extras para exibir em cada comprovante'
+              )}
             </div>
             <div className="text-[11px] text-slate-500 dark:text-slate-400">
-              Completá las que quieras imprimir en boletas de reparación, ventas, lotes y PDF.
+              {tr(
+                'Completá las que quieras imprimir en boletas de reparación, ventas, lotes y PDF.',
+                'Fill in any details you want printed on repair, sales, batch and PDF receipts.',
+                'Preencha os campos que deseja imprimir nos comprovantes de reparo, vendas, lotes e PDF.'
+              )}
             </div>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Horarios de atención
+                {tr('Horarios de atención', 'Business hours', 'Horário de atendimento')}
               </label>
               <input
                 type="text"
                 maxLength={100}
                 value={hours}
                 onChange={(e) => setHours(e.target.value)}
-                placeholder="Ej: Lun a Vie 9:30 a 19:00 · Sáb 10 a 14"
+                placeholder={tr(
+                  'Ej: Lun a Vie 9:30 a 19:00 · Sáb 10 a 14',
+                  'Ex: Mon–Fri 9:30 AM – 7:00 PM · Sat 10 AM – 2 PM',
+                  'Ex: Seg a Sex 9:30 às 19:00 · Sáb 10 às 14'
+                )}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
 
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Instagram / Web
+                {tr('Instagram / Web', 'Instagram / Website', 'Instagram / Site')}
               </label>
               <input
                 type="text"
                 maxLength={100}
                 value={social}
                 onChange={(e) => setSocial(e.target.value)}
-                placeholder="Ej: @th3bnb.servicio · www.th3bnb.com"
+                placeholder={tr(
+                  'Ej: @th3bnb.servicio · www.th3bnb.com',
+                  'Ex: @myworkshop · www.myworkshop.com',
+                  'Ex: @minhaoficina · www.minhaoficina.com'
+                )}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
 
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                CUIT / Documento comercial (opcional)
+                {tr(
+                  'CUIT / Documento comercial (opcional)',
+                  'Tax ID / Business ID (optional)',
+                  'CNPJ / Documento comercial (opcional)'
+                )}
               </label>
               <input
                 type="text"
                 maxLength={60}
                 value={taxId}
                 onChange={(e) => setTaxId(e.target.value)}
-                placeholder="Ej: CUIT 20-12345678-9"
+                placeholder={tr('Ej: CUIT 20-12345678-9', 'Ex: EIN 12-3456789', 'Ex: CNPJ 12.345.678/0001-90')}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
 
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Email de contacto
+                {tr('Email de contacto', 'Contact email', 'E-mail de contato')}
               </label>
               <input
                 type="email"
                 maxLength={100}
                 value={businessEmail}
                 onChange={(e) => setBusinessEmail(e.target.value)}
-                placeholder="Ej: contacto@tutaller.com"
+                placeholder={tr('Ej: contacto@tutaller.com', 'Ex: contact@yourshop.com', 'Ex: contato@suaoficina.com')}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
 
             <div className="sm:col-span-2">
               <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Garantía o mensaje destacado al pie de boleta
+                {tr(
+                  'Garantía o mensaje destacado al pie de boleta',
+                  'Warranty or footer note on receipt',
+                  'Garantia ou mensagem de rodapé no comprovante'
+                )}
               </label>
               <input
                 type="text"
                 maxLength={180}
                 value={footerNote}
                 onChange={(e) => setFooterNote(e.target.value)}
-                placeholder="Ej: Garantía 30 días sobre el trabajo realizado · ¡Gracias por elegirnos!"
+                placeholder={tr(
+                  'Ej: Garantía 30 días sobre el trabajo realizado · ¡Gracias por elegirnos!',
+                  'Ex: 30-day warranty on service performed · Thank you for choosing us!',
+                  'Ex: Garantia de 30 dias sobre o serviço realizado · Obrigado pela preferência!'
+                )}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
@@ -997,10 +1049,18 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
               </span>
               <div>
                 <div className="text-xs font-bold text-slate-800 dark:text-slate-100">
-                  Asignación de técnicos (opcional)
+                  {tr(
+                    'Asignación de técnicos (opcional)',
+                    'Technician assignment (optional)',
+                    'Atribuição de técnicos (opcional)'
+                  )}
                 </div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Si trabajás solo como dueño del taller podés dejarlo desactivado. Activándolo elegís qué técnico toma cada orden.
+                  {tr(
+                    'Si trabajás solo como dueño del taller podés dejarlo desactivado. Activándolo elegís qué técnico toma cada orden.',
+                    'If you work solo you can leave this off. Enable it to assign a technician to each order.',
+                    'Se você trabalha sozinho pode deixar desativado. Ao ativar, escolha qual técnico assume cada ordem.'
+                  )}
                 </p>
               </div>
             </div>
@@ -1012,7 +1072,9 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
                 className="h-4 w-4 rounded accent-[#0072BB]"
               />
               <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-                {techniciansEnabled ? 'Activo' : 'Opcional'}
+                {techniciansEnabled
+                  ? tr('Activo', 'Enabled', 'Ativo')
+                  : tr('Opcional', 'Optional', 'Opcional')}
               </span>
             </label>
           </div>
@@ -1031,7 +1093,11 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
                       handleAddTechnician();
                     }
                   }}
-                  placeholder="Nombre del técnico (ej: Marcos, Sofía...)"
+                  placeholder={tr(
+                    'Nombre del técnico (ej: Marcos, Sofía...)',
+                    'Technician name (ex: Alex, Sofia...)',
+                    'Nome do técnico (ex: Marcos, Sofia...)'
+                  )}
                   className="h-10 min-w-[180px] flex-1 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                 />
                 <button
@@ -1041,7 +1107,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
                   className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0072BB] px-3.5 text-xs font-semibold text-white transition hover:bg-[#005f9c] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  Agregar
+                  {tr('Agregar', 'Add', 'Adicionar')}
                 </button>
                 {ownerDisplayName &&
                   !technicians.some((t) => t.toLowerCase() === ownerDisplayName.toLowerCase()) && (
@@ -1051,14 +1117,18 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
                       className="inline-flex h-10 items-center gap-1 rounded-xl border border-[#0072BB]/30 bg-white px-3 text-xs font-semibold text-[#0072BB] hover:bg-sky-50 dark:border-sky-700/50 dark:bg-slate-900 dark:text-sky-300 dark:hover:bg-sky-950/40"
                     >
                       <Plus className="h-3.5 w-3.5" />
-                      Agregarme ({ownerDisplayName})
+                      {tr('Agregarme', 'Add myself', 'Me adicionar')} ({ownerDisplayName})
                     </button>
                   )}
               </div>
 
               {technicians.length === 0 ? (
                 <p className="rounded-xl border border-dashed border-slate-200 bg-white/70 px-3 py-2 text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-400">
-                  Agregá al menos un técnico para habilitar el selector en nuevas órdenes y filtros.
+                  {tr(
+                    'Agregá al menos un técnico para habilitar el selector en nuevas órdenes y filtros.',
+                    'Add at least one technician to enable the selector on new orders and filters.',
+                    'Adicione pelo menos um técnico para ativar o seletor em novas ordens e filtros.'
+                  )}
                 </p>
               ) : (
                 <div className="flex flex-wrap gap-2">
@@ -1136,8 +1206,8 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
                   </div>
                   <p className="mt-0.5 text-[11px] text-slate-600 dark:text-slate-300">
                     {isExempt
-                      ? `Renovación anual automática sin costo ($0) el ${expiryStr}`
-                      : `${rem.detailLabel} · Vence el ${expiryStr}`}
+                      ? `${tr('Renovación anual automática sin costo ($0) el', 'Auto annual renewal at $0 on', 'Renovação anual automática gratuita em')} ${expiryStr}`
+                      : `${rem.detailLabel} · ${tr('Vence el', 'Expires on', 'Vence em')} ${expiryStr}`}
                   </p>
                 </div>
               </div>
@@ -1151,7 +1221,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
                   }}
                   className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0072BB] px-3.5 text-xs font-semibold text-white transition hover:bg-[#005f9c]"
                 >
-                  Ver planes / Suscripción
+                  {tr('Ver planes / Suscripción', 'View plans / Subscription', 'Ver planos / Assinatura')}
                 </button>
               )}
             </div>
@@ -1435,7 +1505,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
 
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
           <div className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
-            Color por palabra y vista previa
+            {tr('Color por palabra y vista previa', 'Word colors & preview', 'Cor por palavra e pré-visualização')}
           </div>
           <div className="flex flex-wrap items-center gap-3">
             {words.map((word, idx) => (
@@ -1476,7 +1546,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
               <ImageIcon className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
-              <span>Logo del taller</span>
+              <span>{tr('Logo del taller', 'Workshop logo', 'Logotipo da oficina')}</span>
             </div>
             {logoDataUrl && (
               <button
@@ -1485,7 +1555,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
                 className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                Quitar logo
+                {tr('Quitar logo', 'Remove logo', 'Remover logotipo')}
               </button>
             )}
           </div>
@@ -1521,7 +1591,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
               >
                 <img
                   src={logoDataUrl}
-                  alt="Vista previa del logo"
+                  alt={tr('Vista previa del logo', 'Logo preview', 'Pré-visualização do logotipo')}
                   referrerPolicy="no-referrer"
                   style={{ height: `${Math.round((48 * logoScale) / 100)}px` }}
                   className="max-w-full object-contain"
@@ -1531,10 +1601,15 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
               <>
                 <UploadCloud className="h-7 w-7 text-slate-400" />
                 <div className="text-xs text-slate-600 dark:text-slate-300">
-                  <strong>Clic para seleccionar</strong> o arrastrá una imagen
+                  <strong>{tr('Clic para seleccionar', 'Click to select', 'Clique para selecionar')}</strong>{' '}
+                  {tr('o arrastrá una imagen', 'or drag an image here', 'ou arraste uma imagem')}
                 </div>
                 <div className="text-[11px] text-slate-400">
-                  PNG transparente recomendado · Máx 2 MB
+                  {tr(
+                    'PNG transparente recomendado · Máx 2 MB',
+                    'Transparent PNG recommended · Max 2 MB',
+                    'PNG transparente recomendado · Máx. 2 MB'
+                  )}
                 </div>
               </>
             )}
@@ -1542,7 +1617,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
 
           <div className="space-y-1">
             <div className="flex items-center justify-between text-xs font-medium text-slate-700 dark:text-slate-300">
-              <span>Tamaño del logo</span>
+              <span>{tr('Tamaño del logo', 'Logo size', 'Tamanho do logotipo')}</span>
               <span className="font-mono-num">{logoScale}%</span>
             </div>
             <input
@@ -1565,31 +1640,46 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
             />
             <span>
               <strong className="block text-slate-900 dark:text-white">
-                Mi logo tiene fondo transparente
+                {tr(
+                  'Mi logo tiene fondo transparente',
+                  'My logo has a transparent background',
+                  'Meu logotipo tem fundo transparente'
+                )}
               </strong>
-              Si subiste un JPG o PNG con fondo blanco, desmarcalo para mostrarlo sobre un recuadro
-              claro.
+              {tr(
+                'Si subiste un JPG o PNG con fondo blanco, desmarcalo para mostrarlo sobre un recuadro claro.',
+                'If you uploaded a JPG or PNG with a white background, uncheck this to display it on a light box.',
+                'Se enviou um JPG ou PNG com fundo branco, desmarque para exibi-lo sobre um fundo claro.'
+              )}
             </span>
           </label>
         </div>
 
         <div>
           <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-            Términos y condiciones
+            {tr('Términos y condiciones', 'Terms & conditions', 'Termos e condições')}
           </label>
           <textarea
             rows={4}
             maxLength={2000}
             value={receiptTerms}
             onChange={(e) => setReceiptTerms(e.target.value)}
-            placeholder="Escribí los términos y condiciones que aparecerán en la boleta del cliente..."
+            placeholder={tr(
+              'Escribí los términos y condiciones que aparecerán en la boleta del cliente...',
+              'Write the terms and conditions that will appear on the customer receipt...',
+              'Escreva os termos e condições que aparecerão no comprovante do cliente...'
+            )}
             className="w-full rounded-xl border border-slate-200 bg-white p-3 text-xs leading-relaxed text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
           />
         </div>
 
         <div>
           <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-            Dirección pública del sitio para links de seguimiento (opcional)
+            {tr(
+              'Dirección pública del sitio para links de seguimiento (opcional)',
+              'Public website URL for tracking links (optional)',
+              'Endereço público do site para links de acompanhamento (opcional)'
+            )}
           </label>
           <input
             type="url"
@@ -1608,10 +1698,14 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
               </span>
               <div>
                 <h4 className="text-xs font-bold text-slate-900 dark:text-white">
-                  Copia de seguridad completa
+                  {tr('Copia de seguridad completa', 'Full workshop backup', 'Backup completo')}
                 </h4>
                 <p className="mt-0.5 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
-                  Descargá un respaldo en formato JSON con tus reparaciones, clientes, inventario, ventas, compras, caja diaria, agenda y proveedores (sin tokens privados).
+                  {tr(
+                    'Descargá un respaldo en formato JSON con tus reparaciones, clientes, inventario, ventas, compras, caja diaria, agenda y proveedores (sin tokens privados).',
+                    'Download a JSON backup of your repairs, clients, inventory, sales, purchases, cash register, schedule and suppliers (no private tokens).',
+                    'Baixe um backup em JSON com seus reparos, clientes, estoque, vendas, compras, caixa, agenda e fornecedores (sem tokens privados).'
+                  )}
                 </p>
               </div>
             </div>
@@ -1626,7 +1720,9 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
               ) : (
                 <Download className="h-3.5 w-3.5" />
               )}
-              {exportingBackup ? 'Generando...' : 'Descargar respaldo (.json)'}
+              {exportingBackup
+                ? tr('Generando...', 'Generating...', 'Gerando...')
+                : tr('Descargar respaldo (.json)', 'Download backup (.json)', 'Baixar backup (.json)')}
             </button>
           </div>
         </div>
@@ -1639,10 +1735,18 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
               </span>
               <div>
                 <h4 className="text-xs font-bold text-red-900 dark:text-red-200">
-                  Eliminar cuenta y todos los datos
+                  {tr(
+                    'Eliminar cuenta y todos los datos',
+                    'Delete account and all data',
+                    'Excluir conta e todos os dados'
+                  )}
                 </h4>
                 <p className="mt-0.5 text-[11px] leading-relaxed text-red-800/85 dark:text-red-300/85">
-                  Borra de forma permanente tu usuario{(userEmail || profile.email) ? ` (${userEmail || profile.email})` : ''}, perfil del taller, reparaciones, clientes, inventario, ventas, compras, agenda, proveedores y links de seguimiento.
+                  {tr(
+                    `Borra de forma permanente tu usuario${(userEmail || profile.email) ? ` (${userEmail || profile.email})` : ''}, perfil del taller, reparaciones, clientes, inventario, ventas, compras, agenda, proveedores y links de seguimiento.`,
+                    `Permanently deletes your account${(userEmail || profile.email) ? ` (${userEmail || profile.email})` : ''}, workshop profile, repairs, clients, inventory, sales, purchases, schedule, suppliers and tracking links.`,
+                    `Exclui permanentemente sua conta${(userEmail || profile.email) ? ` (${userEmail || profile.email})` : ''}, perfil da oficina, reparos, clientes, estoque, vendas, compras, agenda, fornecedores e links de acompanhamento.`
+                  )}
                 </p>
               </div>
             </div>
@@ -1658,7 +1762,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
                 className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-red-300 bg-white px-3.5 text-xs font-semibold text-red-600 transition hover:bg-red-50 dark:border-red-800 dark:bg-slate-900 dark:text-red-400 dark:hover:bg-red-950/50"
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                Eliminar cuenta
+                {tr('Eliminar cuenta', 'Delete account', 'Excluir conta')}
               </button>
             )}
           </div>
@@ -1668,8 +1772,10 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
               <div className="flex items-start gap-2 text-xs text-red-800 dark:text-red-200">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
                 <span>
-                  Esta acción es <strong>irreversible</strong>. Para confirmar, escribí{' '}
-                  <strong className="font-mono">ELIMINAR</strong> debajo:
+                  {tr('Esta acción es', 'This action is', 'Esta ação é')}{' '}
+                  <strong>{tr('irreversible', 'irreversible', 'irreversível')}</strong>.{' '}
+                  {tr('Para confirmar, escribí', 'To confirm, type', 'Para confirmar, digite')}{' '}
+                  <strong className="font-mono">ELIMINAR</strong> {tr('debajo:', 'below:', 'abaixo:')}
                 </span>
               </div>
 
@@ -1685,7 +1791,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
                     }
                   }
                 }}
-                placeholder="Escribí ELIMINAR"
+                placeholder={tr('Escribí ELIMINAR', 'Type ELIMINAR', 'Digite ELIMINAR')}
                 disabled={deletingAccount}
                 className="h-10 w-full rounded-xl border border-red-300 bg-white px-3 font-mono text-xs font-semibold uppercase text-slate-900 outline-none focus:border-red-600 dark:border-red-800 dark:bg-slate-900 dark:text-white"
               />
@@ -1707,7 +1813,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
                   }}
                   className="h-9 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                 >
-                  Cancelar
+                  {tr('Cancelar', 'Cancel', 'Cancelar')}
                 </button>
                 <button
                   type="button"
@@ -1722,7 +1828,9 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
                   ) : (
                     <Trash2 className="h-3.5 w-3.5" />
                   )}
-                  {deletingAccount ? 'Eliminando todo...' : 'Confirmar eliminación'}
+                  {deletingAccount
+                    ? tr('Eliminando todo...', 'Deleting everything...', 'Excluindo tudo...')
+                    : tr('Confirmar eliminación', 'Confirm deletion', 'Confirmar exclusão')}
                 </button>
               </div>
             </div>
