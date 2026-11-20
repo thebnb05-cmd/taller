@@ -13,6 +13,7 @@ import type { PageId, WorkshopProfile } from '../types/workshop';
 import { sanitizePhone, sanitizePlainLine, sanitizeText } from '../utils/validation';
 import { ModalShell } from './ModalShell';
 import { useToast } from './ToastProvider';
+import { useI18n } from '../utils/i18n';
 
 interface SupportModalProps {
   open: boolean;
@@ -67,6 +68,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({
   currentPage,
 }) => {
   const { notify } = useToast();
+  const { tr } = useI18n();
   const [category, setCategory] = useState<SupportCategory>('consulta');
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
@@ -187,8 +189,12 @@ export const SupportModal: React.FC<SupportModalProps> = ({
     <ModalShell
       open={open}
       onClose={onClose}
-      title="Soporte, consultas y mejoras"
-      subtitle="Escribinos directo si encontraste una falla, tenés dudas o querés sugerir mejoras"
+      title={tr('Soporte, consultas y mejoras', 'Support, questions & feedback', 'Suporte, dúvidas e melhorias')}
+      subtitle={tr(
+        'Escribinos directo si encontraste una falla, tenés dudas o querés sugerir mejoras',
+        'Message us directly if you found a bug, have questions or want to suggest features',
+        'Fale conosco se encontrou um erro, tem dúvidas ou quer sugerir melhorias'
+      )}
       maxWidth="lg"
     >
       <div className="space-y-4">

@@ -1,6 +1,7 @@
 import type { RepairRecord } from '../types/workshop';
 import { STATUS_META } from '../data/catalog';
 import { getActiveCurrency, getCurrencyOption, type CurrencyCode } from './currency';
+import { getIntlLocale, getTranslatedStatusLabel } from './i18n';
 
 export function formatCurrency(
   value: number | undefined | null,
@@ -50,7 +51,7 @@ export function formatDateShort(dateStr: string | undefined): string {
   if (!dateStr) return '—';
   const parsed = new Date(dateStr.includes('T') ? dateStr : `${dateStr}T12:00:00`);
   if (Number.isNaN(parsed.getTime())) return dateStr;
-  return new Intl.DateTimeFormat('es-AR', {
+  return new Intl.DateTimeFormat(getIntlLocale(), {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
@@ -83,18 +84,21 @@ export function generateInternalProductCode(): string {
 }
 
 export function getStatusLabel(status: string): string {
-  return STATUS_META[status as keyof typeof STATUS_META]?.label ?? status;
+  return getTranslatedStatusLabel(status);
 }
 
 export function getStatusMeta(status: string) {
-  return (
+  const base =
     STATUS_META[status as keyof typeof STATUS_META] ?? {
       label: status,
       defaultProgress: 20,
       badgeClass: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200',
       barClass: 'bg-slate-500',
-    }
-  );
+    };
+  return {
+    ...base,
+    label: getTranslatedStatusLabel(status),
+  };
 }
 
 export function computeProductPricing(params: {

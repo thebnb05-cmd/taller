@@ -42,6 +42,7 @@ import { parsePaymentInfo } from '../utils/payment';
 import { downloadInventorySummaryPdf, downloadSalesSummaryPdf } from '../utils/pdfReport';
 import { parseRepairPaymentLedger } from '../utils/repairMeta';
 import { parseSaleDetails, parseSalePaymentInfo } from '../utils/saleMeta';
+import { useI18n } from '../utils/i18n';
 
 interface ReportsPageProps {
   profile?: WorkshopProfile | null;
@@ -126,6 +127,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
   onSelectProduct,
 }) => {
   const { notify } = useToast();
+  const { locale, tr } = useI18n();
   const [range, setRange] = useState<RangeId>('30');
   const [customFrom, setCustomFrom] = useState<string>(() => {
     const d = new Date();
@@ -513,7 +515,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           d.getDate()
         ).padStart(2, '0')}`;
         const label = `${d.getDate()}/${d.getMonth() + 1}`;
-        const fullLabel = new Intl.DateTimeFormat('es-AR', {
+        const fullLabel = new Intl.DateTimeFormat(locale, {
           day: '2-digit',
           month: 'short',
         }).format(d);
@@ -529,14 +531,14 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           '0'
         )}-${String(dayStart.getDate()).padStart(2, '0')}`;
         const label = `S ${dayStart.getDate()}/${dayStart.getMonth() + 1}`;
-        const fullLabel = `Semana del ${dayStart.getDate()}/${dayStart.getMonth() + 1}`;
+        const fullLabel = `${tr('Semana del', 'Week of', 'Semana de')} ${dayStart.getDate()}/${dayStart.getMonth() + 1}`;
         return { key, label, fullLabel };
       }
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      const label = new Intl.DateTimeFormat('es-AR', { month: 'short' })
+      const label = new Intl.DateTimeFormat(locale, { month: 'short' })
         .format(d)
         .replace('.', '');
-      const fullLabel = new Intl.DateTimeFormat('es-AR', {
+      const fullLabel = new Intl.DateTimeFormat(locale, {
         month: 'long',
         year: 'numeric',
       }).format(d);
@@ -705,29 +707,49 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-white font-display">
-            Reportes y Analítica
+            {tr('Reportes y Analítica', 'Reports & Analytics', 'Relatórios e Análises')}
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Evolución temporal, rentabilidad financiera, rendimiento operativo y estado del stock
+            {tr(
+              'Evolución temporal, rentabilidad financiera, rendimiento operativo y estado del stock',
+              'Time evolution, profitability, operational performance and inventory status',
+              'Evolução temporal, lucratividade, desempenho operacional e status do estoque'
+            )}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex flex-wrap items-center gap-1 rounded-xl border border-slate-200 bg-slate-100/90 p-1 dark:border-slate-800 dark:bg-slate-900">
-            {RANGE_OPTIONS.map((btn) => (
-              <button
-                key={btn.id}
-                type="button"
-                onClick={() => setRange(btn.id)}
-                className={`h-8 rounded-lg px-2.5 text-xs font-semibold transition whitespace-nowrap shrink-0 ${
-                  range === btn.id
-                    ? 'bg-white text-slate-900 shadow-2xs dark:bg-slate-800 dark:text-white'
-                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
-                }`}
-              >
-                {btn.label}
-              </button>
-            ))}
+            {RANGE_OPTIONS.map((btn) => {
+              const translatedRangeLabel =
+                btn.id === 'today'
+                  ? tr('Hoy', 'Today', 'Hoje')
+                  : btn.id === '7'
+                    ? tr('7 días', '7 days', '7 dias')
+                    : btn.id === 'month'
+                      ? tr('Este mes', 'This month', 'Este mês')
+                      : btn.id === '30'
+                        ? tr('30 días', '30 days', '30 dias')
+                        : btn.id === '90'
+                          ? tr('90 días', '90 days', '90 dias')
+                          : btn.id === 'custom'
+                            ? tr('Personalizado', 'Custom', 'Personalizado')
+                            : tr('Histórico', 'All time', 'Histórico');
+              return (
+                <button
+                  key={btn.id}
+                  type="button"
+                  onClick={() => setRange(btn.id)}
+                  className={`h-8 rounded-lg px-2.5 text-xs font-semibold transition whitespace-nowrap shrink-0 ${
+                    range === btn.id
+                      ? 'bg-white text-slate-900 shadow-2xs dark:bg-slate-800 dark:text-white'
+                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                  }`}
+                >
+                  {translatedRangeLabel}
+                </button>
+              );
+            })}
           </div>
 
           <div ref={pdfMenuRef} className="relative">
@@ -739,7 +761,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
               className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0072BB] px-3.5 text-xs font-semibold text-white transition hover:bg-[#005f9c] whitespace-nowrap shrink-0"
             >
               <FileDown className="h-4 w-4" />
-              <span>Exportar PDF</span>
+              <span>{tr('Exportar PDF', 'Export PDF', 'Exportar PDF')}</span>
               <ChevronDown className="h-3.5 w-3.5 opacity-80" />
             </button>
 
@@ -757,10 +779,14 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                   <ShoppingBag className="mt-0.5 h-4 w-4 shrink-0 text-[#0072BB] dark:text-sky-400" />
                   <div>
                     <div className="text-xs font-semibold text-slate-900 dark:text-white">
-                      Resumen de ventas (PDF)
+                      {tr('Resumen de ventas (PDF)', 'Sales summary (PDF)', 'Resumo de vendas (PDF)')}
                     </div>
                     <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Ingresos, órdenes y ventas del período
+                      {tr(
+                        'Ingresos, órdenes y ventas del período',
+                        'Income, orders and sales for the period',
+                        'Receitas, ordens e vendas do período'
+                      )}
                     </div>
                   </div>
                 </button>

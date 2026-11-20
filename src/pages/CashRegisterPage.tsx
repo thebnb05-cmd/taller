@@ -39,6 +39,7 @@ import {
   sanitizeText,
 } from '../utils/validation';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
+import { useI18n } from '../utils/i18n';
 
 interface CashRegisterPageProps {
   ownerId: string;
@@ -57,6 +58,7 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
   profile,
 }) => {
   const { notify } = useToast();
+  const { locale, tr } = useI18n();
   const baseCurrency = useMemo(() => parseWorkshopMeta(profile).currency, [profile]);
 
   const shifts = useMemo(() => {
@@ -270,7 +272,7 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
   const formatTime = (iso: string) => {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return '';
-    return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
   };
 
   const previewDiscrepancy =
@@ -283,12 +285,16 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-white font-display">
-            Caja diaria y arqueo
+            {tr('Caja diaria y arqueo', 'Daily cash register', 'Caixa diário e fechamento')}
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             {activeShift
-              ? `Turno abierto · ${formatDateShort(activeShift.shiftDate)} desde las ${formatTime(activeShift.openedAt)}${activeShift.openedBy ? ` · ${activeShift.openedBy}` : ''}`
-              : 'Mostrando movimientos de hoy · Abrí la caja para controlar efectivo y cierre'}
+              ? `${tr('Turno abierto', 'Open shift', 'Turno aberto')} · ${formatDateShort(activeShift.shiftDate)} ${tr('desde las', 'since', 'desde')} ${formatTime(activeShift.openedAt)}${activeShift.openedBy ? ` · ${activeShift.openedBy}` : ''}`
+              : tr(
+                  'Mostrando movimientos de hoy · Abrí la caja para controlar efectivo y cierre',
+                  'Showing today movements · Open register to track cash & closing',
+                  'Exibindo movimentações de hoje · Abra o caixa para controlar dinheiro e fechamento'
+                )}
           </p>
         </div>
 
@@ -305,7 +311,7 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
                 className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 hover:border-emerald-500 hover:text-emerald-700 whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
               >
                 <Plus className="h-4 w-4 text-emerald-600" />
-                Ingreso
+                {tr('Ingreso', 'Cash in', 'Entrada')}
               </button>
               <button
                 type="button"
@@ -317,7 +323,7 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
                 className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 hover:border-rose-500 hover:text-rose-700 whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
               >
                 <ArrowUpRight className="h-4 w-4 text-rose-600" />
-                Retiro / Gasto
+                {tr('Retiro / Gasto', 'Cash out / Expense', 'Retirada / Despesa')}
               </button>
               <button
                 type="button"
@@ -325,7 +331,7 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
                 className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-slate-900 px-4 text-xs font-semibold text-white hover:bg-slate-800 whitespace-nowrap shrink-0 dark:bg-[#0072BB] dark:hover:bg-[#005f9c]"
               >
                 <Lock className="h-4 w-4" />
-                Cerrar y arquear caja
+                {tr('Cerrar y arquear caja', 'Close & reconcile', 'Fechar caixa')}
               </button>
             </>
           ) : (
@@ -339,7 +345,7 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
               className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-xs font-semibold text-white hover:bg-[#005f9c] whitespace-nowrap shrink-0"
             >
               <Unlock className="h-4 w-4" />
-              Abrir caja del turno
+              {tr('Abrir caja del turno', 'Open register shift', 'Abrir caixa do turno')}
             </button>
           )}
         </div>
@@ -349,7 +355,7 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400">
-            <span>Efectivo esperado en caja</span>
+            <span>{tr('Efectivo esperado en caja', 'Expected cash in drawer', 'Dinheiro esperado no caixa')}</span>
             <Banknote className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
           </div>
           <div className="mt-1.5 font-mono-num text-2xl font-extrabold text-emerald-600 dark:text-emerald-400">
@@ -357,48 +363,52 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
           </div>
           <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
             {activeShift
-              ? `Inicial ${formatCompactCurrency(activeShift.openingCash)} · Cobros ${formatCompactCurrency(financials.totalsByMethod.efectivo)}`
-              : 'Abrí turno para sumar saldo inicial'}
+              ? `${tr('Inicial', 'Opening', 'Inicial')} ${formatCompactCurrency(activeShift.openingCash)} · ${tr('Cobros', 'Collections', 'Recebimentos')} ${formatCompactCurrency(financials.totalsByMethod.efectivo)}`
+              : tr(
+                  'Abrí turno para sumar saldo inicial',
+                  'Open shift to add opening balance',
+                  'Abra o turno para incluir saldo inicial'
+                )}
           </div>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400">
-            <span>Transferencias / QR</span>
+            <span>{tr('Transferencias / QR', 'Bank transfers / QR', 'Transferências / PIX')}</span>
             <Landmark className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
           </div>
           <div className="mt-1.5 font-mono-num text-2xl font-extrabold text-slate-900 dark:text-white">
             {formatCurrency(financials.totalsByMethod.transferencia, baseCurrency)}
           </div>
           <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-            Acreditado en banco / billetera
+            {tr('Acreditado en banco / billetera', 'Credited to bank / wallet', 'Creditado em banco / carteira')}
           </div>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400">
-            <span>Tarjetas / Point</span>
+            <span>{tr('Tarjetas / Point', 'Cards / POS', 'Cartões / Maquininha')}</span>
             <CreditCard className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
           </div>
           <div className="mt-1.5 font-mono-num text-2xl font-extrabold text-slate-900 dark:text-white">
             {formatCurrency(financials.totalsByMethod.tarjeta, baseCurrency)}
           </div>
           <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-            Débito, crédito y posnet
+            {tr('Débito, crédito y posnet', 'Debit, credit and card terminal', 'Débito, crédito e maquininha')}
           </div>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400">
-            <span>Total ingresos del período</span>
+            <span>{tr('Total ingresos del período', 'Total period income', 'Total de entradas do período')}</span>
             <Calculator className="h-4 w-4 text-slate-500" />
           </div>
           <div className="mt-1.5 font-mono-num text-2xl font-extrabold text-slate-900 dark:text-white">
             {formatCurrency(totalCollectedAllMethods, baseCurrency)}
           </div>
           <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-            Ventas {formatCompactCurrency(financials.salesTotal)} · Taller{' '}
-            {formatCompactCurrency(financials.repairsTotal)}
+            {tr('Ventas', 'Sales', 'Vendas')} {formatCompactCurrency(financials.salesTotal)} ·{' '}
+            {tr('Taller', 'Workshop', 'Oficina')} {formatCompactCurrency(financials.repairsTotal)}
           </div>
         </div>
       </div>
@@ -410,7 +420,9 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
               <div>
                 <h2 className="text-sm font-bold text-slate-900 dark:text-white">
-                  Movimientos {activeShift ? 'del turno actual' : 'de hoy'}
+                  {activeShift
+                    ? tr('Movimientos del turno actual', 'Current shift movements', 'Movimentações do turno atual')
+                    : tr('Movimientos de hoy', 'Today movements', 'Movimentações de hoje')}
                 </h2>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
                   {financials.entries.length}{' '}

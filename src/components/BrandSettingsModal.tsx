@@ -8,6 +8,7 @@ import {
   Crown,
   Download,
   ExternalLink,
+  Globe,
   Image as ImageIcon,
   Loader2,
   Plus,
@@ -40,6 +41,15 @@ import {
   type CurrencyCode,
   type SecondaryCurrencyConfig,
 } from '../utils/currency';
+import {
+  getActiveLanguage,
+  getIntlLocale,
+  LANGUAGE_OPTIONS,
+  sanitizeLanguageCode,
+  setActiveLanguage,
+  useI18n,
+  type LanguageCode,
+} from '../utils/i18n';
 import { compressImageToDataUrl, formatCurrency, todayISO } from '../utils/formatters';
 import {
   isPrivatePreviewOrigin,
@@ -107,6 +117,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
   onOpenSubscription,
 }) => {
   const { notify } = useToast();
+  const { tr } = useI18n();
   const initialMeta = parseWorkshopMeta(profile);
   const [brandName, setBrandName] = useState(profile.brandName || 'TH3 BNB');
   const [subtitleText, setSubtitleText] = useState(initialMeta.subtitle);
@@ -118,6 +129,10 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
   const [businessEmail, setBusinessEmail] = useState(initialMeta.businessEmail);
   const [footerNote, setFooterNote] = useState(initialMeta.footerNote);
   const [currency, setCurrency] = useState<CurrencyCode>(initialMeta.currency);
+  const [language, setLanguage] = useState<LanguageCode>(() =>
+    initialMeta.hasExplicitLanguage ? initialMeta.language : getActiveLanguage()
+  );
+  const [languageBeforeOpen, setLanguageBeforeOpen] = useState<LanguageCode>(getActiveLanguage);
   const [secondaryRows, setSecondaryRows] = useState<SecondaryCurrencyRow[]>(() =>
     initialMeta.secondaryCurrencies.map((item) => ({
       code: item.code,
@@ -232,6 +247,9 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
     setBusinessEmail(meta.businessEmail);
     setFooterNote(meta.footerNote);
     setCurrency(meta.currency);
+    const resolvedLang = meta.hasExplicitLanguage ? meta.language : getActiveLanguage();
+    setLanguage(resolvedLang);
+    setLanguageBeforeOpen(getActiveLanguage());
     setSecondaryRows(
       meta.secondaryCurrencies.map((item) => ({
         code: item.code,
@@ -360,6 +378,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
     }
 
     const safeCurrency = sanitizeCurrencyCode(currency);
+    const safeLanguage = sanitizeLanguageCode(language);
     const parsedSecondary: SecondaryCurrencyConfig[] = [];
     const seenSecondary = new Set<CurrencyCode>();
 
@@ -399,6 +418,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
         businessEmail: cleanEmail,
         footerNote: sanitizePlainLine(footerNote, 180),
         currency: safeCurrency,
+        language: safeLanguage,
         secondaryCurrencies: safeSecondaryCurrencies,
         techniciansEnabled,
         technicians: sanitizeTechnicianList(technicians),
@@ -426,6 +446,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
       });
       await updateRow('workshop_profiles', profile.id, payload);
       setActiveCurrency(safeCurrency);
+      setActiveLanguage(safeLanguage);
       notify('Configuración del taller actualizada.');
       onClose();
     } catch (err) {
@@ -593,12 +614,21 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
     }
   };
 
+  const handleCancel = () => {
+    setActiveLanguage(languageBeforeOpen);
+    onClose();
+  };
+
   return (
     <ModalShell
       open={open}
-      onClose={onClose}
-      title="Configuración"
-      subtitle="Administrá tu taller, marca, logo y los datos visibles en cada boleta."
+      onClose={handleCancel}
+      title={tr('Configuración', 'Settings', 'Configurações')}
+      subtitle={tr(
+        'Administrá tu taller, idioma, marca, logo y los datos visibles en cada boleta.',
+        'Manage your workshop, language, brand, logo, and receipt details.',
+        'Gerencie sua oficina, idioma, marca, logotipo e os dados exibidos em cada comprovante.'
+      )}
       maxWidth="2xl"
     >
       <form onSubmit={handleSave} className="space-y-5">
@@ -608,18 +638,74 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
           </span>
           <div>
             <div className="text-sm font-bold text-slate-900 dark:text-white font-display">
-              Taller · Marca y comprobantes
+              {tr(
+                'Taller · Marca y comprobantes',
+                'Workshop · Brand & receipts',
+                'Oficina · Marca e comprovantes'
+              )}
             </div>
             <div className="text-[11px] text-slate-500 dark:text-slate-400">
-              Todos estos datos se reflejan automáticamente en tus boletas A4, 80mm y PDF.
+              {tr(
+                'Todos estos datos se reflejan automáticamente en tus boletas A4, 80mm y PDF.',
+                'All of these details automatically appear on your A4, 80mm, and PDF receipts.',
+                'Todos esses dados aparecem automaticamente nos seus comprovantes A4, 80mm e PDF.'
+              )}
             </div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-800/40">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-50 text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300">
+                <Globe className="h-4 w-4" />
+              </span>
+              <div>
+                <label
+                  htmlFor="workshop-language-select"
+                  className="block text-xs font-bold text-slate-800 dark:text-slate-100"
+                >
+                  {tr(
+                    'Idioma / Lenguaje del sistema',
+                    'System language',
+                    'Idioma do sistema'
+                  )}
+                </label>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {tr(
+                    'Elegí el idioma de los menús, botones, fechas y pantallas del taller.',
+                    'Choose the language for menus, buttons, dates, and workshop screens.',
+                    'Escolha o idioma dos menus, botões, datas e telas da oficina.'
+                  )}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3">
+            <select
+              id="workshop-language-select"
+              value={language}
+              onChange={(e) => {
+                const nextLang = sanitizeLanguageCode(e.target.value);
+                setLanguage(nextLang);
+                setActiveLanguage(nextLang);
+              }}
+              className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            >
+              {LANGUAGE_OPTIONS.map((opt) => (
+                <option key={opt.code} value={opt.code}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Nombre o marca del taller
+              {tr('Nombre o marca del taller', 'Workshop name or brand', 'Nome ou marca da oficina')}
             </label>
             <input
               type="text"
@@ -1008,7 +1094,7 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
           const subPayload = subscriptionRecord.payload;
           const rem = getSubscriptionRemaining(subPayload, nowMs);
           const isExempt = subPayload.isExemptAnnual;
-          const expiryStr = new Date(subPayload.expiresAt).toLocaleDateString('es-AR', {
+          const expiryStr = new Date(subPayload.expiresAt).toLocaleDateString(getIntlLocale(), {
             day: '2-digit',
             month: '2-digit',
             year: 'numeric',
@@ -1646,18 +1732,20 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
         <div className="flex gap-3 pt-2">
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleCancel}
             disabled={deletingAccount}
             className="h-11 flex-1 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
           >
-            Cancelar
+            {tr('Cancelar', 'Cancel', 'Cancelar')}
           </button>
           <button
             type="submit"
             disabled={saving || deletingAccount}
             className="h-11 flex-1 rounded-xl bg-[#0072BB] text-sm font-semibold text-white transition hover:bg-[#005f9c] disabled:opacity-60"
           >
-            {saving ? 'Guardando...' : 'Guardar configuración'}
+            {saving
+              ? tr('Guardando...', 'Saving...', 'Salvando...')
+              : tr('Guardar configuración', 'Save settings', 'Salvar configurações')}
           </button>
         </div>
       </form>

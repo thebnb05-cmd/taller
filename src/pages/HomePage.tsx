@@ -35,6 +35,7 @@ import {
   getStatusMeta,
   isActiveRepairStatus,
 } from '../utils/formatters';
+import { useI18n } from '../utils/i18n';
 
 interface HomePageProps {
   repairs: RepairRecord[];
@@ -63,6 +64,7 @@ export const HomePage: React.FC<HomePageProps> = ({
   onSelectRepair,
   onSelectClient,
 }) => {
+  const { lang, locale, tr } = useI18n();
   const [selectedSalesWeek, setSelectedSalesWeek] = useState<number | null>(null);
   const [selectedRepairStage, setSelectedRepairStage] = useState<string | null>(null);
   const [balanceScope, setBalanceScope] = useState<'total' | 'month'>('total');
@@ -87,7 +89,7 @@ export const HomePage: React.FC<HomePageProps> = ({
     const prevYear = prevMonthDate.getFullYear();
     const prevMonth = prevMonthDate.getMonth();
 
-    const currentMonthName = new Intl.DateTimeFormat('es-AR', { month: 'long' }).format(now);
+    const currentMonthName = new Intl.DateTimeFormat(locale, { month: 'long' }).format(now);
     const currentMonthLabel =
       currentMonthName.charAt(0).toUpperCase() + currentMonthName.slice(1);
 
@@ -128,10 +130,10 @@ export const HomePage: React.FC<HomePageProps> = ({
         : null;
 
     const salesWeeklyBuckets = [
-      { key: 0, label: 'Sem 1', rangeLabel: 'Días 1–7', amount: 0, count: 0 },
-      { key: 1, label: 'Sem 2', rangeLabel: 'Días 8–14', amount: 0, count: 0 },
-      { key: 2, label: 'Sem 3', rangeLabel: 'Días 15–21', amount: 0, count: 0 },
-      { key: 3, label: 'Sem 4', rangeLabel: 'Días 22–31', amount: 0, count: 0 },
+      { key: 0, label: tr('Sem 1', 'Wk 1', 'Sem 1'), rangeLabel: tr('Días 1–7', 'Days 1–7', 'Dias 1–7'), amount: 0, count: 0 },
+      { key: 1, label: tr('Sem 2', 'Wk 2', 'Sem 2'), rangeLabel: tr('Días 8–14', 'Days 8–14', 'Dias 8–14'), amount: 0, count: 0 },
+      { key: 2, label: tr('Sem 3', 'Wk 3', 'Sem 3'), rangeLabel: tr('Días 15–21', 'Days 15–21', 'Dias 15–21'), amount: 0, count: 0 },
+      { key: 3, label: tr('Sem 4', 'Wk 4', 'Sem 4'), rangeLabel: tr('Días 22–31', 'Days 22–31', 'Dias 22–31'), amount: 0, count: 0 },
     ];
     monthlySales.forEach((s) => {
       const d = resolveDate(s.createdAt, s.dueDate);
@@ -145,8 +147,8 @@ export const HomePage: React.FC<HomePageProps> = ({
     const activeRepairStages = [
       {
         key: 'recibido',
-        label: 'Recib.',
-        fullLabel: 'Recibido',
+        label: tr('Recib.', 'Recv.', 'Receb.'),
+        fullLabel: tr('Recibido', 'Received', 'Recebido'),
         barClass: 'bg-sky-500 dark:bg-sky-400',
         activeRing: 'ring-sky-500/40',
         count: 0,
@@ -154,8 +156,8 @@ export const HomePage: React.FC<HomePageProps> = ({
       },
       {
         key: 'diagnostico',
-        label: 'Diagn.',
-        fullLabel: 'Diagnóstico',
+        label: tr('Diagn.', 'Diag.', 'Diagn.'),
+        fullLabel: tr('Diagnóstico', 'Diagnostics', 'Diagnóstico'),
         barClass: 'bg-amber-500 dark:bg-amber-400',
         activeRing: 'ring-amber-500/40',
         count: 0,
@@ -163,8 +165,8 @@ export const HomePage: React.FC<HomePageProps> = ({
       },
       {
         key: 'espera_repuesto',
-        label: 'Rep.',
-        fullLabel: 'Espera repuesto',
+        label: tr('Rep.', 'Parts', 'Peça'),
+        fullLabel: tr('Espera repuesto', 'Waiting for parts', 'Aguardando peça'),
         barClass: 'bg-orange-500 dark:bg-orange-400',
         activeRing: 'ring-orange-500/40',
         count: 0,
@@ -172,8 +174,8 @@ export const HomePage: React.FC<HomePageProps> = ({
       },
       {
         key: 'en_progreso',
-        label: 'Taller',
-        fullLabel: 'En progreso',
+        label: tr('Taller', 'Bench', 'Oficina'),
+        fullLabel: tr('En progreso', 'In progress', 'Em andamento'),
         barClass: 'bg-[#0072BB] dark:bg-blue-500',
         activeRing: 'ring-[#0072BB]/40',
         count: 0,
@@ -231,7 +233,7 @@ export const HomePage: React.FC<HomePageProps> = ({
     for (let offset = 6; offset >= 0; offset--) {
       const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - offset);
       const dateKey = toLocalDateKey(d);
-      const shortWeekday = new Intl.DateTimeFormat('es-AR', {
+      const shortWeekday = new Intl.DateTimeFormat(locale, {
         weekday: 'short',
         day: 'numeric',
       })
@@ -239,7 +241,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         .replace('.', '');
       last7Days.push({
         dateKey,
-        label: offset === 0 ? 'Hoy' : shortWeekday,
+        label: offset === 0 ? tr('Hoy', 'Today', 'Hoje') : shortWeekday,
         fullDate: formatDateShort(dateKey),
         count: countByDateKey.get(dateKey) || 0,
       });
@@ -283,7 +285,7 @@ export const HomePage: React.FC<HomePageProps> = ({
       last7Days,
       last7DaysTotal,
     };
-  }, [products, purchases, repairs, sales]);
+  }, [products, purchases, repairs, sales, lang, locale]);
 
   const recentActivity = useMemo(() => {
     return [...repairs]
@@ -306,13 +308,14 @@ export const HomePage: React.FC<HomePageProps> = ({
         >
           <div className="min-w-0">
             <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-              Reparaciones abiertas
+              {tr('Reparaciones abiertas', 'Open repairs', 'Reparos em aberto')}
             </div>
             <div className="mt-1.5 font-mono-num text-2xl font-extrabold text-[#0072BB] sm:text-3xl dark:text-sky-400">
               {stats.openRepairsCount}
             </div>
             <div className="mt-1 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-              {stats.activeCount} en taller · {stats.readyCount} listas
+              {stats.activeCount} {tr('en taller', 'in workshop', 'na oficina')} · {stats.readyCount}{' '}
+              {tr('listas', 'ready', 'prontos')}
             </div>
           </div>
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-400">
@@ -328,13 +331,13 @@ export const HomePage: React.FC<HomePageProps> = ({
         >
           <div className="min-w-0">
             <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-              Ingreso mensual estimado
+              {tr('Ingreso mensual estimado', 'Estimated monthly income', 'Receita mensal estimada')}
             </div>
             <div className="mt-1.5 truncate font-mono-num text-2xl font-extrabold text-emerald-600 sm:text-3xl dark:text-emerald-400">
               {formatCompactCurrency(stats.monthlyEstimatedIncome)}
             </div>
             <div className="mt-1 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-              {stats.monthlyOpsCount} operaciones este mes
+              {stats.monthlyOpsCount} {tr('operaciones este mes', 'operations this month', 'operações este mês')}
             </div>
           </div>
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400">
@@ -350,14 +353,16 @@ export const HomePage: React.FC<HomePageProps> = ({
         >
           <div className="min-w-0">
             <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-              Valor total del inventario
+              {tr('Valor total del inventario', 'Total inventory value', 'Valor total do estoque')}
             </div>
             <div className="mt-1.5 truncate font-mono-num text-2xl font-extrabold text-slate-900 sm:text-3xl dark:text-white">
               {formatCompactCurrency(stats.inventoryValue)}
             </div>
             <div className="mt-1 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-              {products.length} artículos
-              {stats.lowStockCount > 0 ? ` · ${stats.lowStockCount} bajo stock` : ''}
+              {products.length} {tr('artículos', 'items', 'itens')}
+              {stats.lowStockCount > 0
+                ? ` · ${stats.lowStockCount} ${tr('bajo stock', 'low stock', 'estoque baixo')}`
+                : ''}
             </div>
           </div>
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
@@ -376,8 +381,10 @@ export const HomePage: React.FC<HomePageProps> = ({
             <Wrench className="h-5 w-5" />
           </span>
           <div className="min-w-0">
-            <div className="text-sm font-bold">Nueva reparación</div>
-            <div className="text-xs text-sky-100">Ingresar equipo al taller</div>
+            <div className="text-sm font-bold">{tr('Nueva reparación', 'New repair', 'Novo reparo')}</div>
+            <div className="text-xs text-sky-100">
+              {tr('Ingresar equipo al taller', 'Check in device', 'Dar entrada no aparelho')}
+            </div>
           </div>
         </button>
 
@@ -390,8 +397,12 @@ export const HomePage: React.FC<HomePageProps> = ({
             <UserPlus className="h-5 w-5" />
           </span>
           <div className="min-w-0">
-            <div className="text-sm font-bold text-slate-900 dark:text-white">Nuevo cliente</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">Guardar contacto</div>
+            <div className="text-sm font-bold text-slate-900 dark:text-white">
+              {tr('Nuevo cliente', 'New client', 'Novo cliente')}
+            </div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              {tr('Guardar contacto', 'Save contact', 'Salvar contato')}
+            </div>
           </div>
         </button>
 
@@ -404,8 +415,12 @@ export const HomePage: React.FC<HomePageProps> = ({
             <Package className="h-5 w-5" />
           </span>
           <div className="min-w-0">
-            <div className="text-sm font-bold text-slate-900 dark:text-white">Nuevo producto</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">Agregar repuesto o stock</div>
+            <div className="text-sm font-bold text-slate-900 dark:text-white">
+              {tr('Nuevo producto', 'New product', 'Novo produto')}
+            </div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              {tr('Agregar repuesto o stock', 'Add spare part or stock', 'Adicionar peça ou estoque')}
+            </div>
           </div>
         </button>
       </div>
@@ -424,7 +439,9 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
-                      <span>Ventas de {stats.currentMonthLabel}</span>
+                      <span>
+                        {tr('Ventas de', 'Sales for', 'Vendas de')} {stats.currentMonthLabel}
+                      </span>
                       {stats.salesDeltaPct !== null && (
                         <span
                           className={`rounded-md px-1.5 py-0.5 font-mono-num text-[10px] font-bold ${
@@ -447,7 +464,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <button
                     type="button"
                     onClick={() => onNavigate('sales')}
-                    aria-label="Ir a Ventas"
+                    aria-label={tr('Ir a Ventas', 'Go to Sales', 'Ir para Vendas')}
                     className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-[#0072BB] transition hover:bg-[#0072BB] hover:text-white dark:bg-sky-950/60 dark:text-sky-400 dark:hover:bg-sky-500 dark:hover:text-white"
                   >
                     <ShoppingBag className="h-5 w-5" />
@@ -463,17 +480,21 @@ export const HomePage: React.FC<HomePageProps> = ({
                       </span>
                       <span className="font-mono-num font-bold text-[#0072BB] dark:text-sky-400">
                         {formatCurrency(activeBucket.amount)} · {activeBucket.count}{' '}
-                        {activeBucket.count === 1 ? 'venta' : 'ventas'}
+                        {activeBucket.count === 1
+                          ? tr('venta', 'sale', 'venda')
+                          : tr('ventas', 'sales', 'vendas')}
                       </span>
                     </>
                   ) : (
                     <>
                       <span className="text-slate-500 dark:text-slate-400">
-                        Tocá una semana para ver detalle
+                        {tr('Tocá una semana para ver detalle', 'Tap a week for details', 'Toque em uma semana para detalhes')}
                       </span>
                       <span className="font-mono-num font-bold text-slate-700 dark:text-slate-200">
                         {stats.monthlySalesCount}{' '}
-                        {stats.monthlySalesCount === 1 ? 'venta' : 'ventas'}
+                        {stats.monthlySalesCount === 1
+                          ? tr('venta', 'sale', 'venda')
+                          : tr('ventas', 'sales', 'vendas')}
                       </span>
                     </>
                   )}
@@ -536,14 +557,14 @@ export const HomePage: React.FC<HomePageProps> = ({
 
               <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs dark:border-slate-800">
                 <span className="text-slate-500 dark:text-slate-400">
-                  Distribución semanal del mes
+                  {tr('Distribución semanal del mes', 'Weekly breakdown', 'Distribuição semanal')}
                 </span>
                 <button
                   type="button"
                   onClick={() => onNavigate('sales')}
                   className="inline-flex items-center gap-1 font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
                 >
-                  Ver ventas <ArrowRight className="h-3.5 w-3.5" />
+                  {tr('Ver ventas', 'View sales', 'Ver vendas')} <ArrowRight className="h-3.5 w-3.5" />
                 </button>
               </div>
             </div>
@@ -562,21 +583,23 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-                      Reparaciones en curso
+                      {tr('Reparaciones en curso', 'Repairs in progress', 'Reparos em andamento')}
                     </div>
                     <div className="mt-1 flex items-baseline gap-2">
                       <span className="font-mono-num text-2xl font-extrabold text-[#0072BB] dark:text-sky-400">
                         {stats.activeCount}
                       </span>
                       <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                        {stats.activeCount === 1 ? 'equipo activo' : 'equipos activos'}
+                        {stats.activeCount === 1
+                          ? tr('equipo activo', 'active device', 'aparelho ativo')
+                          : tr('equipos activos', 'active devices', 'aparelhos ativos')}
                       </span>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => onNavigate('repairs')}
-                    aria-label="Ir a Reparaciones"
+                    aria-label={tr('Ir a Reparaciones', 'Go to Repairs', 'Ir para Reparos')}
                     className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-600 transition hover:bg-amber-500 hover:text-white dark:bg-amber-950/60 dark:text-amber-400 dark:hover:bg-amber-500 dark:hover:text-white"
                   >
                     <Wrench className="h-5 w-5" />
@@ -597,10 +620,10 @@ export const HomePage: React.FC<HomePageProps> = ({
                   ) : (
                     <>
                       <span className="text-slate-500 dark:text-slate-400">
-                        Tocá una etapa para inspeccionar
+                        {tr('Tocá una etapa para inspeccionar', 'Tap a stage to inspect', 'Toque em uma etapa para ver')}
                       </span>
                       <span className="font-mono-num font-bold text-emerald-600 dark:text-emerald-400">
-                        {stats.readyCount} listas
+                        {stats.readyCount} {tr('listas', 'ready', 'prontos')}
                       </span>
                     </>
                   )}
@@ -663,14 +686,14 @@ export const HomePage: React.FC<HomePageProps> = ({
 
               <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs dark:border-slate-800">
                 <span className="text-slate-500 dark:text-slate-400">
-                  {stats.openRepairsCount} órdenes abiertas en total
+                  {stats.openRepairsCount} {tr('órdenes abiertas en total', 'total open orders', 'ordens em aberto no total')}
                 </span>
                 <button
                   type="button"
                   onClick={() => onNavigate('repairs')}
                   className="inline-flex items-center gap-1 font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
                 >
-                  Ver taller <ArrowRight className="h-3.5 w-3.5" />
+                  {tr('Ver taller', 'View workshop', 'Ver oficina')} <ArrowRight className="h-3.5 w-3.5" />
                 </button>
               </div>
             </div>
@@ -702,7 +725,9 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-                        Balance {isMonthly ? 'del mes' : 'total'}
+                        {isMonthly
+                          ? tr('Balance del mes', 'Monthly balance', 'Saldo do mês')
+                          : tr('Balance total', 'Total balance', 'Saldo total')}
                       </span>
                       <span
                         className={`rounded-md px-1.5 py-0.5 font-mono-num text-[10px] font-bold ${
@@ -711,7 +736,9 @@ export const HomePage: React.FC<HomePageProps> = ({
                             : 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
                         }`}
                       >
-                        {marginPct >= 0 ? `${marginPct}% margen` : 'Déficit'}
+                        {marginPct >= 0
+                          ? `${marginPct}% ${tr('margen', 'margin', 'margem')}`
+                          : tr('Déficit', 'Deficit', 'Déficit')}
                       </span>
                     </div>
                     <div
@@ -748,7 +775,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                             : 'text-slate-500 dark:text-slate-400'
                         }`}
                       >
-                        Mes
+                        {tr('Mes', 'Month', 'Mês')}
                       </button>
                     </div>
                     <button

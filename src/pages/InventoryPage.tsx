@@ -15,6 +15,7 @@ import { updateRow } from '../lib/db';
 import type { ProductRecord } from '../types/workshop';
 import { downloadCsvFile } from '../utils/csvExport';
 import { formatCompactCurrency, formatCurrency, todayISO } from '../utils/formatters';
+import { useI18n } from '../utils/i18n';
 
 interface InventoryPageProps {
   products: ProductRecord[];
@@ -34,6 +35,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({
   onSelectProduct,
 }) => {
   const { notify } = useToast();
+  const { tr } = useI18n();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'repuestos' | 'accesorios' | 'bajo_stock'>(
     initialFilter
@@ -158,10 +160,14 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-white font-display">
-            Inventario y productos
+            {tr('Inventario y productos', 'Inventory & products', 'Estoque e produtos')}
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Catálogo, existencias y reposición de repuestos y accesorios
+            {tr(
+              'Catálogo, existencias y reposición de repuestos y accesorios',
+              'Catalog, stock levels and spare parts / accessories restock',
+              'Catálogo, estoque e reposição de peças e acessórios'
+            )}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -169,11 +175,15 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({
             type="button"
             onClick={handleExportCsv}
             disabled={filtered.length === 0}
-            title="Descargar listado de inventario en formato CSV"
+            title={tr(
+              'Descargar listado de inventario en formato CSV',
+              'Download inventory list as CSV',
+              'Baixar lista de estoque em CSV'
+            )}
             className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] disabled:opacity-50 whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-sky-400 dark:hover:text-sky-300"
           >
             <Download className="h-4 w-4" />
-            Exportar CSV
+            {tr('Exportar CSV', 'Export CSV', 'Exportar CSV')}
           </button>
           <button
             type="button"
@@ -181,7 +191,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({
             className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
           >
             <FileSpreadsheet className="h-4 w-4" />
-            Importar Excel
+            {tr('Importar Excel', 'Import Excel', 'Importar Excel')}
           </button>
           <button
             type="button"
@@ -189,7 +199,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({
             className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-xs font-semibold text-white hover:bg-[#005f9c] whitespace-nowrap shrink-0"
           >
             <Plus className="h-4 w-4" />
-            Agregar
+            {tr('Agregar', 'Add', 'Adicionar')}
           </button>
         </div>
       </div>
@@ -199,7 +209,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({
           <div className="font-mono-num text-2xl font-bold text-slate-900 dark:text-white">
             {products.length}
           </div>
-          <div className="text-xs text-slate-500">Productos</div>
+          <div className="text-xs text-slate-500">{tr('Productos', 'Products', 'Produtos')}</div>
         </div>
         <button
           type="button"
@@ -213,13 +223,13 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({
           <div className="font-mono-num text-2xl font-bold text-amber-600 dark:text-amber-400">
             {lowStockCount}
           </div>
-          <div className="text-xs text-slate-500">Stock bajo</div>
+          <div className="text-xs text-slate-500">{tr('Stock bajo', 'Low stock', 'Estoque baixo')}</div>
         </button>
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="font-mono-num text-2xl font-bold text-[#0072BB] dark:text-sky-400">
             {formatCompactCurrency(inventoryValue)}
           </div>
-          <div className="text-xs text-slate-500">Valorizado</div>
+          <div className="text-xs text-slate-500">{tr('Valorizado', 'Total value', 'Valor total')}</div>
         </div>
       </div>
 
@@ -230,7 +240,11 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por nombre, SKU, código de barras, marca o ubicación..."
+            placeholder={tr(
+              'Buscar por nombre, SKU, código de barras, marca o ubicación...',
+              'Search by name, SKU, barcode, brand or location...',
+              'Buscar por nome, SKU, código de barras, marca ou localização...'
+            )}
             className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-800 dark:bg-slate-900 dark:text-white"
           />
         </div>
@@ -238,10 +252,13 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 dark:bg-slate-900">
             {[
-              { id: 'all', label: 'Todo' },
-              { id: 'repuestos', label: 'Repuestos' },
-              { id: 'accesorios', label: 'Accesorios' },
-              { id: 'bajo_stock', label: `Bajo stock${lowStockCount > 0 ? ` (${lowStockCount})` : ''}` },
+              { id: 'all', label: tr('Todo', 'All', 'Tudo') },
+              { id: 'repuestos', label: tr('Repuestos', 'Spare parts', 'Peças') },
+              { id: 'accesorios', label: tr('Accesorios', 'Accessories', 'Acessórios') },
+              {
+                id: 'bajo_stock',
+                label: `${tr('Bajo stock', 'Low stock', 'Estoque baixo')}${lowStockCount > 0 ? ` (${lowStockCount})` : ''}`,
+              },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -269,7 +286,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({
               }`}
             >
               <LayoutGrid className="h-3.5 w-3.5" />
-              Tarjetas
+              {tr('Tarjetas', 'Cards', 'Cartões')}
             </button>
             <button
               type="button"
@@ -281,7 +298,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({
               }`}
             >
               <List className="h-3.5 w-3.5" />
-              Lista (+/-)
+              {tr('Lista (+/-)', 'List (+/-)', 'Lista (+/-)')}
             </button>
           </div>
         </div>

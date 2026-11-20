@@ -22,6 +22,7 @@ import {
 } from '../utils/subscription';
 import { ModalShell } from './ModalShell';
 import { useToast } from './ToastProvider';
+import { useI18n } from '../utils/i18n';
 
 export const PENDING_SUB_STORAGE_KEY = 'th3bnb_pending_mp_subscription';
 
@@ -55,6 +56,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   onSignOut,
 }) => {
   const { notify } = useToast();
+  const { locale, tr } = useI18n();
   const [loadingPlan, setLoadingPlan] = useState<SubscriptionPlanId | null>(null);
   const [pendingCheckout, setPendingCheckout] = useState<PendingCheckoutState | null>(null);
   const [verifying, setVerifying] = useState(false);
@@ -208,7 +210,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   };
 
   const expiryFormatted = payload?.expiresAt
-    ? new Date(payload.expiresAt).toLocaleDateString('es-AR', {
+    ? new Date(payload.expiresAt).toLocaleDateString(locale, {
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
@@ -219,11 +221,19 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
     <ModalShell
       open={open}
       onClose={blocking ? () => {} : onClose}
-      title="Suscripción y Planes"
+      title={tr('Suscripción y Planes', 'Subscription & Plans', 'Assinatura e Planos')}
       subtitle={
         blocking
-          ? 'Tu período de prueba o suscripción finalizó. Elegí un plan para seguir operando.'
-          : 'Administrá el estado de tu taller y elegí el plan que mejor se adapte.'
+          ? tr(
+              'Tu período de prueba o suscripción finalizó. Elegí un plan para seguir operando.',
+              'Your trial or subscription has ended. Choose a plan to keep operating.',
+              'Seu período de teste ou assinatura terminou. Escolha um plano para continuar.'
+            )
+          : tr(
+              'Administrá el estado de tu taller y elegí el plan que mejor se adapte.',
+              'Manage your workshop subscription and pick the plan that best fits you.',
+              'Gerencie o status da sua oficina e escolha o plano ideal.'
+            )
       }
       maxWidth="2xl"
     >
@@ -269,7 +279,9 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                         : 'bg-red-100 text-red-700 dark:bg-red-900/70 dark:text-red-200'
                     }`}
                   >
-                    {remaining.isExpired ? 'Vencida' : 'Activa'}
+                    {remaining.isExpired
+                      ? tr('Vencida', 'Expired', 'Vencida')
+                      : tr('Activa', 'Active', 'Ativa')}
                   </span>
                 </div>
                 <div className="mt-1 text-xs font-semibold text-slate-700 dark:text-slate-200">
@@ -277,20 +289,22 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                 </div>
                 <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
                   {isExempt
-                    ? `Renovación anual automática sin costo ($0) el ${expiryFormatted}`
+                    ? `${tr('Renovación anual automática sin costo ($0) el', 'Auto annual renewal at $0 on', 'Renovação anual automática gratuita em')} ${expiryFormatted}`
                     : remaining.isExpired
-                      ? `Venció el ${expiryFormatted}`
-                      : `Vigente hasta el ${expiryFormatted}`}
+                      ? `${tr('Venció el', 'Expired on', 'Venceu em')} ${expiryFormatted}`
+                      : `${tr('Vigente hasta el', 'Valid until', 'Válido até')} ${expiryFormatted}`}
                 </div>
               </div>
             </div>
 
             <div className="text-right font-mono-num">
               <div className="text-lg font-extrabold text-slate-900 dark:text-white">
-                {remaining.isExpired ? '0 días' : `${remaining.days}d ${remaining.hours}h`}
+                {remaining.isExpired
+                  ? tr('0 días', '0 days', '0 dias')
+                  : `${remaining.days}d ${remaining.hours}h`}
               </div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                Tiempo restante
+                {tr('Tiempo restante', 'Time remaining', 'Tempo restante')}
               </div>
             </div>
           </div>

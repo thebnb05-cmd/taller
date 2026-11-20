@@ -33,6 +33,7 @@ import {
 } from '../lib/db';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useActiveCurrency } from '../utils/currency';
+import { useI18n } from '../utils/i18n';
 import { clearTransferConfigCache, hydrateTransferConfig } from '../utils/payment';
 import {
   clearMercadoPagoConfigCache,
@@ -123,40 +124,6 @@ interface NavItem {
   icon: React.FC<{ className?: string }>;
 }
 
-const NAV_GROUPS: Array<{ title: string; items: NavItem[] }> = [
-  {
-    title: 'Taller',
-    items: [
-      { id: 'home', label: 'Inicio', icon: Home },
-      { id: 'repairs', label: 'Reparaciones', icon: Wrench },
-      { id: 'agenda', label: 'Agenda', icon: CalendarDays },
-      { id: 'clients', label: 'Clientes', icon: Users },
-    ],
-  },
-  {
-    title: 'Stock y Compras',
-    items: [
-      { id: 'inventory', label: 'Inventario y Productos', icon: Boxes },
-      { id: 'suppliers', label: 'Proveedores', icon: Factory },
-      { id: 'purchases', label: 'Compras', icon: Receipt },
-    ],
-  },
-  {
-    title: 'Ventas y Control',
-    items: [
-      { id: 'sales', label: 'Ventas', icon: ShoppingBag },
-      { id: 'cash', label: 'Caja diaria', icon: Banknote },
-      { id: 'reports', label: 'Reportes', icon: BarChart3 },
-    ],
-  },
-];
-
-const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
-
-const MOBILE_MORE_ITEMS: NavItem[] = NAV_ITEMS.filter((item) =>
-  ['agenda', 'suppliers', 'purchases', 'sales', 'cash', 'reports'].includes(item.id)
-);
-
 const PLATFORM_ADMIN_EMAIL = 'thebnb05@gmail.com';
 
 export const WorkshopApp: React.FC<WorkshopAppProps> = ({
@@ -167,7 +134,53 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   onToggleDark,
 }) => {
   const isOnline = useOnlineStatus();
+  const { tr } = useI18n();
   useActiveCurrency();
+
+  const navGroups = useMemo<Array<{ title: string; items: NavItem[] }>>(
+    () => [
+      {
+        title: tr('Taller', 'Workshop', 'Oficina'),
+        items: [
+          { id: 'home', label: tr('Inicio', 'Home', 'Início'), icon: Home },
+          { id: 'repairs', label: tr('Reparaciones', 'Repairs', 'Reparos'), icon: Wrench },
+          { id: 'agenda', label: tr('Agenda', 'Schedule', 'Agenda'), icon: CalendarDays },
+          { id: 'clients', label: tr('Clientes', 'Clients', 'Clientes'), icon: Users },
+        ],
+      },
+      {
+        title: tr('Stock y Compras', 'Stock & Purchases', 'Estoque e Compras'),
+        items: [
+          {
+            id: 'inventory',
+            label: tr('Inventario y Productos', 'Inventory & Products', 'Estoque e Produtos'),
+            icon: Boxes,
+          },
+          { id: 'suppliers', label: tr('Proveedores', 'Suppliers', 'Fornecedores'), icon: Factory },
+          { id: 'purchases', label: tr('Compras', 'Purchases', 'Compras'), icon: Receipt },
+        ],
+      },
+      {
+        title: tr('Ventas y Control', 'Sales & Control', 'Vendas e Controle'),
+        items: [
+          { id: 'sales', label: tr('Ventas', 'Sales', 'Vendas'), icon: ShoppingBag },
+          { id: 'cash', label: tr('Caja diaria', 'Cash register', 'Caixa diário'), icon: Banknote },
+          { id: 'reports', label: tr('Reportes', 'Reports', 'Relatórios'), icon: BarChart3 },
+        ],
+      },
+    ],
+    [tr]
+  );
+
+  const navItems = useMemo(() => navGroups.flatMap((g) => g.items), [navGroups]);
+  const mobileMoreItems = useMemo(
+    () =>
+      navItems.filter((item) =>
+        ['agenda', 'suppliers', 'purchases', 'sales', 'cash', 'reports'].includes(item.id)
+      ),
+    [navItems]
+  );
+
   const isPlatformAdmin =
     (userEmail || profile.email || '').trim().toLowerCase() === PLATFORM_ADMIN_EMAIL;
   const [page, setPage] = useState<PageId>('home');
@@ -541,8 +554,8 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 py-4">
-          <nav data-tour="sidebar-nav" className="space-y-5" aria-label="Secciones principales">
-            {NAV_GROUPS.map((group) => (
+          <nav data-tour="sidebar-nav" className="space-y-5" aria-label={tr('Secciones principales', 'Main sections', 'Seções principais')}>
+            {navGroups.map((group) => (
               <div key={group.title}>
                 <div className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                   {group.title}
@@ -579,7 +592,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
             {isPlatformAdmin && (
               <div className="border-t border-slate-100 pt-4 dark:border-slate-800">
                 <div className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                  Plataforma
+                  {tr('Plataforma', 'Platform', 'Plataforma')}
                 </div>
                 <button
                   type="button"
@@ -591,7 +604,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                   }`}
                 >
                   <ShieldCheck className="h-4 w-4 shrink-0" />
-                  <span className="truncate">Admin de taller</span>
+                  <span className="truncate">{tr('Admin de taller', 'Workshop admin', 'Admin da oficina')}</span>
                 </button>
               </div>
             )}
@@ -599,7 +612,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
 
           <div data-tour="quick-actions" className="mt-6 border-t border-slate-100 pt-4 dark:border-slate-800">
             <div className="mb-2 px-3 text-[11px] font-semibold text-slate-400">
-              Acciones rápidas
+              {tr('Acciones rápidas', 'Quick actions', 'Ações rápidas')}
             </div>
             <div className="space-y-1.5">
               <button
@@ -608,7 +621,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                 className="flex h-9 w-full items-center gap-2 rounded-xl bg-[#0072BB] px-3 text-xs font-semibold text-white hover:bg-[#005f9c]"
               >
                 <Plus className="h-3.5 w-3.5" />
-                Nueva reparación
+                {tr('Nueva reparación', 'New repair', 'Novo reparo')}
               </button>
               <button
                 type="button"
@@ -619,7 +632,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                 className="flex h-9 w-full items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 <Plus className="h-3.5 w-3.5" />
-                Nuevo cliente
+                {tr('Nuevo cliente', 'New client', 'Novo cliente')}
               </button>
               <button
                 type="button"
@@ -630,7 +643,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                 className="flex h-9 w-full items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 <Plus className="h-3.5 w-3.5" />
-                Nuevo producto
+                {tr('Nuevo producto', 'New product', 'Novo produto')}
               </button>
             </div>
           </div>
@@ -664,7 +677,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                 </div>
               </div>
               <span className="shrink-0 rounded-lg bg-white/90 px-2 py-0.5 text-[10px] font-bold text-[#0072BB] dark:bg-slate-900 dark:text-sky-300">
-                Planes
+                {tr('Planes', 'Plans', 'Planos')}
               </span>
             </button>
           )}
@@ -674,15 +687,17 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
             className="flex h-9 w-full items-center gap-2 rounded-xl border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
           >
             <MessageSquarePlus className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
-            <span>Soporte y sugerencias</span>
+            <span>{tr('Soporte y sugerencias', 'Support & feedback', 'Suporte e sugestões')}</span>
           </button>
           <div className="truncate px-2 text-xs font-medium text-slate-700 dark:text-slate-300">
             {profile.firstName
               ? `${profile.firstName} ${profile.lastName || ''}`.trim()
-              : userEmail || 'Taller'}
+              : userEmail || tr('Taller', 'Workshop', 'Oficina')}
           </div>
           <div className="truncate px-2 text-[11px] text-slate-400">
-            {profile.role === 'admin' ? 'Administrador' : 'Operador'}
+            {profile.role === 'admin'
+              ? tr('Administrador', 'Administrator', 'Administrador')
+              : tr('Operador', 'Operator', 'Operador')}
           </div>
         </div>
       </aside>
@@ -700,8 +715,8 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
             </div>
             <span className="hidden text-sm font-semibold text-slate-500 lg:inline dark:text-slate-400">
               {page === 'admin_taller'
-                ? 'Admin de taller'
-                : NAV_ITEMS.find((n) => n.id === page)?.label}
+                ? tr('Admin de taller', 'Workshop admin', 'Admin da oficina')
+                : navItems.find((n) => n.id === page)?.label}
             </span>
           </div>
 
@@ -755,8 +770,8 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
             <button
               type="button"
               onClick={() => setShowSupportModal(true)}
-              aria-label="Soporte y sugerencias"
-              title="Soporte y sugerencias"
+              aria-label={tr('Soporte y sugerencias', 'Support & feedback', 'Suporte e sugestões')}
+              title={tr('Soporte y sugerencias', 'Support & feedback', 'Suporte e sugestões')}
               className="hidden lg:flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <MessageSquarePlus className="h-4 w-4" />
@@ -765,8 +780,8 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
             <button
               type="button"
               onClick={() => setWelcomeTourOpen(true)}
-              aria-label="Ver tour guiado"
-              title="Tour guiado"
+              aria-label={tr('Ver tour guiado', 'Guided tour', 'Tour guiado')}
+              title={tr('Tour guiado', 'Guided tour', 'Tour guiado')}
               className="hidden lg:flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <HelpCircle className="h-4 w-4" />
@@ -780,8 +795,8 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                 setPage('inventory');
                 setMoreMenuOpen(false);
               }}
-              aria-label="Alertas de stock bajo"
-              title="Stock bajo"
+              aria-label={tr('Alertas de stock bajo', 'Low stock alerts', 'Alertas de estoque baixo')}
+              title={tr('Stock bajo', 'Low stock', 'Estoque baixo')}
               className="relative flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <Bell className="h-4 w-4" />
@@ -795,8 +810,8 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
             <button
               type="button"
               onClick={() => setShowBrandSettings(true)}
-              aria-label="Configuración"
-              title="Configuración"
+              aria-label={tr('Configuración', 'Settings', 'Configurações')}
+              title={tr('Configuración', 'Settings', 'Configurações')}
               className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <Settings className="h-4 w-4" />
@@ -805,7 +820,11 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
             <button
               type="button"
               onClick={onToggleDark}
-              aria-label={darkMode ? 'Activar modo claro' : 'Activar modo oscuro'}
+              aria-label={
+                darkMode
+                  ? tr('Activar modo claro', 'Enable light mode', 'Ativar modo claro')
+                  : tr('Activar modo oscuro', 'Enable dark mode', 'Ativar modo escuro')
+              }
               className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -818,12 +837,12 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                 clearMercadoPagoConfigCache(userId);
                 void supabase.auth.signOut();
               }}
-              aria-label="Cerrar sesión"
-              title="Salir"
+              aria-label={tr('Cerrar sesión', 'Sign out', 'Sair')}
+              title={tr('Salir', 'Sign out', 'Sair')}
               className="inline-flex h-9 sm:h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-2.5 lg:px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               <LogOut className="h-3.5 w-3.5" />
-              <span className="hidden lg:inline">Salir</span>
+              <span className="hidden lg:inline">{tr('Salir', 'Sign out', 'Sair')}</span>
             </button>
           </div>
         </header>
@@ -832,7 +851,13 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
           {!isOnline && (
             <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs font-medium text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
               <WifiOff className="h-4 w-4 shrink-0" />
-              <span>Sin conexión — Estás viendo datos en caché. Los cambios se sincronizarán al reconectar.</span>
+              <span>
+                {tr(
+                  'Sin conexión — Estás viendo datos en caché. Los cambios se sincronizarán al reconectar.',
+                  'Offline — Showing cached data. Changes will sync when reconnected.',
+                  'Sem conexão — Exibindo dados em cache. As alterações serão sincronizadas ao reconectar.'
+                )}
+              </span>
             </div>
           )}
 
@@ -1012,10 +1037,10 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         className="no-print fixed bottom-0 left-0 right-0 z-30 grid h-16 grid-cols-5 border-t border-slate-200 bg-white/95 backdrop-blur-md lg:hidden dark:border-slate-800 dark:bg-slate-900/95"
       >
         {[
-          { id: 'home' as PageId, label: 'Inicio', icon: Home },
-          { id: 'repairs' as PageId, label: 'Equipos', icon: Wrench },
-          { id: 'clients' as PageId, label: 'Clientes', icon: Users },
-          { id: 'inventory' as PageId, label: 'Inventario', icon: Boxes },
+          { id: 'home' as PageId, label: tr('Inicio', 'Home', 'Início'), icon: Home },
+          { id: 'repairs' as PageId, label: tr('Equipos', 'Repairs', 'Reparos'), icon: Wrench },
+          { id: 'clients' as PageId, label: tr('Clientes', 'Clients', 'Clientes'), icon: Users },
+          { id: 'inventory' as PageId, label: tr('Inventario', 'Inventory', 'Estoque'), icon: Boxes },
         ].map((item) => {
           const Icon = item.icon;
           const active = page === item.id;
@@ -1054,7 +1079,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
           }`}
         >
           <MoreHorizontal className="h-5 w-5" />
-          <span>Más</span>
+          <span>{tr('Más', 'More', 'Mais')}</span>
         </button>
       </nav>
 
@@ -1069,19 +1094,19 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
           <div className="w-full rounded-t-3xl border-t border-slate-200 bg-white p-5 pb-8 dark:border-slate-800 dark:bg-slate-900">
             <div className="mb-4 flex items-center justify-between">
               <span className="text-sm font-bold text-slate-900 dark:text-white font-display">
-                Más secciones
+                {tr('Más secciones', 'More sections', 'Mais seções')}
               </span>
               <button
                 type="button"
                 onClick={() => setMoreMenuOpen(false)}
-                aria-label="Cerrar menú"
+                aria-label={tr('Cerrar menú', 'Close menu', 'Fechar menu')}
                 className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
             <div className="grid grid-cols-3 gap-2.5">
-              {MOBILE_MORE_ITEMS.map((item) => {
+              {mobileMoreItems.map((item) => {
                 const Icon = item.icon;
                 const active = page === item.id;
                 return (
@@ -1111,7 +1136,9 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                   }`}
                 >
                   <ShieldCheck className="h-5 w-5" />
-                  <span className="text-center leading-tight">Admin de taller</span>
+                  <span className="text-center leading-tight">
+                    {tr('Admin de taller', 'Workshop admin', 'Admin da oficina')}
+                  </span>
                 </button>
               )}
             </div>
@@ -1125,7 +1152,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                 className="flex h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 dark:border-slate-800 dark:text-slate-200"
               >
                 <MessageSquarePlus className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
-                <span>Soporte</span>
+                <span>{tr('Soporte', 'Support', 'Suporte')}</span>
               </button>
               <button
                 type="button"
@@ -1136,7 +1163,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                 className="flex h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 dark:border-slate-800 dark:text-slate-200"
               >
                 <HelpCircle className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
-                <span>Tour guiado</span>
+                <span>{tr('Tour guiado', 'Guided tour', 'Tour guiado')}</span>
               </button>
             </div>
             {subscriptionRecord && (

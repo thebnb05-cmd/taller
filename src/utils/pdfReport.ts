@@ -15,6 +15,7 @@ import { parsePaymentInfo } from './payment';
 import { parseSalePaymentInfo } from './saleMeta';
 import { parseCheckoutAndSignature } from './signatureMeta';
 import { parseWorkshopMeta } from './workshopMeta';
+import { getIntlLocale } from './i18n';
 
 interface PdfBrandHeader {
   brandName: string;
@@ -124,7 +125,7 @@ export function downloadSalesSummaryPdf(params: {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const margin = 14;
 
-  const generatedAt = new Intl.DateTimeFormat('es-AR', {
+  const generatedAt = new Intl.DateTimeFormat(getIntlLocale(), {
     dateStyle: 'short',
     timeStyle: 'short',
   }).format(new Date());
@@ -282,7 +283,7 @@ export function downloadInventorySummaryPdf(params: {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const margin = 14;
 
-  const generatedAt = new Intl.DateTimeFormat('es-AR', {
+  const generatedAt = new Intl.DateTimeFormat(getIntlLocale(), {
     dateStyle: 'short',
     timeStyle: 'short',
   }).format(new Date());

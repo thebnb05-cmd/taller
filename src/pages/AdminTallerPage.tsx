@@ -17,6 +17,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { supabase } from '../lib/db';
+import { getIntlLocale } from '../utils/i18n';
 
 interface AdminOverviewSummary {
   totalUsers: number;
@@ -102,7 +103,7 @@ function formatDateTimeShort(iso: string | null): string {
   if (!iso) return 'Nunca';
   const ms = Date.parse(iso);
   if (!Number.isFinite(ms) || ms <= 0) return '—';
-  return new Intl.DateTimeFormat('es-AR', {
+  return new Intl.DateTimeFormat(getIntlLocale(), {
     day: '2-digit',
     month: '2-digit',
     year: '2-digit',

@@ -35,6 +35,7 @@ import {
   sanitizeTelHref,
 } from '../utils/validation';
 import type { PublicTicketRecord } from '../types/workshop';
+import { getIntlLocale, useI18n } from '../utils/i18n';
 
 interface PublicTrackingViewProps {
   initialCode: string;
@@ -55,7 +56,7 @@ const VALID_TRACKING_CODE_RE = /^[a-zA-Z0-9_-]{1,40}$/;
 function formatTimelineDateTime(iso: string): string {
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return iso;
-  return new Intl.DateTimeFormat('es-AR', {
+  return new Intl.DateTimeFormat(getIntlLocale(), {
     day: '2-digit',
     month: '2-digit',
     hour: '2-digit',
@@ -67,6 +68,7 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
   initialCode,
   onExitTracking,
 }) => {
+  const { tr } = useI18n();
   const activeCurrency = useActiveCurrency();
   const [urlCurrency] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
@@ -265,7 +267,7 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
                 {ticket?.businessName || 'TH3 BNB Servicio Técnico'}
               </h1>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Seguimiento en vivo de tu equipo
+                {tr('Seguimiento en vivo de tu equipo', 'Live tracking for your device', 'Acompanhamento em tempo real do seu aparelho')}
               </p>
             </div>
           </div>
@@ -282,7 +284,7 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
                 className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-                <span className="hidden sm:inline">Actualizar</span>
+                <span className="hidden sm:inline">{tr('Actualizar', 'Refresh', 'Atualizar')}</span>
               </button>
             )}
             {onExitTracking && (
@@ -292,7 +294,7 @@ export const PublicTrackingView: React.FC<PublicTrackingViewProps> = ({
                 className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 <ArrowLeft className="h-3.5 w-3.5" />
-                Volver al taller
+                {tr('Volver al taller', 'Back to workshop', 'Voltar à oficina')}
               </button>
             )}
           </div>

@@ -29,6 +29,7 @@ import {
 } from '../utils/purchaseMeta';
 import { sanitizeDbErrorMessage } from '../utils/validation';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
+import { useI18n } from '../utils/i18n';
 
 interface PurchasesPageProps {
   purchases: PurchaseRecord[];
@@ -53,6 +54,7 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
   onEditPurchase,
 }) => {
   const { notify } = useToast();
+  const { tr } = useI18n();
   const baseCurrency = useMemo(() => parseWorkshopMeta(profile).currency, [profile]);
   const openShift = useMemo(() => findOpenCashShift(tasks), [tasks]);
 
@@ -229,10 +231,14 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-white font-display">
-            Compras y gastos
+            {tr('Compras y gastos', 'Purchases & expenses', 'Compras e despesas')}
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Reposición de repuestos, servicios fijos y pagos a proveedores
+            {tr(
+              'Reposición de repuestos, servicios fijos y pagos a proveedores',
+              'Parts restock, fixed expenses and supplier payments',
+              'Reposição de peças, despesas fixas e pagamentos a fornecedores'
+            )}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -243,7 +249,7 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
             className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] disabled:opacity-50 whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
           >
             <Download className="h-4 w-4" />
-            Exportar CSV
+            {tr('Exportar CSV', 'Export CSV', 'Exportar CSV')}
           </button>
           <button
             type="button"
@@ -251,7 +257,7 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
             className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-xs font-semibold text-white hover:bg-[#005f9c] whitespace-nowrap shrink-0"
           >
             <Plus className="h-4 w-4" />
-            Nueva compra
+            {tr('Nueva compra', 'New purchase', 'Nova compra')}
           </button>
         </div>
       </div>
@@ -261,19 +267,19 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
           <div className="font-mono-num text-xl font-bold text-slate-900 sm:text-2xl dark:text-white">
             {formatCompactCurrency(total, baseCurrency)}
           </div>
-          <div className="text-xs text-slate-500">Total compras</div>
+          <div className="text-xs text-slate-500">{tr('Total compras', 'Total purchases', 'Total de compras')}</div>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="font-mono-num text-xl font-bold text-amber-600 sm:text-2xl dark:text-amber-400">
             {formatCompactCurrency(pending, baseCurrency)}
           </div>
-          <div className="text-xs text-slate-500">Pendiente</div>
+          <div className="text-xs text-slate-500">{tr('Pendiente', 'Pending', 'Pendente')}</div>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="font-mono-num text-xl font-bold text-emerald-600 sm:text-2xl dark:text-emerald-400">
             {formatCompactCurrency(paid, baseCurrency)}
           </div>
-          <div className="text-xs text-slate-500">Pagado</div>
+          <div className="text-xs text-slate-500">{tr('Pagado', 'Paid', 'Pago')}</div>
         </div>
       </div>
 
@@ -285,7 +291,11 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar proveedor, factura, categoría o repuesto..."
+            placeholder={tr(
+              'Buscar proveedor, factura, categoría o repuesto...',
+              'Search supplier, invoice, category or part...',
+              'Buscar fornecedor, nota fiscal, categoria ou peça...'
+            )}
             className="h-9 w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-9 pr-8 text-xs text-slate-900 outline-none focus:border-[#0072BB] focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
           />
           {query && (
@@ -302,10 +312,10 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
         <select
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value as CategoryFilter)}
-          aria-label="Filtrar por categoría"
+          aria-label={tr('Filtrar por categoría', 'Filter by category', 'Filtrar por categoria')}
           className="h-9 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
         >
-          <option value="all">Todas las categorías</option>
+          <option value="all">{tr('Todas las categorías', 'All categories', 'Todas as categorias')}</option>
           {(Object.keys(PURCHASE_CATEGORY_LABELS) as PurchaseCategory[]).map((cat) => (
             <option key={cat} value={cat}>
               {PURCHASE_CATEGORY_LABELS[cat]}
@@ -316,9 +326,9 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
         <div className="flex items-center gap-1">
           {(
             [
-              { id: 'all', label: 'Todas' },
-              { id: 'pendiente', label: 'Pendientes' },
-              { id: 'pagado', label: 'Pagadas' },
+              { id: 'all', label: tr('Todas', 'All', 'Todas') },
+              { id: 'pendiente', label: tr('Pendientes', 'Pending', 'Pendentes') },
+              { id: 'pagado', label: tr('Pagadas', 'Paid', 'Pagas') },
             ] as const
           ).map((tab) => (
             <button

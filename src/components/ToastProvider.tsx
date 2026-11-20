@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useState } from 'react';
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
+import { translateToastMessage, useActiveLanguage } from '../utils/i18n';
 
 type ToastTone = 'success' | 'error' | 'info';
 
@@ -21,6 +22,7 @@ export function useToast() {
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const lang = useActiveLanguage();
 
   const dismiss = useCallback((toastId: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== toastId));
@@ -29,12 +31,13 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const notify = useCallback(
     (message: string, tone: ToastTone = 'success') => {
       const toastId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      setToasts((prev) => [...prev.slice(-3), { id: toastId, message, tone }]);
+      const localized = translateToastMessage(message, lang);
+      setToasts((prev) => [...prev.slice(-3), { id: toastId, message: localized, tone }]);
       window.setTimeout(() => {
         dismiss(toastId);
       }, 3600);
     },
-    [dismiss]
+    [dismiss, lang]
   );
 
   return (

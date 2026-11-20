@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Building2,
   Coins,
+  Globe,
   Image as ImageIcon,
   LogIn,
   Mail,
@@ -28,6 +29,14 @@ import {
   setActiveCurrency,
   type CurrencyCode,
 } from '../utils/currency';
+import {
+  getActiveLanguage,
+  LANGUAGE_OPTIONS,
+  sanitizeLanguageCode,
+  setActiveLanguage,
+  useI18n,
+  type LanguageCode,
+} from '../utils/i18n';
 import { compressImageToDataUrl, formatCurrency } from '../utils/formatters';
 import {
   isPrivatePreviewOrigin,
@@ -69,6 +78,7 @@ interface OtpLockState {
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) => {
   const { notify } = useToast();
+  const { lang, tr } = useI18n();
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -267,22 +277,41 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
               </span>
             </div>
             <h1 className="mt-8 text-3xl font-bold leading-tight tracking-tight text-balance font-display">
-              Gestión integral para tu servicio técnico
+              {tr(
+                'Gestión integral para tu servicio técnico',
+                'Complete management for your repair shop',
+                'Gestão completa para sua assistência técnica'
+              )}
             </h1>
             <p className="mt-3 text-sm leading-relaxed text-slate-300">
-              Administrá órdenes de reparación, check-in de equipos, clientes, repuestos, inventario,
-              ventas y boletas en tiempo real desde cualquier dispositivo.
+              {tr(
+                'Administrá órdenes de reparación, check-in de equipos, clientes, repuestos, inventario, ventas y boletas en tiempo real desde cualquier dispositivo.',
+                'Manage repair orders, device check-ins, clients, spare parts, inventory, sales, and receipts in real time from any device.',
+                'Gerencie ordens de serviço, check-in de aparelhos, clientes, peças, estoque, vendas e comprovantes em tempo real de qualquer dispositivo.'
+              )}
             </p>
           </div>
 
           <div className="mt-8 space-y-3 border-t border-slate-800 pt-6 text-xs text-slate-300">
             <div className="flex items-center gap-2.5">
               <ShieldCheck className="h-4 w-4 shrink-0 text-sky-400" />
-              <span>Acceso seguro por cuenta con Supabase Auth y políticas RLS</span>
+              <span>
+                {tr(
+                  'Acceso seguro por cuenta con Supabase Auth y políticas RLS',
+                  'Secure per-account access with Supabase Auth and RLS policies',
+                  'Acesso seguro por conta com Supabase Auth e políticas RLS'
+                )}
+              </span>
             </div>
             <div className="flex items-center gap-2.5">
               <Building2 className="h-4 w-4 shrink-0 text-sky-400" />
-              <span>Base de datos PostgreSQL en Supabase entre PC, tablet y celular</span>
+              <span>
+                {tr(
+                  'Base de datos PostgreSQL en Supabase entre PC, tablet y celular',
+                  'PostgreSQL database synced across desktop, tablet, and mobile',
+                  'Banco de dados sincronizado entre computador, tablet e celular'
+                )}
+              </span>
             </div>
             {onOpenTrackingLookup && (
               <button
@@ -290,7 +319,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
                 onClick={onOpenTrackingLookup}
                 className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-sky-400 hover:text-sky-300 hover:underline"
               >
-                ¿Sos cliente? Consultar estado de reparación
+                {tr(
+                  '¿Sos cliente? Consultar estado de reparación',
+                  'Are you a customer? Check repair status',
+                  'É cliente? Consultar status do reparo'
+                )}
               </button>
             )}
           </div>
@@ -298,15 +331,42 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
 
         <div className="flex flex-col justify-center p-8 sm:p-10">
           <div className="space-y-5">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900 dark:text-white font-display">
-                  {mode === 'login' ? 'Ingresar al sistema' : 'Crear cuenta de taller'}
-                </h2>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                  {mode === 'login'
-                    ? 'Ingresá con tu correo y contraseña para acceder a tu taller.'
-                    : 'Registrate con tu correo para crear un nuevo taller en Supabase.'}
-                </p>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-white font-display">
+                    {mode === 'login'
+                      ? tr('Ingresar al sistema', 'Sign in', 'Entrar no sistema')
+                      : tr('Crear cuenta de taller', 'Create workshop account', 'Criar conta da oficina')}
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                    {mode === 'login'
+                      ? tr(
+                          'Ingresá con tu correo y contraseña para acceder a tu taller.',
+                          'Sign in with your email and password to access your workshop.',
+                          'Entre com seu e-mail e senha para acessar sua oficina.'
+                        )
+                      : tr(
+                          'Registrate con tu correo para crear un nuevo taller.',
+                          'Sign up with your email to create a new workshop.',
+                          'Cadastre-se com seu e-mail para criar uma nova oficina.'
+                        )}
+                  </p>
+                </div>
+                <label className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                  <Globe className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
+                  <select
+                    aria-label={tr('Idioma', 'Language', 'Idioma')}
+                    value={lang}
+                    onChange={(e) => setActiveLanguage(sanitizeLanguageCode(e.target.value))}
+                    className="bg-transparent text-xs font-semibold text-slate-700 outline-none dark:text-slate-200"
+                  >
+                    {LANGUAGE_OPTIONS.map((opt) => (
+                      <option key={opt.code} value={opt.code} className="dark:bg-slate-900">
+                        {opt.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
 
               <div className="grid grid-cols-2 rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
@@ -324,7 +384,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
                       : 'text-slate-600 dark:text-slate-400'
                   }`}
                 >
-                  Iniciar sesión
+                  {tr('Iniciar sesión', 'Sign in', 'Entrar')}
                 </button>
                 <button
                   type="button"
@@ -340,7 +400,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
                       : 'text-slate-600 dark:text-slate-400'
                   }`}
                 >
-                  Crear cuenta
+                  {tr('Crear cuenta', 'Create account', 'Criar conta')}
                 </button>
               </div>
 
@@ -390,13 +450,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
                     d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
                   />
                 </svg>
-                <span>{googleLoading ? 'Redirigiendo a Google...' : 'Continuar con Google'}</span>
+                <span>
+                  {googleLoading
+                    ? tr('Redirigiendo a Google...', 'Redirecting to Google...', 'Redirecionando para o Google...')
+                    : tr('Continuar con Google', 'Continue with Google', 'Continuar com o Google')}
+                </span>
               </button>
 
               <div className="relative flex items-center py-0.5">
                 <div className="flex-grow border-t border-slate-200 dark:border-slate-800" />
                 <span className="mx-3 shrink-0 text-[11px] font-medium text-slate-400">
-                  o con tu correo
+                  {tr('o con tu correo', 'or with your email', 'ou com seu e-mail')}
                 </span>
                 <div className="flex-grow border-t border-slate-200 dark:border-slate-800" />
               </div>
@@ -404,7 +468,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
               <form onSubmit={handleEmailAuth} className="space-y-3.5">
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    Correo electrónico
+                    {tr('Correo electrónico', 'Email', 'E-mail')}
                   </label>
                   <div className="relative">
                     <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -424,7 +488,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
 
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    Contraseña
+                    {tr('Contraseña', 'Password', 'Senha')}
                   </label>
                   <input
                     type="password"
@@ -434,7 +498,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
                     autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder={mode === 'signup' ? 'Mín. 8 caracteres (letras y números)' : 'Tu contraseña'}
+                    placeholder={
+                      mode === 'signup'
+                        ? tr(
+                            'Mín. 8 caracteres (letras y números)',
+                            'Min. 8 chars (letters & numbers)',
+                            'Mín. 8 caracteres (letras e números)'
+                          )
+                        : tr('Tu contraseña', 'Your password', 'Sua senha')
+                    }
                     className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
                 </div>
@@ -447,10 +519,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
                   <LogIn className="h-4 w-4" />
                   <span>
                     {loading
-                      ? 'Conectando...'
+                      ? tr('Conectando...', 'Connecting...', 'Conectando...')
                       : mode === 'login'
-                      ? 'Ingresar'
-                      : 'Registrar taller'}
+                      ? tr('Ingresar', 'Sign in', 'Entrar')
+                      : tr('Registrar taller', 'Register workshop', 'Cadastrar oficina')}
                   </span>
                 </button>
               </form>
@@ -503,10 +575,12 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
   displayName,
 }) => {
   const { notify } = useToast();
+  const { tr } = useI18n();
   const initialParts = (displayName || '').trim().split(/\s+/);
   const [firstName, setFirstName] = useState(initialParts[0] || '');
   const [lastName, setLastName] = useState(initialParts.slice(1).join(' ') || '');
   const [role, setRole] = useState<'admin' | 'operator'>('admin');
+  const [language, setLanguage] = useState<LanguageCode>(() => getActiveLanguage());
 
   const [brandName, setBrandName] = useState('TH3 BNB');
   const [subtitleText, setSubtitleText] = useState('Servicio técnico');
@@ -585,6 +659,7 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
     try {
       const nowIso = new Date().toISOString();
       const safeCurrency = sanitizeCurrencyCode(currency);
+      const safeLanguage = sanitizeLanguageCode(language);
       const safeTrackingBaseUrl = isPrivatePreviewOrigin(cleanedTrackingUrl)
         ? ''
         : clampStr(cleanedTrackingUrl, 250);
@@ -596,6 +671,7 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
         businessEmail: cleanContactEmail,
         footerNote: sanitizePlainLine(footerNote, 180),
         currency: safeCurrency,
+        language: safeLanguage,
       });
       const safeColors = wordColors
         .slice(0, 12)
@@ -625,6 +701,7 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
       });
       await upsertRow('workshop_profiles', payload);
       setActiveCurrency(safeCurrency);
+      setActiveLanguage(safeLanguage);
       notify('Perfil del taller guardado correctamente.');
     } catch (err) {
       notify(sanitizeDbErrorMessage(err, 'No se pudo guardar el perfil. Intentá de nuevo.'), 'error');
@@ -637,21 +714,79 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-8 dark:bg-slate-950">
       <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8 dark:border-slate-800 dark:bg-slate-900">
-        <div className="mb-6">
-          <h2 className="text-2xl font-bold text-slate-900 dark:text-white font-display">
-            Configurá tu taller
-          </h2>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Completá tus datos, marca, moneda, logo y opciones visibles en cada boleta y presupuesto.
-          </p>
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white font-display">
+              {tr('Configurá tu taller', 'Set up your workshop', 'Configure sua oficina')}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              {tr(
+                'Completá tus datos, idioma, marca, moneda, logo y opciones visibles en cada boleta y presupuesto.',
+                'Complete your details, language, brand, currency, logo, and receipt options.',
+                'Preencha seus dados, idioma, marca, moeda, logotipo e opções dos comprovantes.'
+              )}
+            </p>
+            {userEmail && (
+              <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                <Mail className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
+                <span>{userEmail}</span>
+              </div>
+            )}
+          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
+          {/* Idioma / Lenguaje */}
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-800/40">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-50 text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300">
+                <Globe className="h-4 w-4" />
+              </span>
+              <div>
+                <label
+                  htmlFor="onboarding-language-select"
+                  className="block text-xs font-bold text-slate-800 dark:text-slate-100"
+                >
+                  {tr(
+                    'Idioma / Lenguaje del sistema',
+                    'System language',
+                    'Idioma do sistema'
+                  )}
+                </label>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {tr(
+                    'Podés cambiarlo en cualquier momento desde Configuración.',
+                    'You can change it anytime from Settings.',
+                    'Você pode alterá-lo a qualquer momento em Configurações.'
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="mt-3">
+              <select
+                id="onboarding-language-select"
+                value={language}
+                onChange={(e) => {
+                  const nextLang = sanitizeLanguageCode(e.target.value);
+                  setLanguage(nextLang);
+                  setActiveLanguage(nextLang);
+                }}
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+              >
+                {LANGUAGE_OPTIONS.map((opt) => (
+                  <option key={opt.code} value={opt.code}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           {/* Datos del responsable */}
           <div className="grid gap-4 sm:grid-cols-3">
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Nombre *
+                {tr('Nombre *', 'First name *', 'Nome *')}
               </label>
               <input
                 type="text"
@@ -659,13 +794,13 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
                 maxLength={100}
                 value={firstName}
                 onChange={(e) => setFirstName(e.target.value)}
-                placeholder="Tu nombre"
+                placeholder={tr('Tu nombre', 'Your first name', 'Seu nome')}
                 className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Apellido *
+                {tr('Apellido *', 'Last name *', 'Sobrenome *')}
               </label>
               <input
                 type="text"
@@ -673,21 +808,21 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
                 maxLength={100}
                 value={lastName}
                 onChange={(e) => setLastName(e.target.value)}
-                placeholder="Tu apellido"
+                placeholder={tr('Tu apellido', 'Your last name', 'Seu sobrenome')}
                 className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Tipo de acceso
+                {tr('Tipo de acceso', 'Access role', 'Tipo de acesso')}
               </label>
               <select
                 value={role}
                 onChange={(e) => setRole(e.target.value as 'admin' | 'operator')}
                 className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               >
-                <option value="admin">Administrador</option>
-                <option value="operator">Operador</option>
+                <option value="admin">{tr('Administrador', 'Administrator', 'Administrador')}</option>
+                <option value="operator">{tr('Operador', 'Operator', 'Operador')}</option>
               </select>
             </div>
           </div>
@@ -1066,14 +1201,16 @@ export const WorkshopOnboarding: React.FC<WorkshopOnboardingProps> = ({
               onClick={() => void supabase.auth.signOut()}
               className="h-11 rounded-xl border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             >
-              Cerrar sesión
+              {tr('Cerrar sesión', 'Sign out', 'Sair')}
             </button>
             <button
               type="submit"
               disabled={saving}
               className="h-11 flex-1 rounded-xl bg-[#0072BB] px-5 text-sm font-semibold text-white transition hover:bg-[#005f9c] disabled:opacity-60"
             >
-              {saving ? 'Guardando...' : 'Comenzar a usar el taller'}
+              {saving
+                ? tr('Guardando...', 'Saving...', 'Salvando...')
+                : tr('Comenzar a usar el taller', 'Start using workshop', 'Começar a usar a oficina')}
             </button>
           </div>
         </form>

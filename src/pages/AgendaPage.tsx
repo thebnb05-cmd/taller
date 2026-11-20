@@ -23,6 +23,7 @@ import {
   todayISO,
 } from '../utils/formatters';
 import { isCashShiftTask } from '../utils/cashRegister';
+import { getIntlLocale, useI18n } from '../utils/i18n';
 
 interface AgendaPageProps {
   tasks: TaskRecord[];
@@ -30,8 +31,6 @@ interface AgendaPageProps {
   onNewTask: () => void;
   onSelectRepair?: (repair: RepairRecord) => void;
 }
-
-const WEEKDAY_LABELS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
 function dateToISO(date: Date): string {
   const y = date.getFullYear();
@@ -49,7 +48,7 @@ function normalizeISODate(raw: string | undefined): string {
 function formatLongDateES(iso: string): string {
   const parsed = new Date(`${iso}T12:00:00`);
   if (Number.isNaN(parsed.getTime())) return iso;
-  const formatted = new Intl.DateTimeFormat('es-AR', {
+  const formatted = new Intl.DateTimeFormat(getIntlLocale(), {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
@@ -65,7 +64,21 @@ export const AgendaPage: React.FC<AgendaPageProps> = ({
   onSelectRepair,
 }) => {
   const { notify } = useToast();
+  const { locale, tr } = useI18n();
   const today = todayISO();
+
+  const weekdayLabels = useMemo(
+    () => [
+      tr('Lun', 'Mon', 'Seg'),
+      tr('Mar', 'Tue', 'Ter'),
+      tr('Mié', 'Wed', 'Qua'),
+      tr('Jue', 'Thu', 'Qui'),
+      tr('Vie', 'Fri', 'Sex'),
+      tr('Sáb', 'Sat', 'Sáb'),
+      tr('Dom', 'Sun', 'Dom'),
+    ],
+    [tr]
+  );
 
   const [viewMode, setViewMode] = useState<'calendar' | 'tasks'>('calendar');
   const [selectedDate, setSelectedDate] = useState<string>(today);
@@ -146,12 +159,12 @@ export const AgendaPage: React.FC<AgendaPageProps> = ({
   }, [monthCursor]);
 
   const monthTitle = useMemo(() => {
-    const label = new Intl.DateTimeFormat('es-AR', {
+    const label = new Intl.DateTimeFormat(locale, {
       month: 'long',
       year: 'numeric',
     }).format(new Date(monthCursor.year, monthCursor.month, 1));
     return label.charAt(0).toUpperCase() + label.slice(1);
-  }, [monthCursor]);
+  }, [locale, monthCursor]);
 
   const monthPrefix = useMemo(() => {
     const m = String(monthCursor.month + 1).padStart(2, '0');
@@ -245,9 +258,15 @@ export const AgendaPage: React.FC<AgendaPageProps> = ({
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 dark:text-white font-display">Agenda</h1>
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white font-display">
+            {tr('Agenda', 'Schedule', 'Agenda')}
+          </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Calendario de entregas estimadas, seguimientos y recordatorios
+            {tr(
+              'Calendario de entregas estimadas, seguimientos y recordatorios',
+              'Calendar of estimated deliveries, follow-ups and reminders',
+              'Calendário de entregas previstas, acompanhamentos e lembretes'
+            )}
           </p>
         </div>
 
@@ -263,7 +282,7 @@ export const AgendaPage: React.FC<AgendaPageProps> = ({
               }`}
             >
               <CalendarDays className="h-3.5 w-3.5" />
-              Calendario
+              {tr('Calendario', 'Calendar', 'Calendário')}
             </button>
             <button
               type="button"
@@ -275,7 +294,7 @@ export const AgendaPage: React.FC<AgendaPageProps> = ({
               }`}
             >
               <List className="h-3.5 w-3.5" />
-              Tareas
+              {tr('Tareas', 'Tasks', 'Tarefas')}
               {counts.pending > 0 && (
                 <span className="rounded-md bg-slate-200 px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-slate-700 dark:bg-slate-700 dark:text-slate-200">
                   {counts.pending}
@@ -290,7 +309,7 @@ export const AgendaPage: React.FC<AgendaPageProps> = ({
             className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-xs font-semibold text-white hover:bg-[#005f9c]"
           >
             <Plus className="h-4 w-4" />
-            Nueva tarea
+            {tr('Nueva tarea', 'New task', 'Nova tarefa')}
           </button>
         </div>
       </div>
@@ -302,25 +321,25 @@ export const AgendaPage: React.FC<AgendaPageProps> = ({
               <div className="font-mono-num text-xl font-bold text-slate-900 dark:text-white">
                 {deliveryStats.thisMonth}
               </div>
-              <div className="text-xs text-slate-500">Entregas del mes</div>
+              <div className="text-xs text-slate-500">{tr('Entregas del mes', 'Deliveries this month', 'Entregas do mês')}</div>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white p-3.5 dark:border-slate-800 dark:bg-slate-900">
               <div className="font-mono-num text-xl font-bold text-[#0072BB] dark:text-sky-400">
                 {deliveryStats.dueTodayCount}
               </div>
-              <div className="text-xs text-slate-500">Entregas para hoy</div>
+              <div className="text-xs text-slate-500">{tr('Entregas para hoy', 'Due today', 'Entregas para hoje')}</div>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white p-3.5 dark:border-slate-800 dark:bg-slate-900">
               <div className="font-mono-num text-xl font-bold text-red-600 dark:text-red-400">
                 {deliveryStats.overdueCount}
               </div>
-              <div className="text-xs text-slate-500">Entregas atrasadas</div>
+              <div className="text-xs text-slate-500">{tr('Entregas atrasadas', 'Overdue deliveries', 'Entregas atrasadas')}</div>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white p-3.5 dark:border-slate-800 dark:bg-slate-900">
               <div className="font-mono-num text-xl font-bold text-slate-600 dark:text-slate-300">
                 {deliveryStats.withoutDateCount}
               </div>
-              <div className="text-xs text-slate-500">Activas sin fecha est.</div>
+              <div className="text-xs text-slate-500">{tr('Activas sin fecha est.', 'Active without ETA', 'Ativas sem data prev.')}</div>
             </div>
           </div>
 
@@ -331,7 +350,7 @@ export const AgendaPage: React.FC<AgendaPageProps> = ({
                   <button
                     type="button"
                     onClick={() => shiftMonth(-1)}
-                    aria-label="Mes anterior"
+                    aria-label={tr('Mes anterior', 'Previous month', 'Mês anterior')}
                     className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
                   >
                     <ChevronLeft className="h-4 w-4" />
@@ -342,7 +361,7 @@ export const AgendaPage: React.FC<AgendaPageProps> = ({
                   <button
                     type="button"
                     onClick={() => shiftMonth(1)}
-                    aria-label="Mes siguiente"
+                    aria-label={tr('Mes siguiente', 'Next month', 'Próximo mês')}
                     className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
                   >
                     <ChevronRight className="h-4 w-4" />
@@ -352,7 +371,7 @@ export const AgendaPage: React.FC<AgendaPageProps> = ({
                     onClick={() => jumpToDate(today)}
                     className="h-9 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                   >
-                    Hoy
+                    {tr('Hoy', 'Today', 'Hoje')}
                   </button>
                 </div>
 
@@ -363,12 +382,12 @@ export const AgendaPage: React.FC<AgendaPageProps> = ({
                     onChange={(e) => setHideDelivered(e.target.checked)}
                     className="h-4 w-4 rounded border-slate-300 text-[#0072BB] focus:ring-[#0072BB]"
                   />
-                  Ocultar entregados
+                  {tr('Ocultar entregados', 'Hide delivered', 'Ocultar entregues')}
                 </label>
               </div>
 
               <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                {WEEKDAY_LABELS.map((day) => (
+                {weekdayLabels.map((day) => (
                   <div key={day} className="py-1.5">
                     {day}
                   </div>

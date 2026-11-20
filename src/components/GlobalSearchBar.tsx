@@ -3,6 +3,7 @@ import { Package, Search, Smartphone, Users, X } from 'lucide-react';
 import type { ClientRecord, ProductRecord, RepairRecord } from '../types/workshop';
 import { formatCurrency, getStatusMeta } from '../utils/formatters';
 import { parseClientMeta } from '../utils/clientMeta';
+import { useI18n } from '../utils/i18n';
 
 type SearchCategory = 'all' | 'clients' | 'repairs' | 'products';
 
@@ -34,6 +35,7 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
   onSelectRepair,
   onSelectProduct,
 }) => {
+  const { tr } = useI18n();
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<SearchCategory>('all');
   const [open, setOpen] = useState(false);
@@ -217,10 +219,10 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
 
   const renderDropdownContent = () => {
     const tabs: Array<{ id: SearchCategory; label: string; count: number }> = [
-      { id: 'all', label: 'Todos', count: totalMatches },
-      { id: 'clients', label: 'Clientes', count: matches.clients.length },
-      { id: 'repairs', label: 'Equipos', count: matches.repairs.length },
-      { id: 'products', label: 'Productos', count: matches.products.length },
+      { id: 'all', label: tr('Todos', 'All', 'Todos'), count: totalMatches },
+      { id: 'clients', label: tr('Clientes', 'Clients', 'Clientes'), count: matches.clients.length },
+      { id: 'repairs', label: tr('Equipos', 'Devices', 'Aparelhos'), count: matches.repairs.length },
+      { id: 'products', label: tr('Productos', 'Products', 'Produtos'), count: matches.products.length },
     ];
 
     let runningIndex = 0;
@@ -228,7 +230,7 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
     return (
       <div
         role="listbox"
-        aria-label="Resultados de búsqueda global"
+        aria-label={tr('Resultados de búsqueda global', 'Global search results', 'Resultados da busca global')}
         className="mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900"
       >
         <div className="flex items-center gap-1 overflow-x-auto border-b border-slate-100 bg-slate-50/80 p-1.5 dark:border-slate-800 dark:bg-slate-950/60">
@@ -267,22 +269,37 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
           {!normalizedQuery ? (
             <div className="px-3 py-6 text-center text-xs text-slate-500 dark:text-slate-400">
               <p className="font-medium text-slate-700 dark:text-slate-200">
-                Búsqueda rápida en todo el taller
+                {tr(
+                  'Búsqueda rápida en todo el taller',
+                  'Quick search across your workshop',
+                  'Busca rápida em toda a oficina'
+                )}
               </p>
               <p className="mt-1">
-                Escribí nombre, teléfono, DNI, marca/modelo, orden, IMEI, SKU o código de barras.
+                {tr(
+                  'Escribí nombre, teléfono, DNI, marca/modelo, orden, IMEI, SKU o código de barras.',
+                  'Type name, phone, ID, brand/model, order, IMEI, SKU or barcode.',
+                  'Digite nome, telefone, CPF, marca/modelo, ordem, IMEI, SKU ou código de barras.'
+                )}
               </p>
               <div className="mt-3 flex flex-wrap justify-center gap-3 font-mono-num text-[11px] text-slate-400">
-                <span>{clients.length} clientes</span>
+                <span>
+                  {clients.length} {tr('clientes', 'clients', 'clientes')}
+                </span>
                 <span>·</span>
-                <span>{repairs.length} equipos</span>
+                <span>
+                  {repairs.length} {tr('equipos', 'devices', 'aparelhos')}
+                </span>
                 <span>·</span>
-                <span>{products.length} productos</span>
+                <span>
+                  {products.length} {tr('productos', 'products', 'produtos')}
+                </span>
               </div>
             </div>
           ) : flatItems.length === 0 ? (
             <div className="px-3 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
-              No se encontraron resultados para «<span className="font-semibold">{query.trim()}</span>».
+              {tr('No se encontraron resultados para', 'No results found for', 'Nenhum resultado encontrado para')} «
+              <span className="font-semibold">{query.trim()}</span>».
             </div>
           ) : (
             <div className="space-y-2">
@@ -291,7 +308,7 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
                   <div className="flex items-center justify-between px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
                     <span className="inline-flex items-center gap-1.5">
                       <Users className="h-3.5 w-3.5" />
-                      Clientes
+                      {tr('Clientes', 'Clients', 'Clientes')}
                     </span>
                     <span className="font-mono-num">{matches.clients.length}</span>
                   </div>
@@ -482,12 +499,16 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
           setOpen(true);
           window.setTimeout(() => mobileInputRef.current?.focus(), 20);
         }}
-        aria-label="Abrir búsqueda global"
-        title="Buscar clientes, equipos o productos"
+        aria-label={tr('Abrir búsqueda global', 'Open global search', 'Abrir busca global')}
+        title={tr(
+          'Buscar clientes, equipos o productos',
+          'Search clients, devices, or products',
+          'Buscar clientes, aparelhos ou produtos'
+        )}
         className="flex h-9 w-full min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-2.5 text-left text-xs text-slate-400 transition hover:bg-slate-100 sm:hidden dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-400 dark:hover:bg-slate-800"
       >
         <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-        <span className="truncate">{query || 'Buscar...'}</span>
+        <span className="truncate">{query || tr('Buscar...', 'Search...', 'Buscar...')}</span>
       </button>
 
       {/* Desktop / Tablet inline search bar */}
@@ -503,8 +524,16 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
             if (!open) setOpen(true);
           }}
           onKeyDown={handleInputKeyDown}
-          placeholder="Buscar clientes, equipos o productos..."
-          aria-label="Búsqueda global entre clientes, equipos y productos"
+          placeholder={tr(
+            'Buscar clientes, equipos o productos...',
+            'Search clients, devices, or products...',
+            'Buscar clientes, aparelhos ou produtos...'
+          )}
+          aria-label={tr(
+            'Búsqueda global entre clientes, equipos y productos',
+            'Global search across clients, devices, and products',
+            'Busca global entre clientes, aparelhos e produtos'
+          )}
           className="h-9 sm:h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-9 lg:pr-16 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#0072BB] focus:bg-white dark:border-slate-700 dark:bg-slate-800/70 dark:text-white dark:focus:border-sky-500 dark:focus:bg-slate-800"
         />
         {query ? (
@@ -514,7 +543,7 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
               setQuery('');
               desktopInputRef.current?.focus();
             }}
-            aria-label="Limpiar búsqueda"
+            aria-label={tr('Limpiar búsqueda', 'Clear search', 'Limpar busca')}
             className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 hover:bg-slate-200/70 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-slate-200"
           >
             <X className="h-3.5 w-3.5" />
@@ -547,8 +576,16 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
                   if (!open) setOpen(true);
                 }}
                 onKeyDown={handleInputKeyDown}
-                placeholder="Buscar clientes, equipos o productos..."
-                aria-label="Búsqueda global entre clientes, equipos y productos"
+                placeholder={tr(
+                  'Buscar clientes, equipos o productos...',
+                  'Search clients, devices, or products...',
+                  'Buscar clientes, aparelhos ou produtos...'
+                )}
+                aria-label={tr(
+                  'Búsqueda global entre clientes, equipos y productos',
+                  'Global search across clients, devices, and products',
+                  'Busca global entre clientes, aparelhos e produtos'
+                )}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-8 text-sm text-slate-900 outline-none focus:border-[#0072BB] focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
               {query && (
@@ -558,7 +595,7 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
                     setQuery('');
                     mobileInputRef.current?.focus();
                   }}
-                  aria-label="Limpiar búsqueda"
+                  aria-label={tr('Limpiar búsqueda', 'Clear search', 'Limpar busca')}
                   className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-slate-400"
                 >
                   <X className="h-3.5 w-3.5" />
@@ -570,7 +607,7 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
               onClick={closeSearch}
               className="h-10 shrink-0 rounded-xl px-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
             >
-              Cerrar
+              {tr('Cerrar', 'Close', 'Fechar')}
             </button>
           </div>
           {open && renderDropdownContent()}

@@ -5,6 +5,7 @@ import type { ClientRecord, RepairRecord, SaleRecord } from '../types/workshop';
 import { CLIENT_TYPE_LABELS, parseClientMeta } from '../utils/clientMeta';
 import { downloadCsvFile } from '../utils/csvExport';
 import { formatCurrency, todayISO } from '../utils/formatters';
+import { useI18n } from '../utils/i18n';
 
 interface ClientsPageProps {
   clients: ClientRecord[];
@@ -22,6 +23,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({
   onSelectClient,
 }) => {
   const { notify } = useToast();
+  const { tr } = useI18n();
   const [search, setSearch] = useState('');
 
   const filtered = useMemo(() => {
@@ -106,10 +108,11 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-white font-display">
-            Clientes
+            {tr('Clientes', 'Clients', 'Clientes')}
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            {clients.length} clientes en base de datos
+            {clients.length}{' '}
+            {tr('clientes en base de datos', 'clients in database', 'clientes no banco de dados')}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -117,11 +120,15 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({
             type="button"
             onClick={handleExportCsv}
             disabled={filtered.length === 0}
-            title="Descargar listado de clientes en formato CSV"
+            title={tr(
+              'Descargar listado de clientes en formato CSV',
+              'Download client list as CSV',
+              'Baixar lista de clientes em CSV'
+            )}
             className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] disabled:opacity-50 whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-sky-400 dark:hover:text-sky-300"
           >
             <Download className="h-4 w-4" />
-            Exportar CSV
+            {tr('Exportar CSV', 'Export CSV', 'Exportar CSV')}
           </button>
           <button
             type="button"
@@ -129,7 +136,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({
             className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-xs font-semibold text-white hover:bg-[#005f9c] whitespace-nowrap shrink-0"
           >
             <Plus className="h-4 w-4" />
-            Nuevo cliente
+            {tr('Nuevo cliente', 'New client', 'Novo cliente')}
           </button>
         </div>
       </div>
@@ -140,7 +147,11 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({
           type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar por nombre, teléfono, DNI, CUIT, barrio o email..."
+          placeholder={tr(
+            'Buscar por nombre, teléfono, DNI, CUIT, barrio o email...',
+            'Search by name, phone, ID, neighborhood or email...',
+            'Buscar por nome, telefone, CPF/CNPJ, bairro ou e-mail...'
+          )}
           className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-800 dark:bg-slate-900 dark:text-white"
         />
       </div>
@@ -149,7 +160,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({
         <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-10 text-center dark:border-slate-800 dark:bg-slate-900">
           <Users className="mx-auto h-7 w-7 text-slate-400" />
           <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">
-            Sin clientes para mostrar
+            {tr('Sin clientes para mostrar', 'No clients to display', 'Nenhum cliente para exibir')}
           </p>
         </div>
       ) : (

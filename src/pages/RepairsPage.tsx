@@ -36,6 +36,7 @@ import { buildTrackingUrl } from '../utils/tracking';
 import { sanitizeDbErrorMessage } from '../utils/validation';
 import { buildRepairWhatsAppMessage } from '../utils/whatsappTemplates';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
+import { getTranslatedStatusLabel, useI18n } from '../utils/i18n';
 
 interface RepairsPageProps {
   repairs: RepairRecord[];
@@ -126,6 +127,7 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
   onSelectRepair,
 }) => {
   const { notify } = useToast();
+  const { lang, tr } = useI18n();
   const [viewMode, setViewMode] = useState<'grid' | 'kanban'>('grid');
   const [showDeliveredInKanban, setShowDeliveredInKanban] = useState(false);
   const [search, setSearch] = useState('');
@@ -381,10 +383,15 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-white font-display">
-            Reparaciones
+            {tr('Reparaciones', 'Repairs', 'Reparos')}
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            {repairs.length} órdenes registradas en el taller
+            {repairs.length}{' '}
+            {tr(
+              'órdenes registradas en el taller',
+              'orders registered in the workshop',
+              'ordens registradas na oficina'
+            )}
           </p>
         </div>
 
@@ -400,7 +407,7 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
               }`}
             >
               <LayoutGrid className="h-3.5 w-3.5" />
-              Tarjetas
+              {tr('Tarjetas', 'Cards', 'Cartões')}
             </button>
             <button
               type="button"
@@ -422,7 +429,7 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
             className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0072BB] px-4 text-xs font-semibold text-white hover:bg-[#005f9c] whitespace-nowrap shrink-0"
           >
             <Plus className="h-4 w-4" />
-            Nueva reparación
+            {tr('Nueva reparación', 'New repair', 'Novo reparo')}
           </button>
         </div>
       </div>
@@ -434,7 +441,11 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por orden, cliente, marca, modelo o IMEI..."
+            placeholder={tr(
+              'Buscar por orden, cliente, marca, modelo o IMEI...',
+              'Search by order, client, brand, model or IMEI...',
+              'Buscar por ordem, cliente, marca, modelo ou IMEI...'
+            )}
             className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 text-sm text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-800 dark:bg-slate-900 dark:text-white"
           />
         </div>
@@ -443,14 +454,14 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
           <select
             value={techFilter}
             onChange={(e) => setTechFilter(e.target.value)}
-            aria-label="Filtrar por técnico"
+            aria-label={tr('Filtrar por técnico', 'Filter by technician', 'Filtrar por técnico')}
             className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-[#0072BB] dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
           >
-            <option value="all">Todos los técnicos</option>
-            <option value="__unassigned__">Sin asignar</option>
+            <option value="all">{tr('Todos los técnicos', 'All technicians', 'Todos os técnicos')}</option>
+            <option value="__unassigned__">{tr('Sin asignar', 'Unassigned', 'Sem técnico')}</option>
             {availableTechnicians.map((techName) => (
               <option key={techName} value={techName}>
-                Técnico: {techName}
+                {tr('Técnico:', 'Tech:', 'Técnico:')} {techName}
               </option>
             ))}
           </select>
@@ -459,10 +470,10 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
         {viewMode === 'grid' ? (
           <div className="flex items-center gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-900">
             {[
-              { id: 'all', label: 'Todas' },
-              { id: 'activas', label: 'Activas' },
-              { id: 'listas', label: 'Listas' },
-              { id: 'entregadas', label: 'Entregadas' },
+              { id: 'all', label: tr('Todas', 'All', 'Todas') },
+              { id: 'activas', label: tr('Activas', 'Active', 'Ativas') },
+              { id: 'listas', label: tr('Listas', 'Ready', 'Prontas') },
+              { id: 'entregadas', label: tr('Entregadas', 'Delivered', 'Entregues') },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -488,9 +499,13 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
                 : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
             }`}
           >
-            <span>Entregados ({deliveredCount})</span>
+            <span>
+              {tr('Entregados', 'Delivered', 'Entregues')} ({deliveredCount})
+            </span>
             <span className="text-[10px] opacity-75">
-              {showDeliveredInKanban ? 'Ocultar' : 'Mostrar'}
+              {showDeliveredInKanban
+                ? tr('Ocultar', 'Hide', 'Ocultar')
+                : tr('Mostrar', 'Show', 'Mostrar')}
             </span>
           </button>
         )}
@@ -529,7 +544,11 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
         <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-slate-500 dark:text-slate-400">
             <span>
-              Arrastrá cualquier tarjeta entre columnas para cambiar su estado o usá las flechas rápidas en cada tarjeta.
+              {tr(
+                'Arrastrá cualquier tarjeta entre columnas para cambiar su estado o usá las flechas rápidas en cada tarjeta.',
+                'Drag any card between columns to update its status or use the quick arrows on each card.',
+                'Arraste qualquer cartão entre as colunas para alterar o status ou use as setas rápidas em cada cartão.'
+              )}
             </span>
           </div>
 
@@ -566,7 +585,7 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
                     <div className="flex min-w-0 items-center gap-2">
                       <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${col.dotClass}`} />
                       <h2 className="truncate text-xs font-bold uppercase tracking-wide text-slate-800 dark:text-slate-100">
-                        {col.title}
+                        {getTranslatedStatusLabel(col.status, lang)}
                       </h2>
                     </div>
                     <span className="rounded-lg bg-white/90 px-2 py-0.5 font-mono-num text-[11px] font-bold text-slate-700 shadow-2xs dark:bg-slate-900 dark:text-slate-200">
@@ -583,7 +602,9 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
                             : 'border-slate-200 text-slate-400 dark:border-slate-800 dark:text-slate-500'
                         }`}
                       >
-                        {isDropActive ? 'Soltar aquí' : 'Sin equipos en esta etapa'}
+                        {isDropActive
+                          ? tr('Soltar aquí', 'Drop here', 'Soltar aqui')
+                          : tr('Sin equipos en esta etapa', 'No devices in this stage', 'Sem aparelhos nesta etapa')}
                       </div>
                     ) : (
                       colRepairs.map((r) => {

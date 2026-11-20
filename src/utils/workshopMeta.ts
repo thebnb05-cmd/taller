@@ -8,6 +8,12 @@ import {
   type SecondaryCurrencyConfig,
 } from './currency';
 import {
+  DEFAULT_LANGUAGE,
+  isValidLanguageCode,
+  sanitizeLanguageCode,
+  type LanguageCode,
+} from './i18n';
+import {
   saveMercadoPagoConfig,
   sanitizeMercadoPagoConfig,
   type MercadoPagoConfig,
@@ -22,6 +28,8 @@ export interface WorkshopReceiptMeta {
   businessEmail: string;
   footerNote: string;
   currency: CurrencyCode;
+  language: LanguageCode;
+  hasExplicitLanguage?: boolean;
   secondaryCurrencies: SecondaryCurrencyConfig[];
   techniciansEnabled: boolean;
   technicians: string[];
@@ -80,6 +88,7 @@ export function parseWorkshopMeta(
         e: string;
         f: string;
         c: string;
+        l: string;
         sc: unknown;
         te: boolean;
         ts: unknown;
@@ -94,6 +103,8 @@ export function parseWorkshopMeta(
         sub: SignedSubscriptionRecord;
       }>;
       const currency = sanitizeCurrencyCode(parsed.c);
+      const hasExplicitLanguage = isValidLanguageCode(parsed.l);
+      const language = sanitizeLanguageCode(parsed.l);
       const mp =
         parsed.mp && typeof parsed.mp === 'object'
           ? sanitizeMercadoPagoConfig({
@@ -122,6 +133,8 @@ export function parseWorkshopMeta(
           typeof parsed.e === 'string' && parsed.e.trim() ? parsed.e.trim() : baseEmail,
         footerNote: typeof parsed.f === 'string' ? parsed.f : '',
         currency,
+        language,
+        hasExplicitLanguage,
         secondaryCurrencies: sanitizeSecondaryCurrencies(parsed.sc, currency),
         techniciansEnabled: Boolean(parsed.te),
         technicians: sanitizeTechnicianList(parsed.ts),
@@ -141,6 +154,8 @@ export function parseWorkshopMeta(
     businessEmail: baseEmail,
     footerNote: '',
     currency: DEFAULT_CURRENCY,
+    language: DEFAULT_LANGUAGE,
+    hasExplicitLanguage: false,
     secondaryCurrencies: [],
     techniciansEnabled: false,
     technicians: [],
@@ -155,6 +170,7 @@ export function serializeWorkshopSubtitle(meta: {
   businessEmail: string;
   footerNote: string;
   currency?: CurrencyCode;
+  language?: LanguageCode;
   secondaryCurrencies?: SecondaryCurrencyConfig[];
   techniciansEnabled?: boolean;
   technicians?: string[];
@@ -168,6 +184,7 @@ export function serializeWorkshopSubtitle(meta: {
   const e = meta.businessEmail.trim().slice(0, 120);
   const f = meta.footerNote.trim().slice(0, 220);
   const c = sanitizeCurrencyCode(meta.currency);
+  const l = sanitizeLanguageCode(meta.language);
   const sc = sanitizeSecondaryCurrencies(meta.secondaryCurrencies, c).map((item) => ({
     c: item.code,
     r: item.rate,
@@ -188,6 +205,7 @@ export function serializeWorkshopSubtitle(meta: {
     !e &&
     !f &&
     c === DEFAULT_CURRENCY &&
+    l === DEFAULT_LANGUAGE &&
     sc.length === 0 &&
     !te &&
     ts.length === 0 &&
@@ -205,6 +223,7 @@ export function serializeWorkshopSubtitle(meta: {
     ...(e ? { e } : {}),
     ...(f ? { f } : {}),
     ...(c !== DEFAULT_CURRENCY ? { c } : {}),
+    ...(l !== DEFAULT_LANGUAGE ? { l } : {}),
     ...(sc.length > 0 ? { sc } : {}),
     ...(te ? { te: true } : {}),
     ...(ts.length > 0 ? { ts } : {}),
