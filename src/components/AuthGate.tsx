@@ -7,7 +7,6 @@ import {
   Image as ImageIcon,
   LogIn,
   Mail,
-  ShieldCheck,
   Smartphone,
   Store,
   Trash2,
@@ -323,31 +322,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
             </h1>
             <p className="mt-3 text-sm leading-relaxed text-slate-300">
               {tr(
-                'Administrá órdenes de reparación, check-in de equipos, clientes, repuestos, inventario, ventas y boletas en tiempo real desde cualquier dispositivo.',
-                'Manage repair orders, device check-ins, clients, spare parts, inventory, sales, and receipts in real time from any device.',
-                'Gerencie ordens de serviço, check-in de aparelhos, clientes, peças, estoque, vendas e comprovantes em tempo real de qualquer dispositivo.'
+                'Controlá órdenes, repuestos, ventas y caja en tiempo real, con firma digital, QR de seguimiento y comprobantes listos para imprimir o enviar por WhatsApp.',
+                'Manage orders, spare parts, sales, and cash register in real time, with digital signatures, tracking QR codes, and receipts ready to print or send via WhatsApp.',
+                'Controle ordens, peças, vendas e caixa em tempo real, com assinatura digital, QR de acompanhamento e comprovantes prontos para imprimir ou enviar pelo WhatsApp.'
               )}
             </p>
           </div>
 
           <div className="mt-8 space-y-3 border-t border-slate-800 pt-6 text-xs text-slate-300">
             <div className="flex items-center gap-2.5">
-              <ShieldCheck className="h-4 w-4 shrink-0 text-sky-400" />
-              <span>
-                {tr(
-                  'Acceso seguro por cuenta con Supabase Auth y políticas RLS',
-                  'Secure per-account access with Supabase Auth and RLS policies',
-                  'Acesso seguro por conta com Supabase Auth e políticas RLS'
-                )}
-              </span>
-            </div>
-            <div className="flex items-center gap-2.5">
               <Building2 className="h-4 w-4 shrink-0 text-sky-400" />
               <span>
                 {tr(
-                  'Base de datos PostgreSQL en Supabase entre PC, tablet y celular',
-                  'PostgreSQL database synced across desktop, tablet, and mobile',
-                  'Banco de dados sincronizado entre computador, tablet e celular'
+                  'Sincronizado al instante entre PC, tablet y celular para trabajar desde el mostrador o donde estés.',
+                  'Instantly synced across desktop, tablet, and mobile so you can work from the counter or anywhere.',
+                  'Sincronizado na hora entre computador, tablet e celular para trabalhar do balcão ou de onde você estiver.'
                 )}
               </span>
             </div>
