@@ -311,7 +311,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onOpenTrackingLookup }) 
                 <Smartphone className="h-5 w-5" />
               </span>
               <span>
-                TH3 <span className="text-sky-400">BNB</span>
+                TU <span className="text-sky-400">TALLER</span>
               </span>
             </div>
             <h1 className="mt-8 text-3xl font-bold leading-tight tracking-tight text-balance font-display">
