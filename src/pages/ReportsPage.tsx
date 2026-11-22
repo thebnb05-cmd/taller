@@ -21,6 +21,7 @@ import {
   Wallet,
   Wrench,
 } from 'lucide-react';
+import { RevenueTrendChart } from '../components/RevenueTrendChart';
 import { useToast } from '../components/ToastProvider';
 import { STATUS_META } from '../data/catalog';
 import type {
@@ -1234,6 +1235,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           </div>
         </section>
       </div>
+
+      {/* 30-Day Repairs & Sales Revenue Trend (Recharts) */}
+      <RevenueTrendChart repairs={repairs} sales={sales} />
 
       {/* Block 3: Evolución Temporal */}
       <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
