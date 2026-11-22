@@ -642,6 +642,168 @@ function buildLoginGuardResponse(entry: { n: number; u: number; t: number } | un
   };
 }
 
+const FX_SUPPORTED_CODES = [
+  'ARS',
+  'USD',
+  'EUR',
+  'BRL',
+  'UYU',
+  'CLP',
+  'PYG',
+  'MXN',
+  'PEN',
+  'BOB',
+  'COP',
+] as const;
+
+interface ArsQuotePair {
+  buy: number;
+  sell: number;
+}
+
+interface FxUsdSnapshot {
+  base: 'USD';
+  rates: Record<string, number>;
+  arsQuotes: {
+    oficial?: ArsQuotePair;
+    blue?: ArsQuotePair;
+    mep?: ArsQuotePair;
+  } | null;
+  updatedAt: number;
+  source: string;
+}
+
+const FX_CACHE_TTL_MS = 3 * 60 * 1000;
+const FX_FORCE_COOLDOWN_MS = 15 * 1000;
+let fxCachedSnapshot: FxUsdSnapshot | null = null;
+let fxLastFetchAttemptMs = 0;
+
+async function fetchGlobalUsdRates(): Promise<{ rates: Record<string, number>; source: string }> {
+  // Primary: open.er-api.com (no key required)
+  try {
+    const res = await fetch('https://open.er-api.com/v6/latest/USD', {
+      signal: AbortSignal.timeout(4500),
+      headers: { Accept: 'application/json' },
+    });
+    if (res.ok) {
+      const json = (await res.json()) as {
+        result?: string;
+        rates?: Record<string, unknown>;
+      };
+      if (json && json.rates && typeof json.rates === 'object') {
+        const rates: Record<string, number> = { USD: 1 };
+        for (const code of FX_SUPPORTED_CODES) {
+          const val = Number(json.rates[code]);
+          if (Number.isFinite(val) && val > 0) {
+            rates[code] = val;
+          }
+        }
+        if (Object.keys(rates).length > 2) {
+          return { rates, source: 'open.er-api.com' };
+        }
+      }
+    }
+  } catch {
+    // Fall through to secondary provider
+  }
+
+  // Fallback: fawazahmed0 currency-api on jsDelivr
+  const fallbackRes = await fetch(
+    'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json',
+    {
+      signal: AbortSignal.timeout(4500),
+      headers: { Accept: 'application/json' },
+    }
+  );
+  if (!fallbackRes.ok) {
+    throw new Error(`No se pudieron obtener cotizaciones (HTTP ${fallbackRes.status}).`);
+  }
+  const fallbackJson = (await fallbackRes.json()) as {
+    usd?: Record<string, unknown>;
+  };
+  const usdMap = fallbackJson?.usd;
+  if (!usdMap || typeof usdMap !== 'object') {
+    throw new Error('Respuesta de cotizaciones inválida.');
+  }
+  const rates: Record<string, number> = { USD: 1 };
+  for (const code of FX_SUPPORTED_CODES) {
+    const val = Number(usdMap[code.toLowerCase()]);
+    if (Number.isFinite(val) && val > 0) {
+      rates[code] = val;
+    }
+  }
+  return { rates, source: 'currency-api' };
+}
+
+async function fetchArgentinaDolares(): Promise<FxUsdSnapshot['arsQuotes']> {
+  try {
+    const res = await fetch('https://dolarapi.com/v1/dolares', {
+      signal: AbortSignal.timeout(3500),
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) return null;
+    const list = (await res.json()) as Array<{
+      casa?: string;
+      compra?: unknown;
+      venta?: unknown;
+    }>;
+    if (!Array.isArray(list)) return null;
+    const out: NonNullable<FxUsdSnapshot['arsQuotes']> = {};
+    for (const item of list) {
+      const casa = String(item.casa || '').trim().toLowerCase();
+      const buy = Number(item.compra);
+      const sell = Number(item.venta);
+      if (!Number.isFinite(sell) || sell <= 0) continue;
+      const safeBuy = Number.isFinite(buy) && buy > 0 ? buy : sell;
+      if (casa === 'oficial') out.oficial = { buy: safeBuy, sell };
+      else if (casa === 'blue') out.blue = { buy: safeBuy, sell };
+      else if (casa === 'bolsa' || casa === 'mep') out.mep = { buy: safeBuy, sell };
+    }
+    return Object.keys(out).length > 0 ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+async function getUsdSnapshot(forceRefresh = false): Promise<FxUsdSnapshot> {
+  const now = Date.now();
+  if (fxCachedSnapshot) {
+    const age = now - fxCachedSnapshot.updatedAt;
+    if (!forceRefresh && age < FX_CACHE_TTL_MS) {
+      return fxCachedSnapshot;
+    }
+    if (forceRefresh && now - fxLastFetchAttemptMs < FX_FORCE_COOLDOWN_MS) {
+      return fxCachedSnapshot;
+    }
+  }
+
+  fxLastFetchAttemptMs = now;
+  try {
+    const [globalResult, arsQuotes] = await Promise.all([
+      fetchGlobalUsdRates(),
+      fetchArgentinaDolares(),
+    ]);
+    const rates = { ...globalResult.rates };
+    if (arsQuotes?.oficial?.sell && (!rates.ARS || arsQuotes.oficial.sell > 0)) {
+      rates.ARS = arsQuotes.oficial.sell;
+    }
+    const snapshot: FxUsdSnapshot = {
+      base: 'USD',
+      rates,
+      arsQuotes,
+      updatedAt: Date.now(),
+      source: arsQuotes ? `${globalResult.source} + dolarapi` : globalResult.source,
+    };
+    fxCachedSnapshot = snapshot;
+    return snapshot;
+  } catch (err) {
+    if (fxCachedSnapshot) {
+      return fxCachedSnapshot;
+    }
+    throw err;
+  }
+}
+
 export async function handleApiRequest(
   req: ApiIncomingRequest,
   res: ServerResponse
@@ -658,6 +820,28 @@ export async function handleApiRequest(
       ok: true,
       mpConfigured: Boolean(resolvePlatformMpToken()),
     });
+    return true;
+  }
+
+  if (apiPath === '/api/fx/usd' && method === 'GET') {
+    const rawUrl = req.originalUrl || req.url || '/';
+    const parsedUrl = new URL(rawUrl, 'http://localhost');
+    const force = parsedUrl.searchParams.get('force') === '1';
+    try {
+      const snapshot = await getUsdSnapshot(force);
+      sendJson(res, 200, {
+        ok: true,
+        ...snapshot,
+      });
+    } catch (err) {
+      sendJson(res, 502, {
+        ok: false,
+        error:
+          err instanceof Error
+            ? err.message
+            : 'No se pudo consultar la cotización del dólar en este momento.',
+      });
+    }
     return true;
   }
 

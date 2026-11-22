@@ -36,6 +36,7 @@ import {
   isActiveRepairStatus,
 } from '../utils/formatters';
 import { useI18n } from '../utils/i18n';
+import { DollarRateBanner } from '../components/DollarRateBanner';
 
 interface HomePageProps {
   repairs: RepairRecord[];
@@ -306,6 +307,9 @@ export const HomePage: React.FC<HomePageProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Live USD Exchange Rate Bar */}
+      <DollarRateBanner />
+
       {/* KPI Summary Cards */}
       <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
         <button
