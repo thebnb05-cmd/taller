@@ -107,6 +107,21 @@ function computeDelta(current: number, previous: number): {
   };
 }
 
+function getMetricNumberClass(
+  rawText: string,
+  variant: 'primary' | 'compact' = 'primary'
+): string {
+  const len = rawText.length;
+  if (variant === 'primary') {
+    if (len >= 12) return 'text-base sm:text-lg xl:text-xl';
+    if (len >= 9) return 'text-lg sm:text-xl xl:text-[22px]';
+    return 'text-xl xl:text-2xl';
+  }
+  if (len >= 11) return 'text-sm sm:text-base xl:text-lg';
+  if (len >= 8) return 'text-base sm:text-lg xl:text-xl';
+  return 'text-lg sm:text-xl';
+}
+
 interface TimelineBucket {
   key: string;
   label: string;
@@ -681,14 +696,14 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
     const Icon = delta.direction === 'up' ? ArrowUpRight : ArrowDownRight;
     return (
       <span
-        className={`inline-flex items-center gap-0.5 font-mono-num text-[11px] font-semibold ${
+        className={`inline-flex max-w-full flex-wrap items-center gap-0.5 font-mono-num text-[11px] font-semibold leading-snug ${
           isPositiveColor
             ? 'text-emerald-600 dark:text-emerald-400'
             : 'text-rose-600 dark:text-rose-400'
         }`}
       >
         <Icon className="h-3 w-3 shrink-0" />
-        <span>
+        <span className="break-words">
           {delta.direction === 'up' ? '+' : '-'}
           {delta.pct}% {windowBounds.compareLabel}
         </span>
@@ -857,218 +872,365 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           </span>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
           {/* Ingreso Bruto */}
-          <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/40 p-4 dark:border-emerald-900/50 dark:bg-emerald-950/20">
-            <div className="flex items-center justify-between text-xs font-semibold text-emerald-800 dark:text-emerald-300">
-              <span>Ingreso bruto</span>
-              <TrendingUp className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-            </div>
-            <div className="mt-2 font-mono-num text-2xl font-bold text-slate-900 dark:text-white">
-              {formatCompactCurrency(report.totalRevenue)}
-            </div>
-            <div className="mt-1.5 flex flex-col gap-0.5">
-              <span className="font-mono-num text-[11px] text-slate-600 dark:text-slate-400">
-                Taller {formatCompactCurrency(report.repairIncome)} · Ventas{' '}
-                {formatCompactCurrency(report.salesIncome)}
-              </span>
-              {renderDeltaText(report.revenueDelta)}
-            </div>
-          </div>
+          {(() => {
+            const val = formatCompactCurrency(report.totalRevenue);
+            return (
+              <div className="min-w-0 overflow-hidden rounded-2xl border border-emerald-200/80 bg-emerald-50/40 p-4 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+                <div className="flex items-center justify-between gap-2 text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                  <span className="truncate">Ingreso bruto</span>
+                  <TrendingUp className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <div
+                  title={val}
+                  className={`mt-2 max-w-full truncate font-mono-num font-bold tracking-tight text-slate-900 dark:text-white ${getMetricNumberClass(
+                    val,
+                    'primary'
+                  )}`}
+                >
+                  {val}
+                </div>
+                <div className="mt-1.5 flex min-w-0 flex-col gap-0.5">
+                  <span className="truncate font-mono-num text-[11px] leading-snug text-slate-600 dark:text-slate-400">
+                    Taller {formatCompactCurrency(report.repairIncome)} · Ventas{' '}
+                    {formatCompactCurrency(report.salesIncome)}
+                  </span>
+                  {renderDeltaText(report.revenueDelta)}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Cobrado Real */}
-          <div className="rounded-2xl border border-teal-200/80 bg-teal-50/40 p-4 dark:border-teal-900/50 dark:bg-teal-950/20">
-            <div className="flex items-center justify-between text-xs font-semibold text-teal-800 dark:text-teal-300">
-              <span>Cobrado real</span>
-              <Wallet className="h-4 w-4 text-teal-600 dark:text-teal-400" />
-            </div>
-            <div className="mt-2 font-mono-num text-2xl font-bold text-slate-900 dark:text-white">
-              {formatCompactCurrency(report.totalCollected)}
-            </div>
-            <div className="mt-2 space-y-1">
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-teal-200/70 dark:bg-teal-950">
+          {(() => {
+            const val = formatCompactCurrency(report.totalCollected);
+            return (
+              <div className="min-w-0 overflow-hidden rounded-2xl border border-teal-200/80 bg-teal-50/40 p-4 dark:border-teal-900/50 dark:bg-teal-950/20">
+                <div className="flex items-center justify-between gap-2 text-xs font-semibold text-teal-800 dark:text-teal-300">
+                  <span className="truncate">Cobrado real</span>
+                  <Wallet className="h-4 w-4 shrink-0 text-teal-600 dark:text-teal-400" />
+                </div>
                 <div
-                  className="h-full rounded-full bg-teal-600 transition-all dark:bg-teal-400"
-                  style={{ width: `${Math.min(100, report.collectionRate)}%` }}
-                />
+                  title={val}
+                  className={`mt-2 max-w-full truncate font-mono-num font-bold tracking-tight text-slate-900 dark:text-white ${getMetricNumberClass(
+                    val,
+                    'primary'
+                  )}`}
+                >
+                  {val}
+                </div>
+                <div className="mt-2 space-y-1">
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-teal-200/70 dark:bg-teal-950">
+                    <div
+                      className="h-full rounded-full bg-teal-600 transition-all dark:bg-teal-400"
+                      style={{ width: `${Math.min(100, report.collectionRate)}%` }}
+                    />
+                  </div>
+                  <div className="truncate font-mono-num text-[11px] text-teal-700 dark:text-teal-300">
+                    {report.collectionRate}% recaudado del total
+                  </div>
+                </div>
               </div>
-              <div className="font-mono-num text-[11px] text-teal-700 dark:text-teal-300">
-                {report.collectionRate}% recaudado del total
-              </div>
-            </div>
-          </div>
+            );
+          })()}
 
           {/* Por Cobrar */}
-          <div className="rounded-2xl border border-amber-200/80 bg-amber-50/40 p-4 dark:border-amber-900/50 dark:bg-amber-950/20">
-            <div className="flex items-center justify-between text-xs font-semibold text-amber-800 dark:text-amber-300">
-              <span>Saldo por cobrar</span>
-              <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-            </div>
-            <div className="mt-2 font-mono-num text-2xl font-bold text-slate-900 dark:text-white">
-              {formatCompactCurrency(report.totalPending)}
-            </div>
-            <div className="mt-1.5 text-[11px] text-amber-800/80 dark:text-amber-300/80">
-              {report.totalPending > 0
-                ? 'Pendiente entre señas y ventas'
-                : 'Todo el período está saldado'}
-            </div>
-          </div>
+          {(() => {
+            const val = formatCompactCurrency(report.totalPending);
+            return (
+              <div className="min-w-0 overflow-hidden rounded-2xl border border-amber-200/80 bg-amber-50/40 p-4 dark:border-amber-900/50 dark:bg-amber-950/20">
+                <div className="flex items-center justify-between gap-2 text-xs font-semibold text-amber-800 dark:text-amber-300">
+                  <span className="truncate">Saldo por cobrar</span>
+                  <Clock className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                </div>
+                <div
+                  title={val}
+                  className={`mt-2 max-w-full truncate font-mono-num font-bold tracking-tight text-slate-900 dark:text-white ${getMetricNumberClass(
+                    val,
+                    'primary'
+                  )}`}
+                >
+                  {val}
+                </div>
+                <div className="mt-1.5 text-[11px] leading-snug text-amber-800/80 dark:text-amber-300/80">
+                  {report.totalPending > 0
+                    ? 'Pendiente entre señas y ventas'
+                    : 'Todo el período está saldado'}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Compras / Egresos */}
-          <div className="rounded-2xl border border-rose-200/80 bg-rose-50/40 p-4 dark:border-rose-900/50 dark:bg-rose-950/20">
-            <div className="flex items-center justify-between text-xs font-semibold text-rose-800 dark:text-rose-300">
-              <span>Compras / Egresos</span>
-              <CreditCard className="h-4 w-4 text-rose-600 dark:text-rose-400" />
-            </div>
-            <div className="mt-2 font-mono-num text-2xl font-bold text-slate-900 dark:text-white">
-              {formatCompactCurrency(report.totalPurchases)}
-            </div>
-            <div className="mt-1.5 font-mono-num text-[11px] text-slate-600 dark:text-slate-400">
-              {report.pFiltered.length}{' '}
-              {report.pFiltered.length === 1 ? 'compra a proveedor' : 'compras a proveedores'}
-            </div>
-          </div>
+          {(() => {
+            const val = formatCompactCurrency(report.totalPurchases);
+            return (
+              <div className="min-w-0 overflow-hidden rounded-2xl border border-rose-200/80 bg-rose-50/40 p-4 dark:border-rose-900/50 dark:bg-rose-950/20">
+                <div className="flex items-center justify-between gap-2 text-xs font-semibold text-rose-800 dark:text-rose-300">
+                  <span className="truncate">Compras / Egresos</span>
+                  <CreditCard className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
+                </div>
+                <div
+                  title={val}
+                  className={`mt-2 max-w-full truncate font-mono-num font-bold tracking-tight text-slate-900 dark:text-white ${getMetricNumberClass(
+                    val,
+                    'primary'
+                  )}`}
+                >
+                  {val}
+                </div>
+                <div className="mt-1.5 truncate font-mono-num text-[11px] leading-snug text-slate-600 dark:text-slate-400">
+                  {report.pFiltered.length}{' '}
+                  {report.pFiltered.length === 1 ? 'compra a proveedor' : 'compras a proveedores'}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Resultado Neto */}
-          <div
-            className={`rounded-2xl border p-4 ${
-              report.netResult >= 0
-                ? 'border-emerald-300/80 bg-white dark:border-emerald-800/70 dark:bg-slate-900'
-                : 'border-rose-300/80 bg-white dark:border-rose-800/70 dark:bg-slate-900'
-            }`}
-          >
-            <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-200">
-              <span>Resultado neto</span>
-              <span
-                className={`font-mono-num text-[11px] font-bold ${
+          {(() => {
+            const val = formatCompactCurrency(report.netResult);
+            return (
+              <div
+                className={`min-w-0 overflow-hidden rounded-2xl border p-4 md:col-span-2 xl:col-span-1 ${
                   report.netResult >= 0
-                    ? 'text-emerald-600 dark:text-emerald-400'
-                    : 'text-rose-600 dark:text-rose-400'
+                    ? 'border-emerald-300/80 bg-white dark:border-emerald-800/70 dark:bg-slate-900'
+                    : 'border-rose-300/80 bg-white dark:border-rose-800/70 dark:bg-slate-900'
                 }`}
               >
-                Margen {report.marginPct}%
-              </span>
-            </div>
-            <div
-              className={`mt-2 font-mono-num text-2xl font-bold ${
-                report.netResult >= 0
-                  ? 'text-emerald-700 dark:text-emerald-400'
-                  : 'text-rose-700 dark:text-rose-400'
-              }`}
-            >
-              {formatCompactCurrency(report.netResult)}
-            </div>
-            <div className="mt-1.5">{renderDeltaText(report.netDelta)}</div>
-          </div>
+                <div className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  <span className="truncate">Resultado neto</span>
+                  <span
+                    className={`shrink-0 font-mono-num text-[11px] font-bold ${
+                      report.netResult >= 0
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-rose-600 dark:text-rose-400'
+                    }`}
+                  >
+                    Margen {report.marginPct}%
+                  </span>
+                </div>
+                <div
+                  title={val}
+                  className={`mt-2 max-w-full truncate font-mono-num font-bold tracking-tight ${getMetricNumberClass(
+                    val,
+                    'primary'
+                  )} ${
+                    report.netResult >= 0
+                      ? 'text-emerald-700 dark:text-emerald-400'
+                      : 'text-rose-700 dark:text-rose-400'
+                  }`}
+                >
+                  {val}
+                </div>
+                <div className="mt-1.5 min-w-0">{renderDeltaText(report.netDelta)}</div>
+              </div>
+            );
+          })()}
         </div>
       </section>
 
       {/* Block 2: Operación del Taller + Clientes y Stock */}
-      <div className="grid gap-6 lg:grid-cols-12">
-        <section aria-label="Operación del taller" className="space-y-2.5 lg:col-span-7">
+      <div className="space-y-6">
+        <section aria-label="Operación del taller" className="space-y-2.5">
           <h2 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#0072BB] dark:text-sky-400">
             <Wrench className="h-3.5 w-3.5" />
             <span>Operación del taller</span>
           </h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-            <div className="rounded-2xl border border-sky-200/80 bg-sky-50/40 p-3.5 dark:border-sky-900/50 dark:bg-sky-950/20">
-              <div className="text-[11px] font-semibold text-sky-800 dark:text-sky-300">
-                Órdenes
-              </div>
-              <div className="mt-1.5 font-mono-num text-xl font-bold text-slate-900 dark:text-white">
-                {report.total}
-              </div>
-              <div className="mt-1">{renderDeltaText(report.ordersDelta)}</div>
-            </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+            {(() => {
+              const val = String(report.total);
+              return (
+                <div className="min-w-0 overflow-hidden rounded-2xl border border-sky-200/80 bg-sky-50/40 p-3.5 sm:p-4 dark:border-sky-900/50 dark:bg-sky-950/20">
+                  <div className="truncate text-xs font-semibold text-sky-800 dark:text-sky-300">
+                    Órdenes
+                  </div>
+                  <div
+                    title={val}
+                    className={`mt-1.5 max-w-full truncate font-mono-num font-bold tracking-tight text-slate-900 dark:text-white ${getMetricNumberClass(
+                      val,
+                      'compact'
+                    )}`}
+                  >
+                    {val}
+                  </div>
+                  <div className="mt-1 min-w-0 leading-snug">{renderDeltaText(report.ordersDelta)}</div>
+                </div>
+              );
+            })()}
 
-            <div className="rounded-2xl border border-indigo-200/80 bg-indigo-50/40 p-3.5 dark:border-indigo-900/50 dark:bg-indigo-950/20">
-              <div className="text-[11px] font-semibold text-indigo-800 dark:text-indigo-300">
-                En curso
-              </div>
-              <div className="mt-1.5 font-mono-num text-xl font-bold text-slate-900 dark:text-white">
-                {report.active}
-              </div>
-              <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">En banco</div>
-            </div>
+            {(() => {
+              const val = String(report.active);
+              return (
+                <div className="min-w-0 overflow-hidden rounded-2xl border border-indigo-200/80 bg-indigo-50/40 p-3.5 sm:p-4 dark:border-indigo-900/50 dark:bg-indigo-950/20">
+                  <div className="truncate text-xs font-semibold text-indigo-800 dark:text-indigo-300">
+                    En curso
+                  </div>
+                  <div
+                    title={val}
+                    className={`mt-1.5 max-w-full truncate font-mono-num font-bold tracking-tight text-slate-900 dark:text-white ${getMetricNumberClass(
+                      val,
+                      'compact'
+                    )}`}
+                  >
+                    {val}
+                  </div>
+                  <div className="mt-1 truncate text-[11px] leading-snug text-slate-500 dark:text-slate-400">
+                    En banco
+                  </div>
+                </div>
+              );
+            })()}
 
-            <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/40 p-3.5 dark:border-emerald-900/50 dark:bg-emerald-950/20">
-              <div className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
-                Listas
-              </div>
-              <div className="mt-1.5 font-mono-num text-xl font-bold text-slate-900 dark:text-white">
-                {report.ready}
-              </div>
-              <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Para retirar</div>
-            </div>
+            {(() => {
+              const val = String(report.ready);
+              return (
+                <div className="min-w-0 overflow-hidden rounded-2xl border border-emerald-200/80 bg-emerald-50/40 p-3.5 sm:p-4 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+                  <div className="truncate text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                    Listas
+                  </div>
+                  <div
+                    title={val}
+                    className={`mt-1.5 max-w-full truncate font-mono-num font-bold tracking-tight text-slate-900 dark:text-white ${getMetricNumberClass(
+                      val,
+                      'compact'
+                    )}`}
+                  >
+                    {val}
+                  </div>
+                  <div className="mt-1 truncate text-[11px] leading-snug text-slate-500 dark:text-slate-400">
+                    Para retirar
+                  </div>
+                </div>
+              );
+            })()}
 
-            <div className="rounded-2xl border border-teal-200/80 bg-teal-50/40 p-3.5 dark:border-teal-900/50 dark:bg-teal-950/20">
-              <div className="text-[11px] font-semibold text-teal-800 dark:text-teal-300">
-                Entregadas
-              </div>
-              <div className="mt-1.5 font-mono-num text-xl font-bold text-slate-900 dark:text-white">
-                {report.delivered}
-              </div>
-              <div className="mt-1 font-mono-num text-[11px] text-teal-700 dark:text-teal-300">
-                {report.completionRate}% listas/ent.
-              </div>
-            </div>
+            {(() => {
+              const val = String(report.delivered);
+              return (
+                <div className="min-w-0 overflow-hidden rounded-2xl border border-teal-200/80 bg-teal-50/40 p-3.5 sm:p-4 dark:border-teal-900/50 dark:bg-teal-950/20">
+                  <div className="truncate text-xs font-semibold text-teal-800 dark:text-teal-300">
+                    Entregadas
+                  </div>
+                  <div
+                    title={val}
+                    className={`mt-1.5 max-w-full truncate font-mono-num font-bold tracking-tight text-slate-900 dark:text-white ${getMetricNumberClass(
+                      val,
+                      'compact'
+                    )}`}
+                  >
+                    {val}
+                  </div>
+                  <div className="mt-1 truncate font-mono-num text-[11px] leading-snug text-teal-700 dark:text-teal-300">
+                    {report.completionRate}% listas/ent.
+                  </div>
+                </div>
+              );
+            })()}
 
-            <div className="col-span-2 rounded-2xl border border-slate-200 bg-white p-3.5 sm:col-span-1 dark:border-slate-800 dark:bg-slate-900">
-              <div className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                Ticket prom.
-              </div>
-              <div className="mt-1.5 font-mono-num text-xl font-bold text-slate-900 dark:text-white">
-                {formatCompactCurrency(report.avgTicket)}
-              </div>
-              <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Por orden</div>
-            </div>
+            {(() => {
+              const val = formatCompactCurrency(report.avgTicket);
+              return (
+                <div className="col-span-2 min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-3.5 sm:col-span-2 sm:p-4 xl:col-span-1 dark:border-slate-800 dark:bg-slate-900">
+                  <div className="truncate text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Ticket prom.
+                  </div>
+                  <div
+                    title={val}
+                    className={`mt-1.5 max-w-full truncate font-mono-num font-bold tracking-tight text-slate-900 dark:text-white ${getMetricNumberClass(
+                      val,
+                      'compact'
+                    )}`}
+                  >
+                    {val}
+                  </div>
+                  <div className="mt-1 truncate text-[11px] leading-snug text-slate-500 dark:text-slate-400">
+                    Por orden
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </section>
 
-        <section aria-label="Clientes y stock" className="space-y-2.5 lg:col-span-5">
+        <section aria-label="Clientes y stock" className="space-y-2.5">
           <h2 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-violet-700 dark:text-violet-400">
             <Users className="h-3.5 w-3.5" />
             <span>Clientes y capital en stock</span>
           </h2>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="rounded-2xl border border-violet-200/80 bg-violet-50/40 p-3.5 dark:border-violet-900/50 dark:bg-violet-950/20">
-              <div className="flex items-center justify-between text-[11px] font-semibold text-violet-800 dark:text-violet-300">
-                <span>Clientes</span>
-                <UserCheck className="h-3.5 w-3.5" />
-              </div>
-              <div className="mt-1.5 font-mono-num text-xl font-bold text-slate-900 dark:text-white">
-                {report.activeClientsCount}
-              </div>
-              <div className="mt-1 font-mono-num text-[11px] text-slate-500 dark:text-slate-400">
-                de {clients.length} totales
-              </div>
-            </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {(() => {
+              const val = String(report.activeClientsCount);
+              return (
+                <div className="min-w-0 overflow-hidden rounded-2xl border border-violet-200/80 bg-violet-50/40 p-3.5 sm:p-4 dark:border-violet-900/50 dark:bg-violet-950/20">
+                  <div className="flex items-center justify-between gap-2 text-xs font-semibold text-violet-800 dark:text-violet-300">
+                    <span className="truncate">Clientes</span>
+                    <UserCheck className="h-3.5 w-3.5 shrink-0" />
+                  </div>
+                  <div
+                    title={val}
+                    className={`mt-1.5 max-w-full truncate font-mono-num font-bold tracking-tight text-slate-900 dark:text-white ${getMetricNumberClass(
+                      val,
+                      'compact'
+                    )}`}
+                  >
+                    {val}
+                  </div>
+                  <div className="mt-1 truncate font-mono-num text-[11px] leading-snug text-slate-500 dark:text-slate-400">
+                    de {clients.length} totales
+                  </div>
+                </div>
+              );
+            })()}
 
-            <div className="rounded-2xl border border-cyan-200/80 bg-cyan-50/40 p-3.5 dark:border-cyan-900/50 dark:bg-cyan-950/20">
-              <div className="flex items-center justify-between text-[11px] font-semibold text-cyan-800 dark:text-cyan-300">
-                <span>Capital stock</span>
-                <Boxes className="h-3.5 w-3.5" />
-              </div>
-              <div className="mt-1.5 font-mono-num text-xl font-bold text-slate-900 dark:text-white">
-                {formatCompactCurrency(report.stockRetailValue)}
-              </div>
-              <div className="mt-1 font-mono-num text-[11px] text-slate-500 dark:text-slate-400">
-                Costo {formatCompactCurrency(report.stockCostValue)}
-              </div>
-            </div>
+            {(() => {
+              const val = formatCompactCurrency(report.stockRetailValue);
+              return (
+                <div className="min-w-0 overflow-hidden rounded-2xl border border-cyan-200/80 bg-cyan-50/40 p-3.5 sm:p-4 dark:border-cyan-900/50 dark:bg-cyan-950/20">
+                  <div className="flex items-center justify-between gap-2 text-xs font-semibold text-cyan-800 dark:text-cyan-300">
+                    <span className="truncate">Capital stock</span>
+                    <Boxes className="h-3.5 w-3.5 shrink-0" />
+                  </div>
+                  <div
+                    title={val}
+                    className={`mt-1.5 max-w-full truncate font-mono-num font-bold tracking-tight text-slate-900 dark:text-white ${getMetricNumberClass(
+                      val,
+                      'compact'
+                    )}`}
+                  >
+                    {val}
+                  </div>
+                  <div className="mt-1 truncate font-mono-num text-[11px] leading-snug text-slate-500 dark:text-slate-400">
+                    Costo {formatCompactCurrency(report.stockCostValue)}
+                  </div>
+                </div>
+              );
+            })()}
 
-            <div className="rounded-2xl border border-rose-200/80 bg-rose-50/40 p-3.5 dark:border-rose-900/50 dark:bg-rose-950/20">
-              <div className="flex items-center justify-between text-[11px] font-semibold text-rose-800 dark:text-rose-300">
-                <span>Alertas</span>
-                <AlertTriangle className="h-3.5 w-3.5" />
-              </div>
-              <div className="mt-1.5 font-mono-num text-xl font-bold text-slate-900 dark:text-white">
-                {report.criticalStock.length}
-              </div>
-              <div className="mt-1 font-mono-num text-[11px] text-rose-700 dark:text-rose-300">
-                {report.outOfStockCount} sin stock · {report.lowStockOnlyCount} bajo
-              </div>
-            </div>
+            {(() => {
+              const val = String(report.criticalStock.length);
+              return (
+                <div className="min-w-0 overflow-hidden rounded-2xl border border-rose-200/80 bg-rose-50/40 p-3.5 sm:p-4 dark:border-rose-900/50 dark:bg-rose-950/20">
+                  <div className="flex items-center justify-between gap-2 text-xs font-semibold text-rose-800 dark:text-rose-300">
+                    <span className="truncate">Alertas</span>
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  </div>
+                  <div
+                    title={val}
+                    className={`mt-1.5 max-w-full truncate font-mono-num font-bold tracking-tight text-slate-900 dark:text-white ${getMetricNumberClass(
+                      val,
+                      'compact'
+                    )}`}
+                  >
+                    {val}
+                  </div>
+                  <div className="mt-1 truncate font-mono-num text-[11px] leading-snug text-rose-700 dark:text-rose-300">
+                    {report.outOfStockCount} sin stock · {report.lowStockOnlyCount} bajo
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </section>
       </div>
