@@ -27,10 +27,6 @@ import {
 import { formatCurrency, formatDateShort, getStatusMeta } from '../utils/formatters';
 import { parsePaymentInfo } from '../utils/payment';
 import {
-  buildClientRepairReceiptPdf,
-  downloadClientRepairReceiptPdf,
-} from '../utils/pdfReport';
-import {
   parseCheckoutAndSignature,
   serializeCheckoutAndSignature,
 } from '../utils/signatureMeta';
@@ -41,7 +37,7 @@ import { useToast } from './ToastProvider';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
 import { getTranslatedStatusLabel, useI18n } from '../utils/i18n';
 
-export type PrintDocKey = 'client' | 'workshop' | 'label';
+type PrintDocKey = 'client' | 'workshop' | 'label';
 export type PrintFormat = 'a4' | 'thermal80' | 'label50';
 
 interface RepairPrintDocumentsProps {
@@ -273,6 +269,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
     if (generatingPdf) return;
     setGeneratingPdf(true);
     try {
+      const { downloadClientRepairReceiptPdf } = await import('../utils/pdfReport');
       const { fileName } = await downloadClientRepairReceiptPdf({
         repair,
         profile,
@@ -306,6 +303,7 @@ export const RepairPrintDocuments: React.FC<RepairPrintDocumentsProps> = ({
     if (generatingPdf) return;
     setGeneratingPdf(true);
     try {
+      const { buildClientRepairReceiptPdf } = await import('../utils/pdfReport');
       const { fileName, blob } = await buildClientRepairReceiptPdf({
         repair,
         profile,

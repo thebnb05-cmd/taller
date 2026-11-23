@@ -57,6 +57,15 @@
       ]
     },
     {
+      "source": "/sw-notifications.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
+        }
+      ]
+    },
+    {
       "source": "/manifest.webmanifest",
       "headers": [
         {
@@ -90,7 +99,7 @@
       "destination": "/api/index?__path=$1"
     },
     {
-      "source": "/((?!api/|assets/|manifest\\.webmanifest|sw\\.js|workbox-|boot-guard\\.js).*)",
+      "source": "/((?!api/|assets/|manifest\\.webmanifest|sw\\.js|sw-notifications\\.js|workbox-|boot-guard\\.js).*)",
       "destination": "/index.html"
     }
   ]

@@ -32,7 +32,6 @@ export default defineConfig(() => {
       legacyChunkCompatPlugin(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['icon.svg', 'apple-touch-icon.png', 'boot-guard.js'],
         manifest: {
           id: '/',
           name: 'TH3 BNB Servicio Técnico',
@@ -65,6 +64,7 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
+          importScripts: ['/sw-notifications.js'],
           skipWaiting: true,
           clientsClaim: true,
           cleanupOutdatedCaches: true,
@@ -110,7 +110,7 @@ export default defineConfig(() => {
     ],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(import.meta.dirname, '.'),
       },
     },
     build: {

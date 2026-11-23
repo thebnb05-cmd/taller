@@ -26,10 +26,6 @@ import {
 import { formatCurrency, formatDateShort } from '../utils/formatters';
 import { parsePaymentInfo } from '../utils/payment';
 import {
-  buildBatchRepairReceiptPdf,
-  downloadBatchRepairReceiptPdf,
-} from '../utils/pdfReport';
-import {
   parseCheckoutAndSignature,
   serializeCheckoutAndSignature,
 } from '../utils/signatureMeta';
@@ -278,6 +274,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
     if (generatingPdf) return;
     setGeneratingPdf(true);
     try {
+      const { downloadBatchRepairReceiptPdf } = await import('../utils/pdfReport');
       const { fileName } = await downloadBatchRepairReceiptPdf({
         repairs,
         batchRef,
@@ -314,6 +311,7 @@ export const BatchReceiptModal: React.FC<BatchReceiptModalProps> = ({
     if (generatingPdf) return;
     setGeneratingPdf(true);
     try {
+      const { buildBatchRepairReceiptPdf } = await import('../utils/pdfReport');
       const { fileName, blob } = await buildBatchRepairReceiptPdf({
         repairs,
         batchRef,

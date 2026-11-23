@@ -2,6 +2,16 @@ import { supabase } from '../lib/db';
 
 export type SubscriptionPlanId = 'mensual' | 'semestral' | 'anual';
 
+export const PENDING_SUB_STORAGE_KEY = 'th3bnb_pending_mp_subscription';
+
+export interface PendingCheckoutState {
+  planId: SubscriptionPlanId;
+  providerId: string;
+  kind: 'preapproval' | 'preference';
+  externalReference: string;
+  checkoutUrl: string;
+}
+
 export interface SubscriptionPlanDef {
   id: SubscriptionPlanId;
   name: string;

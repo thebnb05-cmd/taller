@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Package, Search, Smartphone, Users, X } from 'lucide-react';
 import type { ClientRecord, ProductRecord, RepairRecord } from '../types/workshop';
 import { formatCurrency, getStatusMeta } from '../utils/formatters';
@@ -46,10 +46,11 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
   const desktopInputRef = useRef<HTMLInputElement | null>(null);
   const mobileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const normalizedQuery = query.trim().toLowerCase();
+  const deferredQuery = useDeferredValue(query);
+  const normalizedQuery = deferredQuery.trim().toLowerCase();
 
   const matches = useMemo(() => {
-    if (!normalizedQuery) {
+    if (!open || !normalizedQuery) {
       return {
         clients: [] as ClientRecord[],
         repairs: [] as RepairRecord[],
@@ -105,7 +106,7 @@ export const GlobalSearchBar: React.FC<GlobalSearchBarProps> = ({
       repairs: matchedRepairs,
       products: matchedProducts,
     };
-  }, [clients, normalizedQuery, products, repairs]);
+  }, [clients, normalizedQuery, open, products, repairs]);
 
   const visibleGroups = useMemo(() => {
     const clientLimit = category === 'clients' ? MAX_SINGLE_GROUP : MAX_PER_GROUP_ALL;

@@ -40,7 +40,6 @@ import {
   todayISO,
 } from '../utils/formatters';
 import { parsePaymentInfo } from '../utils/payment';
-import { downloadInventorySummaryPdf, downloadSalesSummaryPdf } from '../utils/pdfReport';
 import { parseRepairPaymentLedger } from '../utils/repairMeta';
 import { parseSaleDetails, parseSalePaymentInfo } from '../utils/saleMeta';
 import { useI18n } from '../utils/i18n';
@@ -652,9 +651,10 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
       ? report.timeline[activeBucketIndex] ?? null
       : report.timeline[report.timeline.length - 1] ?? null;
 
-  const handleExportSalesPdf = () => {
+  const handleExportSalesPdf = async () => {
     setPdfMenuOpen(false);
     try {
+      const { downloadSalesSummaryPdf } = await import('../utils/pdfReport');
       downloadSalesSummaryPdf({
         profile,
         rangeLabel: windowBounds.pdfLabel,
@@ -668,9 +668,10 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
     }
   };
 
-  const handleExportInventoryPdf = () => {
+  const handleExportInventoryPdf = async () => {
     setPdfMenuOpen(false);
     try {
+      const { downloadInventorySummaryPdf } = await import('../utils/pdfReport');
       downloadInventorySummaryPdf({
         profile,
         products,

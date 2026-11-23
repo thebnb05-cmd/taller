@@ -12,118 +12,25 @@ import {
   useActiveCurrency,
   type CurrencyCode,
 } from '../utils/currency';
+import {
+  COUNTRY_BY_CURRENCY,
+  FX_AUTO_POLL_MS,
+  FX_UPDATE_EVENT,
+  fetchUsdRates,
+  formatRateNumber,
+  readStoredFxSnapshot,
+  updateFxRateHistory,
+  type FxApiResponse,
+} from '../utils/fxRates';
 import { useI18n } from '../utils/i18n';
-
-interface ArsQuotePair {
-  buy: number;
-  sell: number;
-}
-
-interface FxApiResponse {
-  ok: boolean;
-  base?: 'USD';
-  rates?: Record<string, number>;
-  arsQuotes?: {
-    oficial?: ArsQuotePair;
-    blue?: ArsQuotePair;
-    mep?: ArsQuotePair;
-  } | null;
-  updatedAt?: number;
-  source?: string;
-  error?: string;
-}
-
-interface StoredFxComparison {
-  lastRate: number;
-  prevRate: number | null;
-}
-
-const COUNTRY_BY_CURRENCY: Record<
-  CurrencyCode,
-  { es: string; en: string; pt: string; short: string }
-> = {
-  ARS: { es: 'Argentina', en: 'Argentina', pt: 'Argentina', short: 'AR' },
-  USD: { es: 'EE. UU.', en: 'United States', pt: 'EUA', short: 'US' },
-  EUR: { es: 'Zona Euro', en: 'Eurozone', pt: 'Zona do Euro', short: 'EU' },
-  BRL: { es: 'Brasil', en: 'Brazil', pt: 'Brasil', short: 'BR' },
-  UYU: { es: 'Uruguay', en: 'Uruguay', pt: 'Uruguai', short: 'UY' },
-  CLP: { es: 'Chile', en: 'Chile', pt: 'Chile', short: 'CL' },
-  PYG: { es: 'Paraguay', en: 'Paraguay', pt: 'Paraguai', short: 'PY' },
-  MXN: { es: 'México', en: 'Mexico', pt: 'México', short: 'MX' },
-  PEN: { es: 'Perú', en: 'Peru', pt: 'Peru', short: 'PE' },
-  BOB: { es: 'Bolivia', en: 'Bolivia', pt: 'Bolívia', short: 'BO' },
-  COP: { es: 'Colombia', en: 'Colombia', pt: 'Colômbia', short: 'CO' },
-};
-
-const FX_STORAGE_KEY = 'th3bnb-fx-usd-snapshot-v1';
-const FX_HISTORY_KEY = 'th3bnb-fx-usd-history-v1';
-const AUTO_POLL_MS = 3 * 60 * 1000;
-
-function formatRateNumber(value: number, currency: CurrencyCode, locale: string): string {
-  const zeroDecimal = currency === 'PYG' || currency === 'CLP';
-  return new Intl.NumberFormat(locale, {
-    minimumFractionDigits: zeroDecimal ? 0 : 2,
-    maximumFractionDigits: zeroDecimal ? 0 : 2,
-  }).format(value);
-}
-
-function readStoredSnapshot(): FxApiResponse | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(FX_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as FxApiResponse;
-    return parsed && parsed.ok && parsed.rates ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredSnapshot(data: FxApiResponse): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(FX_STORAGE_KEY, JSON.stringify(data));
-  } catch {
-    // Ignore storage errors
-  }
-}
-
-function updateRateHistory(
-  key: string,
-  nextRate: number
-): { current: number; prev: number | null } {
-  if (typeof window === 'undefined' || !Number.isFinite(nextRate) || nextRate <= 0) {
-    return { current: nextRate, prev: null };
-  }
-  try {
-    const raw = window.localStorage.getItem(FX_HISTORY_KEY);
-    const map: Record<string, StoredFxComparison> = raw ? JSON.parse(raw) : {};
-    const existing = map[key];
-    if (!existing || !Number.isFinite(existing.lastRate)) {
-      map[key] = { lastRate: nextRate, prevRate: null };
-      window.localStorage.setItem(FX_HISTORY_KEY, JSON.stringify(map));
-      return { current: nextRate, prev: null };
-    }
-
-    const diff = Math.abs(nextRate - existing.lastRate);
-    if (diff >= 0.005) {
-      map[key] = { lastRate: nextRate, prevRate: existing.lastRate };
-      window.localStorage.setItem(FX_HISTORY_KEY, JSON.stringify(map));
-      return { current: nextRate, prev: existing.lastRate };
-    }
-    return { current: nextRate, prev: existing.prevRate };
-  } catch {
-    return { current: nextRate, prev: null };
-  }
-}
 
 export const DollarRateBanner: React.FC = () => {
   const activeCurrency = useActiveCurrency();
   const { lang, locale, tr } = useI18n();
 
   const [overrideCurrency, setOverrideCurrency] = useState<'AUTO' | CurrencyCode>('AUTO');
-  const [snapshot, setSnapshot] = useState<FxApiResponse | null>(() => readStoredSnapshot());
-  const [loading, setLoading] = useState<boolean>(() => !readStoredSnapshot());
+  const [snapshot, setSnapshot] = useState<FxApiResponse | null>(() => readStoredFxSnapshot());
+  const [loading, setLoading] = useState<boolean>(() => !readStoredFxSnapshot());
   const [refreshing, setRefreshing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showConverter, setShowConverter] = useState(false);
@@ -152,23 +59,10 @@ export const DollarRateBanner: React.FC = () => {
     }
     setErrorMsg(null);
     try {
-      const url = force ? '/api/fx/usd?force=1' : '/api/fx/usd';
-      const res = await fetch(url, { cache: 'no-store' });
-      const data = (await res.json()) as FxApiResponse;
-      if (!res.ok || !data.ok || !data.rates) {
-        throw new Error(
-          data.error ||
-            tr(
-              'No se pudo actualizar la cotización.',
-              'Could not refresh exchange rate.',
-              'Não foi possível atualizar a cotação.'
-            )
-        );
-      }
+      const data = await fetchUsdRates(force);
       hasSnapshotRef.current = true;
       lastUpdatedRef.current = data.updatedAt ?? Date.now();
       setSnapshot(data);
-      writeStoredSnapshot(data);
     } catch (err) {
       setErrorMsg(
         err instanceof Error
@@ -185,7 +79,7 @@ export const DollarRateBanner: React.FC = () => {
     void syncRates(false);
     const intervalId = window.setInterval(() => {
       void syncRates(false);
-    }, AUTO_POLL_MS);
+    }, FX_AUTO_POLL_MS);
 
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
@@ -196,13 +90,23 @@ export const DollarRateBanner: React.FC = () => {
       }
     };
     const handleOnline = () => void syncRates(false);
+    const handleExternalFxUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<FxApiResponse>).detail;
+      if (detail && detail.ok && detail.rates) {
+        setSnapshot(detail);
+        setLoading(false);
+        setErrorMsg(null);
+      }
+    };
 
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('online', handleOnline);
+    window.addEventListener(FX_UPDATE_EVENT, handleExternalFxUpdate);
     return () => {
       window.clearInterval(intervalId);
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('online', handleOnline);
+      window.removeEventListener(FX_UPDATE_EVENT, handleExternalFxUpdate);
     };
   }, [syncRates]);
 
@@ -229,7 +133,7 @@ export const DollarRateBanner: React.FC = () => {
         ? snapshot.arsQuotes.blue.sell
         : currentRate;
 
-    const { current, prev } = updateRateHistory(historyKey, trackedValue);
+    const { current, prev } = updateFxRateHistory(historyKey, trackedValue);
     if (prev && prev > 0 && Math.abs(current - prev) >= 0.005) {
       const diff = current - prev;
       const pct = (diff / prev) * 100;

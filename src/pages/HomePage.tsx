@@ -296,13 +296,35 @@ export const HomePage: React.FC<HomePageProps> = ({
   }, [products, purchases, repairs, sales, lang, locale]);
 
   const recentActivity = useMemo(() => {
-    return [...repairs]
-      .sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt))
-      .slice(0, 4);
+    const top: RepairRecord[] = [];
+    for (const r of repairs) {
+      const score = r.updatedAt || r.createdAt;
+      if (top.length < 4) {
+        top.push(r);
+        top.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+      } else {
+        const last = top[3];
+        if (score > (last.updatedAt || last.createdAt)) {
+          top[3] = r;
+          top.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+        }
+      }
+    }
+    return top;
   }, [repairs]);
 
   const recentClients = useMemo(() => {
-    return [...clients].sort((a, b) => b.createdAt - a.createdAt).slice(0, 4);
+    const top: ClientRecord[] = [];
+    for (const c of clients) {
+      if (top.length < 4) {
+        top.push(c);
+        top.sort((a, b) => b.createdAt - a.createdAt);
+      } else if (c.createdAt > top[3].createdAt) {
+        top[3] = c;
+        top.sort((a, b) => b.createdAt - a.createdAt);
+      }
+    }
+    return top;
   }, [clients]);
 
   return (

@@ -15,24 +15,16 @@ import {
   formatArs,
   getPlanDisplayName,
   getSubscriptionRemaining,
+  PENDING_SUB_STORAGE_KEY,
   SUBSCRIPTION_PLANS,
   verifySubscriptionPayment,
+  type PendingCheckoutState,
   type SignedSubscriptionRecord,
   type SubscriptionPlanId,
 } from '../utils/subscription';
 import { ModalShell } from './ModalShell';
 import { useToast } from './ToastProvider';
 import { useI18n } from '../utils/i18n';
-
-export const PENDING_SUB_STORAGE_KEY = 'th3bnb_pending_mp_subscription';
-
-export interface PendingCheckoutState {
-  planId: SubscriptionPlanId;
-  providerId: string;
-  kind: 'preapproval' | 'preference';
-  externalReference: string;
-  checkoutUrl: string;
-}
 
 interface SubscriptionModalProps {
   open: boolean;

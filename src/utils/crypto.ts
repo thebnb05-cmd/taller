@@ -4,6 +4,15 @@ const ENC_PREFIX = 'enc:v1:';
 const APP_KEY_PEPPER = 'TH3BNB-AES256GCM-WORKSHOP-KEY-V1::2026';
 
 const derivedKeyCache = new Map<string, Promise<CryptoKey>>();
+const decryptedTextCache = new Map<string, string>();
+const MAX_DECRYPT_CACHE_SIZE = 4000;
+
+function setCachedPlaintext(cacheKey: string, value: string): void {
+  if (decryptedTextCache.size >= MAX_DECRYPT_CACHE_SIZE) {
+    decryptedTextCache.clear();
+  }
+  decryptedTextCache.set(cacheKey, value);
+}
 
 function getSubtleCrypto(): SubtleCrypto | null {
   if (typeof window === 'undefined' || !window.crypto || !window.crypto.subtle) {
@@ -71,7 +80,7 @@ export function isEncryptedValue(value: unknown): value is string {
   return typeof value === 'string' && value.startsWith(ENC_PREFIX);
 }
 
-export async function encryptText(plaintext: string, ownerId: string): Promise<string> {
+async function encryptText(plaintext: string, ownerId: string): Promise<string> {
   if (!plaintext) return '';
   if (isEncryptedValue(plaintext)) return plaintext;
   const key = await getOwnerAesKey(ownerId);
@@ -82,12 +91,19 @@ export async function encryptText(plaintext: string, ownerId: string): Promise<s
   const encoded = new TextEncoder().encode(plaintext);
   const cipherBuffer = await subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
   const cipherBytes = new Uint8Array(cipherBuffer);
-  return `${ENC_PREFIX}${toBase64Url(iv)}:${toBase64Url(cipherBytes)}`;
+  const encrypted = `${ENC_PREFIX}${toBase64Url(iv)}:${toBase64Url(cipherBytes)}`;
+  setCachedPlaintext(`${ownerId}:${encrypted}`, plaintext);
+  return encrypted;
 }
 
-export async function decryptText(value: string, ownerId: string): Promise<string> {
+async function decryptText(value: string, ownerId: string): Promise<string> {
   if (!value) return '';
   if (!isEncryptedValue(value)) return value;
+
+  const cacheKey = `${ownerId}:${value}`;
+  const cached = decryptedTextCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
   const key = await getOwnerAesKey(ownerId);
   const subtle = getSubtleCrypto();
   if (!key || !subtle) return '';
@@ -104,7 +120,9 @@ export async function decryptText(value: string, ownerId: string): Promise<strin
       key,
       new Uint8Array(cipherBytes)
     );
-    return new TextDecoder().decode(plainBuffer);
+    const decoded = new TextDecoder().decode(plainBuffer);
+    setCachedPlaintext(cacheKey, decoded);
+    return decoded;
   } catch {
     return '';
   }
@@ -166,17 +184,29 @@ export async function encryptRecordFields(
   const fields = ENCRYPTED_STRING_FIELDS[table];
   if (!ownerId || !fields) return out;
 
+  const jobs: Array<Promise<void>> = [];
   for (const field of fields) {
     const val = out[field];
     if (typeof val === 'string' && val.length > 0 && !isEncryptedValue(val)) {
-      out[field] = await encryptText(val, ownerId);
+      jobs.push(
+        encryptText(val, ownerId).then((cipher) => {
+          out[field] = cipher;
+        })
+      );
     }
   }
 
   // Encrypt securityPattern unlock sequence while preserving JSONB structure
   if (table === 'repairs' && Array.isArray(out.securityPattern) && out.securityPattern.length > 0) {
-    const enc = await encryptJsonValue(out.securityPattern, ownerId);
-    out.securityPattern = { enc };
+    jobs.push(
+      encryptJsonValue(out.securityPattern, ownerId).then((enc) => {
+        out.securityPattern = { enc };
+      })
+    );
+  }
+
+  if (jobs.length > 0) {
+    await Promise.all(jobs);
   }
 
   return out;
@@ -191,25 +221,52 @@ export async function decryptRecordFields<T extends Record<string, unknown>>(
     (typeof record.ownerId === 'string' && record.ownerId) || ownerIdHint || '';
   if (!ownerId) return record;
 
-  const out: Record<string, unknown> = { ...record };
   const fields = ENCRYPTED_STRING_FIELDS[table];
+  const hasEncryptedSecurityPattern =
+    table === 'repairs' && Boolean(record.securityPattern) && !Array.isArray(record.securityPattern);
+
+  let needsWork = hasEncryptedSecurityPattern;
+  if (!needsWork && fields) {
+    for (const field of fields) {
+      if (isEncryptedValue(record[field])) {
+        needsWork = true;
+        break;
+      }
+    }
+  }
+  if (!needsWork) return record;
+
+  const out: Record<string, unknown> = { ...record };
+  const jobs: Array<Promise<void>> = [];
+
   if (fields) {
     for (const field of fields) {
       const val = out[field];
       if (isEncryptedValue(val)) {
-        out[field] = await decryptText(val, ownerId);
+        jobs.push(
+          decryptText(val, ownerId).then((plain) => {
+            out[field] = plain;
+          })
+        );
       }
     }
   }
 
-  if (table === 'repairs' && out.securityPattern && !Array.isArray(out.securityPattern)) {
+  if (hasEncryptedSecurityPattern) {
     const spObj = out.securityPattern as { enc?: unknown };
     if (spObj && isEncryptedValue(spObj.enc)) {
-      const decryptedArr = await decryptJsonValue<number[]>(spObj.enc, ownerId, []);
-      out.securityPattern = Array.isArray(decryptedArr) ? decryptedArr : [];
+      jobs.push(
+        decryptJsonValue<number[]>(spObj.enc, ownerId, []).then((decryptedArr) => {
+          out.securityPattern = Array.isArray(decryptedArr) ? decryptedArr : [];
+        })
+      );
     } else {
       out.securityPattern = [];
     }
+  }
+
+  if (jobs.length > 0) {
+    await Promise.all(jobs);
   }
 
   return out as T;

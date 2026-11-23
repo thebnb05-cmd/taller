@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Banknote,
   BarChart3,
@@ -52,7 +52,9 @@ import {
   fetchSubscriptionStatus,
   getPlanDisplayName,
   getSubscriptionRemaining,
+  PENDING_SUB_STORAGE_KEY,
   verifySubscriptionPayment,
+  type PendingCheckoutState,
   type SignedSubscriptionRecord,
 } from '../utils/subscription';
 import {
@@ -72,6 +74,11 @@ import {
   type ActionGuideId,
   type OnboardingState,
 } from '../utils/onboardingTour';
+import {
+  isReadyRepairStatus,
+  normalizeRepairStatusKey,
+  sendRepairReadyPushNotification,
+} from '../utils/pushNotifications';
 import { sanitizeDbErrorMessage } from '../utils/validation';
 import type {
   ClientRecord,
@@ -84,42 +91,118 @@ import type {
   TaskRecord,
   WorkshopProfile,
 } from '../types/workshop';
-import { AdminTallerPage } from '../pages/AdminTallerPage';
-import { AgendaPage } from '../pages/AgendaPage';
-import { CashRegisterPage } from '../pages/CashRegisterPage';
-import { ClientsPage } from '../pages/ClientsPage';
-import { HomePage } from '../pages/HomePage';
-import { InventoryPage } from '../pages/InventoryPage';
-import { PurchasesPage } from '../pages/PurchasesPage';
-import { RepairsPage } from '../pages/RepairsPage';
-import { ReportsPage } from '../pages/ReportsPage';
-import { SalesPage } from '../pages/SalesPage';
-import { SuppliersPage } from '../pages/SuppliersPage';
 import { BrandMark } from './BrandMark';
-import { BatchReceiptModal } from './BatchReceiptModal';
-import { BrandSettingsModal } from './BrandSettingsModal';
-import { ClientDetailModal, NewClientModal } from './ClientModals';
+import { CurrencyConverter } from './CurrencyConverter';
 import { GlobalSearchBar } from './GlobalSearchBar';
-import { ContextualWindowGuide, WelcomeSpotlightTour } from './GuidedTourOverlay';
-import { KeyboardShortcutsModal } from './KeyboardShortcutsModal';
-import { NewPurchaseModal } from './NewPurchaseModal';
-import { NewRepairModal } from './NewRepairModal';
-import { NewSaleModal } from './NewSaleModal';
-import { NewSupplierModal } from './NewSupplierModal';
-import { NewTaskModal } from './NewTaskModal';
-import { ProductDetailModal } from './ProductDetailModal';
-import { ProductImportModal } from './ProductImportModal';
-import { ProductModal } from './ProductModal';
+import { PushNotificationControl } from './PushNotificationControl';
 import { PWAInstallButton } from './PWAInstallButton';
-import { RepairDetailModal } from './RepairDetailModal';
-import { SalePrintModal } from './SalePrintModal';
-import {
-  PENDING_SUB_STORAGE_KEY,
-  SubscriptionModal,
-  type PendingCheckoutState,
-} from './SubscriptionModal';
-import { SupportModal } from './SupportModal';
 import { useToast } from './ToastProvider';
+
+const AdminTallerPage = React.lazy(() =>
+  import('../pages/AdminTallerPage').then((m) => ({ default: m.AdminTallerPage }))
+);
+const AgendaPage = React.lazy(() =>
+  import('../pages/AgendaPage').then((m) => ({ default: m.AgendaPage }))
+);
+const CashRegisterPage = React.lazy(() =>
+  import('../pages/CashRegisterPage').then((m) => ({ default: m.CashRegisterPage }))
+);
+const ClientsPage = React.lazy(() =>
+  import('../pages/ClientsPage').then((m) => ({ default: m.ClientsPage }))
+);
+const HomePage = React.lazy(() =>
+  import('../pages/HomePage').then((m) => ({ default: m.HomePage }))
+);
+const InventoryPage = React.lazy(() =>
+  import('../pages/InventoryPage').then((m) => ({ default: m.InventoryPage }))
+);
+const PurchasesPage = React.lazy(() =>
+  import('../pages/PurchasesPage').then((m) => ({ default: m.PurchasesPage }))
+);
+const RepairsPage = React.lazy(() =>
+  import('../pages/RepairsPage').then((m) => ({ default: m.RepairsPage }))
+);
+const ReportsPage = React.lazy(() =>
+  import('../pages/ReportsPage').then((m) => ({ default: m.ReportsPage }))
+);
+const SalesPage = React.lazy(() =>
+  import('../pages/SalesPage').then((m) => ({ default: m.SalesPage }))
+);
+const SuppliersPage = React.lazy(() =>
+  import('../pages/SuppliersPage').then((m) => ({ default: m.SuppliersPage }))
+);
+
+const BatchReceiptModal = React.lazy(() =>
+  import('./BatchReceiptModal').then((m) => ({ default: m.BatchReceiptModal }))
+);
+const BrandSettingsModal = React.lazy(() =>
+  import('./BrandSettingsModal').then((m) => ({ default: m.BrandSettingsModal }))
+);
+const ClientDetailModal = React.lazy(() =>
+  import('./ClientModals').then((m) => ({ default: m.ClientDetailModal }))
+);
+const NewClientModal = React.lazy(() =>
+  import('./ClientModals').then((m) => ({ default: m.NewClientModal }))
+);
+const ContextualWindowGuide = React.lazy(() =>
+  import('./GuidedTourOverlay').then((m) => ({ default: m.ContextualWindowGuide }))
+);
+const WelcomeSpotlightTour = React.lazy(() =>
+  import('./GuidedTourOverlay').then((m) => ({ default: m.WelcomeSpotlightTour }))
+);
+const KeyboardShortcutsModal = React.lazy(() =>
+  import('./KeyboardShortcutsModal').then((m) => ({ default: m.KeyboardShortcutsModal }))
+);
+const NewPurchaseModal = React.lazy(() =>
+  import('./NewPurchaseModal').then((m) => ({ default: m.NewPurchaseModal }))
+);
+const NewRepairModal = React.lazy(() =>
+  import('./NewRepairModal').then((m) => ({ default: m.NewRepairModal }))
+);
+const NewSaleModal = React.lazy(() =>
+  import('./NewSaleModal').then((m) => ({ default: m.NewSaleModal }))
+);
+const NewSupplierModal = React.lazy(() =>
+  import('./NewSupplierModal').then((m) => ({ default: m.NewSupplierModal }))
+);
+const NewTaskModal = React.lazy(() =>
+  import('./NewTaskModal').then((m) => ({ default: m.NewTaskModal }))
+);
+const ProductDetailModal = React.lazy(() =>
+  import('./ProductDetailModal').then((m) => ({ default: m.ProductDetailModal }))
+);
+const ProductImportModal = React.lazy(() =>
+  import('./ProductImportModal').then((m) => ({ default: m.ProductImportModal }))
+);
+const ProductModal = React.lazy(() =>
+  import('./ProductModal').then((m) => ({ default: m.ProductModal }))
+);
+const RepairDetailModal = React.lazy(() =>
+  import('./RepairDetailModal').then((m) => ({ default: m.RepairDetailModal }))
+);
+const SalePrintModal = React.lazy(() =>
+  import('./SalePrintModal').then((m) => ({ default: m.SalePrintModal }))
+);
+const SubscriptionModal = React.lazy(() =>
+  import('./SubscriptionModal').then((m) => ({ default: m.SubscriptionModal }))
+);
+const SupportModal = React.lazy(() =>
+  import('./SupportModal').then((m) => ({ default: m.SupportModal }))
+);
+
+const PageChunkSkeleton: React.FC = () => (
+  <div className="space-y-4">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
+      {[1, 2, 3].map((k) => (
+        <div
+          key={k}
+          className="h-24 animate-pulse rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+        />
+      ))}
+    </div>
+    <div className="h-64 animate-pulse rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900" />
+  </div>
+);
 
 interface WorkshopAppProps {
   userId: string;
@@ -267,14 +350,44 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
       purchases: () => loadTable<PurchaseRecord>('purchases', setPurchases),
     };
 
+    const inflightByTable = new Map<TableName, Promise<void>>();
+    const lastSyncAtByTable = new Map<TableName, number>();
+    const realtimeTimers = new Map<TableName, number>();
+
+    const triggerReload = (tbl: TableName, isRemoteEcho = false) => {
+      const fn = reloadByTable[tbl];
+      if (!fn) return;
+      if (isRemoteEcho) {
+        const last = lastSyncAtByTable.get(tbl) || 0;
+        if (Date.now() - last < 500) return;
+        const existingTimer = realtimeTimers.get(tbl);
+        if (existingTimer) window.clearTimeout(existingTimer);
+        realtimeTimers.set(
+          tbl,
+          window.setTimeout(() => {
+            realtimeTimers.delete(tbl);
+            triggerReload(tbl, false);
+          }, 120)
+        );
+        return;
+      }
+
+      if (inflightByTable.has(tbl)) return;
+      lastSyncAtByTable.set(tbl, Date.now());
+      const promise = fn().finally(() => {
+        inflightByTable.delete(tbl);
+      });
+      inflightByTable.set(tbl, promise);
+    };
+
     const tables = Object.keys(reloadByTable) as TableName[];
     tables.forEach((tbl) => {
-      void reloadByTable[tbl]?.();
+      triggerReload(tbl, false);
     });
 
     const localUnsubs = tables.map((tbl) =>
       subscribeTableChanges(tbl, () => {
-        void reloadByTable[tbl]?.();
+        triggerReload(tbl, false);
       })
     );
 
@@ -284,8 +397,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         'postgres_changes',
         { event: '*', schema: 'public', table: tbl, filter: `owner_id=eq.${userId}` },
         () => {
-          const fn = reloadByTable[tbl];
-          if (fn) void fn();
+          triggerReload(tbl, true);
         }
       );
     });
@@ -293,12 +405,104 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
 
     return () => {
       active = false;
+      realtimeTimers.forEach((timerId) => window.clearTimeout(timerId));
+      realtimeTimers.clear();
       localUnsubs.forEach((unsub) => unsub());
       void supabase.removeChannel(channel);
     };
   }, [userId]);
 
   const isLoading = loadingCount > 0;
+  const prevRepairStatusesRef = useRef<Map<string, string> | null>(null);
+  const initialRepairParamHandledRef = useRef(false);
+
+  // Reset status tracker if the signed-in user changes
+  useEffect(() => {
+    prevRepairStatusesRef.current = null;
+    initialRepairParamHandledRef.current = false;
+  }, [userId]);
+
+  // Trigger Service Worker push notification when any repair transitions to 'listo' or 'terminado'
+  useEffect(() => {
+    if (isLoading) return;
+
+    const currentMap = new Map<string, string>();
+    for (const r of repairs) {
+      currentMap.set(r.id, normalizeRepairStatusKey(r.status));
+    }
+
+    const prevMap = prevRepairStatusesRef.current;
+    if (prevMap === null) {
+      prevRepairStatusesRef.current = currentMap;
+      return;
+    }
+
+    for (const r of repairs) {
+      const nextStatus = normalizeRepairStatusKey(r.status);
+      const prevStatus = prevMap.get(r.id);
+      if (prevStatus !== nextStatus && isReadyRepairStatus(nextStatus)) {
+        void sendRepairReadyPushNotification(r);
+      }
+    }
+
+    prevRepairStatusesRef.current = currentMap;
+  }, [isLoading, repairs]);
+
+  // Open repair modal when user clicks a push notification or lands with ?repairId=
+  useEffect(() => {
+    if (!isLoading && !initialRepairParamHandledRef.current) {
+      initialRepairParamHandledRef.current = true;
+      try {
+        const url = new URL(window.location.href);
+        const paramId = url.searchParams.get('repairId');
+        if (paramId && repairs.some((r) => r.id === paramId)) {
+          setPage('repairs');
+          setSelectedRepairId(paramId);
+          url.searchParams.delete('repairId');
+          window.history.replaceState({}, '', url.toString());
+        }
+      } catch {
+        // Ignore URL parsing errors
+      }
+    }
+  }, [isLoading, repairs]);
+
+  useEffect(() => {
+    const openRepairById = (repairId: string | undefined | null) => {
+      if (!repairId) return;
+      setPage('repairs');
+      setSelectedRepairId(repairId);
+    };
+
+    const handleSwMessage = (event: MessageEvent) => {
+      const msg = event?.data as { type?: string; repairId?: string } | undefined;
+      if (msg && msg.type === 'TH3_OPEN_REPAIR' && msg.repairId) {
+        openRepairById(msg.repairId);
+      }
+    };
+
+    const handleFallbackNotificationEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ repairId?: string }>).detail;
+      if (detail?.repairId) {
+        openRepairById(detail.repairId);
+      }
+    };
+
+    if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleSwMessage);
+    }
+    window.addEventListener('th3bnb:open-repair-from-notification', handleFallbackNotificationEvent);
+
+    return () => {
+      if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+      }
+      window.removeEventListener(
+        'th3bnb:open-repair-from-notification',
+        handleFallbackNotificationEvent
+      );
+    };
+  }, []);
 
   // Modals state
   const [showBrandSettings, setShowBrandSettings] = useState(false);
@@ -865,6 +1069,8 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
           />
 
           <div data-tour="header-actions" className="flex shrink-0 items-center gap-1 sm:gap-1.5">
+            <CurrencyConverter />
+            <PushNotificationControl />
             {subscriptionRecord && (() => {
               const shortPlanLabel = subscriptionRemaining.isExpired
                 ? 'Vencida'
@@ -1013,19 +1219,9 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
           )}
 
           {isLoading ? (
-            <div className="space-y-4">
-              <div className="grid grid-cols-3 gap-4">
-                {[1, 2, 3].map((k) => (
-                  <div
-                    key={k}
-                    className="h-24 animate-pulse rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
-                  />
-                ))}
-              </div>
-              <div className="h-64 animate-pulse rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900" />
-            </div>
+            <PageChunkSkeleton />
           ) : (
-            <>
+            <Suspense fallback={<PageChunkSkeleton />}>
               {page === 'home' && (
                 <HomePage
                   repairs={repairs}
@@ -1170,7 +1366,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               {page === 'admin_taller' && isPlatformAdmin && (
                 <AdminTallerPage userEmail={userEmail} />
               )}
-            </>
+            </Suspense>
           )}
         </main>
       </div>
@@ -1337,268 +1533,304 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         </div>
       )}
 
-      {/* Modals */}
-      <BrandSettingsModal
-        open={showBrandSettings}
-        onClose={() => setShowBrandSettings(false)}
-        profile={profile}
-        userEmail={userEmail}
-        subscriptionRecord={subscriptionRecord}
-        nowMs={nowMs}
-        onOpenSubscription={() => setShowSubscriptionModal(true)}
-      />
+      {/* Modals (mounted & code-split on demand) */}
+      <Suspense fallback={null}>
+        {showBrandSettings && (
+          <BrandSettingsModal
+            open={showBrandSettings}
+            onClose={() => setShowBrandSettings(false)}
+            profile={profile}
+            userEmail={userEmail}
+            subscriptionRecord={subscriptionRecord}
+            nowMs={nowMs}
+            onOpenSubscription={() => setShowSubscriptionModal(true)}
+          />
+        )}
 
-      <NewRepairModal
-        open={showNewRepair}
-        onClose={() => {
-          setShowNewRepair(false);
-          setRepairPreClient(null);
-          setWarrantySourceRepair(null);
-        }}
-        onCreated={(created) => {
-          setJustCreatedRepair(created);
-          setRepairModalInitialTab('receipt');
-          setSelectedRepairId(created.id);
-        }}
-        onBatchCreated={(createdList, batchRef) => {
-          setBatchPrintData({ repairs: createdList, batchRef });
-        }}
-        ownerId={userId}
-        profile={profile}
-        clients={clients}
-        repairs={repairs}
-        products={products}
-        preselectedClient={repairPreClient}
-        warrantyFromRepair={warrantySourceRepair}
-      />
+        {showNewRepair && (
+          <NewRepairModal
+            open={showNewRepair}
+            onClose={() => {
+              setShowNewRepair(false);
+              setRepairPreClient(null);
+              setWarrantySourceRepair(null);
+            }}
+            onCreated={(created) => {
+              setJustCreatedRepair(created);
+              setRepairModalInitialTab('receipt');
+              setSelectedRepairId(created.id);
+            }}
+            onBatchCreated={(createdList, batchRef) => {
+              setBatchPrintData({ repairs: createdList, batchRef });
+            }}
+            ownerId={userId}
+            profile={profile}
+            clients={clients}
+            repairs={repairs}
+            products={products}
+            preselectedClient={repairPreClient}
+            warrantyFromRepair={warrantySourceRepair}
+          />
+        )}
 
-      <RepairDetailModal
-        repair={selectedRepair}
-        clients={clients}
-        products={products}
-        profile={profile}
-        initialTab={repairModalInitialTab}
-        justCreated={Boolean(justCreatedRepair && justCreatedRepair.id === selectedRepairId)}
-        onOpenBatch={(batchRef) => {
-          const matching = repairs
-            .filter((r) => (r.notes || '').toUpperCase().includes(`[LOTE: ${batchRef.toUpperCase()}`))
-            .sort((a, b) => a.code.localeCompare(b.code));
-          if (matching.length > 0) {
-            setSelectedRepairId(null);
-            setBatchPrintData({ repairs: matching, batchRef });
-          }
-        }}
-        onWarrantyReentry={(sourceRepair) => {
-          setSelectedRepairId(null);
-          setRepairPreClient(null);
-          setWarrantySourceRepair(sourceRepair);
-          setShowNewRepair(true);
-        }}
-        onClose={() => {
-          setSelectedRepairId(null);
-          setJustCreatedRepair(null);
-          setRepairModalInitialTab('detail');
-        }}
-      />
+        {selectedRepair && (
+          <RepairDetailModal
+            repair={selectedRepair}
+            clients={clients}
+            products={products}
+            profile={profile}
+            initialTab={repairModalInitialTab}
+            justCreated={Boolean(justCreatedRepair && justCreatedRepair.id === selectedRepairId)}
+            onOpenBatch={(batchRef) => {
+              const matching = repairs
+                .filter((r) => (r.notes || '').toUpperCase().includes(`[LOTE: ${batchRef.toUpperCase()}`))
+                .sort((a, b) => a.code.localeCompare(b.code));
+              if (matching.length > 0) {
+                setSelectedRepairId(null);
+                setBatchPrintData({ repairs: matching, batchRef });
+              }
+            }}
+            onWarrantyReentry={(sourceRepair) => {
+              setSelectedRepairId(null);
+              setRepairPreClient(null);
+              setWarrantySourceRepair(sourceRepair);
+              setShowNewRepair(true);
+            }}
+            onClose={() => {
+              setSelectedRepairId(null);
+              setJustCreatedRepair(null);
+              setRepairModalInitialTab('detail');
+            }}
+          />
+        )}
 
-      <BatchReceiptModal
-        open={Boolean(batchPrintData)}
-        repairs={batchPrintData?.repairs || []}
-        batchRef={batchPrintData?.batchRef || ''}
-        profile={profile}
-        onClose={() => setBatchPrintData(null)}
-        onSelectRepair={(r) => {
-          setBatchPrintData(null);
-          setRepairModalInitialTab('detail');
-          setSelectedRepairId(r.id);
-        }}
-      />
+        {batchPrintData && (
+          <BatchReceiptModal
+            open={Boolean(batchPrintData)}
+            repairs={batchPrintData.repairs}
+            batchRef={batchPrintData.batchRef}
+            profile={profile}
+            onClose={() => setBatchPrintData(null)}
+            onSelectRepair={(r) => {
+              setBatchPrintData(null);
+              setRepairModalInitialTab('detail');
+              setSelectedRepairId(r.id);
+            }}
+          />
+        )}
 
-      <NewClientModal
-        open={showClientModal}
-        onClose={() => {
-          setShowClientModal(false);
-          setEditClient(null);
-        }}
-        ownerId={userId}
-        editClient={editClient}
-      />
+        {showClientModal && (
+          <NewClientModal
+            open={showClientModal}
+            onClose={() => {
+              setShowClientModal(false);
+              setEditClient(null);
+            }}
+            ownerId={userId}
+            editClient={editClient}
+          />
+        )}
 
-      <ClientDetailModal
-        client={selectedClient}
-        repairs={repairs}
-        sales={sales}
-        onClose={() => setSelectedClientId(null)}
-        onEdit={(c) => {
-          setEditClient(c);
-          setShowClientModal(true);
-        }}
-        onNewRepairForClient={(c) => openNewRepairFlow(c)}
-        onSelectRepair={(r) => setSelectedRepairId(r.id)}
-      />
+        {selectedClient && (
+          <ClientDetailModal
+            client={selectedClient}
+            repairs={repairs}
+            sales={sales}
+            onClose={() => setSelectedClientId(null)}
+            onEdit={(c) => {
+              setEditClient(c);
+              setShowClientModal(true);
+            }}
+            onNewRepairForClient={(c) => openNewRepairFlow(c)}
+            onSelectRepair={(r) => setSelectedRepairId(r.id)}
+          />
+        )}
 
-      <ProductModal
-        open={showProductModal}
-        onClose={() => {
-          setShowProductModal(false);
-          setEditProduct(null);
-        }}
-        ownerId={userId}
-        suppliers={suppliers}
-        products={products}
-        editProduct={editProduct}
-      />
+        {showProductModal && (
+          <ProductModal
+            open={showProductModal}
+            onClose={() => {
+              setShowProductModal(false);
+              setEditProduct(null);
+            }}
+            ownerId={userId}
+            suppliers={suppliers}
+            products={products}
+            editProduct={editProduct}
+          />
+        )}
 
-      <ProductDetailModal
-        product={selectedProduct}
-        onClose={() => setSelectedProductId(null)}
-        onEdit={(p) => {
-          setEditProduct(p);
-          setShowProductModal(true);
-        }}
-        onSell={(p) => {
-          setSaleProduct(p);
-          setShowNewSale(true);
-        }}
-      />
+        {selectedProduct && (
+          <ProductDetailModal
+            product={selectedProduct}
+            onClose={() => setSelectedProductId(null)}
+            onEdit={(p) => {
+              setEditProduct(p);
+              setShowProductModal(true);
+            }}
+            onSell={(p) => {
+              setSaleProduct(p);
+              setShowNewSale(true);
+            }}
+          />
+        )}
 
-      <ProductImportModal
-        open={showProductImport}
-        onClose={() => setShowProductImport(false)}
-        ownerId={userId}
-        existingProducts={products}
-      />
+        {showProductImport && (
+          <ProductImportModal
+            open={showProductImport}
+            onClose={() => setShowProductImport(false)}
+            ownerId={userId}
+            existingProducts={products}
+          />
+        )}
 
-      <NewTaskModal
-        open={showNewTask}
-        onClose={() => setShowNewTask(false)}
-        ownerId={userId}
-      />
+        {showNewTask && (
+          <NewTaskModal
+            open={showNewTask}
+            onClose={() => setShowNewTask(false)}
+            ownerId={userId}
+          />
+        )}
 
-      <NewSupplierModal
-        open={showSupplierModal}
-        onClose={() => {
-          setShowSupplierModal(false);
-          setEditSupplier(null);
-        }}
-        ownerId={userId}
-        editSupplier={editSupplier}
-      />
+        {showSupplierModal && (
+          <NewSupplierModal
+            open={showSupplierModal}
+            onClose={() => {
+              setShowSupplierModal(false);
+              setEditSupplier(null);
+            }}
+            ownerId={userId}
+            editSupplier={editSupplier}
+          />
+        )}
 
-      <NewSaleModal
-        open={showNewSale}
-        onClose={() => {
-          setShowNewSale(false);
-          setSaleProduct(null);
-          setEditingSale(null);
-        }}
-        ownerId={userId}
-        clients={clients}
-        products={products}
-        preselectedProduct={saleProduct}
-        editSale={editingSale}
-        profile={profile}
-        brandName={profile.brandName}
-        onCreated={(createdSale) => setSelectedPrintSale(createdSale)}
-      />
+        {showNewSale && (
+          <NewSaleModal
+            open={showNewSale}
+            onClose={() => {
+              setShowNewSale(false);
+              setSaleProduct(null);
+              setEditingSale(null);
+            }}
+            ownerId={userId}
+            clients={clients}
+            products={products}
+            preselectedProduct={saleProduct}
+            editSale={editingSale}
+            profile={profile}
+            brandName={profile.brandName}
+            onCreated={(createdSale) => setSelectedPrintSale(createdSale)}
+          />
+        )}
 
-      <SalePrintModal
-        sale={
-          selectedPrintSale
-            ? sales.find((s) => s.id === selectedPrintSale.id) || selectedPrintSale
-            : null
-        }
-        onClose={() => setSelectedPrintSale(null)}
-        profile={profile}
-        clients={clients}
-      />
+        {selectedPrintSale && (
+          <SalePrintModal
+            sale={sales.find((s) => s.id === selectedPrintSale.id) || selectedPrintSale}
+            onClose={() => setSelectedPrintSale(null)}
+            profile={profile}
+            clients={clients}
+          />
+        )}
 
-      <NewPurchaseModal
-        open={showNewPurchase}
-        onClose={() => {
-          setShowNewPurchase(false);
-          setEditingPurchase(null);
-        }}
-        ownerId={userId}
-        suppliers={suppliers}
-        products={products}
-        tasks={tasks}
-        profile={profile}
-        editPurchase={editingPurchase}
-      />
+        {showNewPurchase && (
+          <NewPurchaseModal
+            open={showNewPurchase}
+            onClose={() => {
+              setShowNewPurchase(false);
+              setEditingPurchase(null);
+            }}
+            ownerId={userId}
+            suppliers={suppliers}
+            products={products}
+            tasks={tasks}
+            profile={profile}
+            editPurchase={editingPurchase}
+          />
+        )}
 
-      <SubscriptionModal
-        open={showSubscriptionModal || isSubscriptionBlocking}
-        blocking={isSubscriptionBlocking}
-        onClose={() => setShowSubscriptionModal(false)}
-        subscriptionRecord={subscriptionRecord}
-        mpConfigured={mpPlatformConfigured}
-        nowMs={nowMs}
-        onSubscriptionUpdated={(next) => {
-          setSubscriptionRecord(next);
-          void saveSubscriptionToProfile(profile, next).catch(() => {});
-        }}
-        onSignOut={() => {
-          clearTransferConfigCache(userId);
-          clearMercadoPagoConfigCache(userId);
-          void supabase.auth.signOut();
-        }}
-      />
+        {(showSubscriptionModal || isSubscriptionBlocking) && (
+          <SubscriptionModal
+            open={showSubscriptionModal || isSubscriptionBlocking}
+            blocking={isSubscriptionBlocking}
+            onClose={() => setShowSubscriptionModal(false)}
+            subscriptionRecord={subscriptionRecord}
+            mpConfigured={mpPlatformConfigured}
+            nowMs={nowMs}
+            onSubscriptionUpdated={(next) => {
+              setSubscriptionRecord(next);
+              void saveSubscriptionToProfile(profile, next).catch(() => {});
+            }}
+            onSignOut={() => {
+              clearTransferConfigCache(userId);
+              clearMercadoPagoConfigCache(userId);
+              void supabase.auth.signOut();
+            }}
+          />
+        )}
 
-      <SupportModal
-        open={showSupportModal}
-        onClose={() => setShowSupportModal(false)}
-        profile={profile}
-        userEmail={userEmail}
-        currentPage={page}
-      />
+        {showSupportModal && (
+          <SupportModal
+            open={showSupportModal}
+            onClose={() => setShowSupportModal(false)}
+            profile={profile}
+            userEmail={userEmail}
+            currentPage={page}
+          />
+        )}
 
-      <KeyboardShortcutsModal
-        open={showShortcutsModal}
-        onClose={() => setShowShortcutsModal(false)}
-        enabled={shortcutsEnabled}
-        onToggleEnabled={(next) => {
-          setShortcutsEnabled(next);
-          persistShortcutsEnabled(next);
-          notify(
-            next
-              ? tr('Atajos de teclado activados.', 'Keyboard shortcuts enabled.', 'Atalhos de teclado ativados.')
-              : tr('Atajos de teclado desactivados.', 'Keyboard shortcuts disabled.', 'Atalhos de teclado desativados.'),
-            'info'
-          );
-        }}
-        onRunAction={handleShortcutAction}
-      />
+        {showShortcutsModal && (
+          <KeyboardShortcutsModal
+            open={showShortcutsModal}
+            onClose={() => setShowShortcutsModal(false)}
+            enabled={shortcutsEnabled}
+            onToggleEnabled={(next) => {
+              setShortcutsEnabled(next);
+              persistShortcutsEnabled(next);
+              notify(
+                next
+                  ? tr('Atajos de teclado activados.', 'Keyboard shortcuts enabled.', 'Atalhos de teclado ativados.')
+                  : tr('Atajos de teclado desactivados.', 'Keyboard shortcuts disabled.', 'Atalhos de teclado desativados.'),
+                'info'
+              );
+            }}
+            onRunAction={handleShortcutAction}
+          />
+        )}
 
-      <WelcomeSpotlightTour
-        open={welcomeTourOpen}
-        steps={WELCOME_TOUR_STEPS}
-        onComplete={() => {
-          setWelcomeTourOpen(false);
-          updateOnboarding((prev) => markWelcomeStepsSeen(prev, WELCOME_TOUR_STEPS));
-        }}
-        onSkip={() => {
-          setWelcomeTourOpen(false);
-          updateOnboarding((prev) => markWelcomeStepsSeen(prev, WELCOME_TOUR_STEPS));
-        }}
-      />
+        {welcomeTourOpen && (
+          <WelcomeSpotlightTour
+            open={welcomeTourOpen}
+            steps={WELCOME_TOUR_STEPS}
+            onComplete={() => {
+              setWelcomeTourOpen(false);
+              updateOnboarding((prev) => markWelcomeStepsSeen(prev, WELCOME_TOUR_STEPS));
+            }}
+            onSkip={() => {
+              setWelcomeTourOpen(false);
+              updateOnboarding((prev) => markWelcomeStepsSeen(prev, WELCOME_TOUR_STEPS));
+            }}
+          />
+        )}
 
-      <ContextualWindowGuide
-        guide={activeContextualGuide?.resolved || null}
-        onDismissCurrent={() => {
-          if (!activeContextualGuide) return;
-          updateOnboarding((prev) =>
-            markGuideScopeSeen(prev, activeContextualGuide.scopeKey, activeContextualGuide.def)
-          );
-        }}
-        onDismissAll={() => {
-          setWelcomeTourOpen(false);
-          updateOnboarding((prev) => ({
-            ...markWelcomeStepsSeen(prev, WELCOME_TOUR_STEPS),
-            dismissAllGuides: true,
-          }));
-        }}
-      />
+        {activeContextualGuide && (
+          <ContextualWindowGuide
+            guide={activeContextualGuide.resolved}
+            onDismissCurrent={() => {
+              if (!activeContextualGuide) return;
+              updateOnboarding((prev) =>
+                markGuideScopeSeen(prev, activeContextualGuide.scopeKey, activeContextualGuide.def)
+              );
+            }}
+            onDismissAll={() => {
+              setWelcomeTourOpen(false);
+              updateOnboarding((prev) => ({
+                ...markWelcomeStepsSeen(prev, WELCOME_TOUR_STEPS),
+                dismissAllGuides: true,
+              }));
+            }}
+          />
+        )}
+      </Suspense>
     </div>
   );
 };

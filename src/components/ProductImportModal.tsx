@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import * as XLSX from 'xlsx';
 import { FileSpreadsheet, UploadCloud } from 'lucide-react';
 import {
   clampStr,
@@ -73,7 +72,7 @@ export const ProductImportModal: React.FC<ProductImportModalProps> = ({
     }
     setFileName(sanitizePlainLine(file.name, 160));
     try {
-      const buffer = await file.arrayBuffer();
+      const [XLSX, buffer] = await Promise.all([import('xlsx'), file.arrayBuffer()]);
       const workbook = XLSX.read(buffer, { type: 'array' });
       const firstSheetName = workbook.SheetNames[0];
       if (!firstSheetName) {

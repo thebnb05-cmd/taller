@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { Smartphone } from 'lucide-react';
 import {
@@ -16,11 +16,35 @@ import { setActiveLanguage, useI18n } from './utils/i18n';
 import { resetLoginGuard } from './utils/loginGuard';
 import { sanitizeDbErrorMessage } from './utils/validation';
 import { parseWorkshopMeta } from './utils/workshopMeta';
-import { AuthScreen, WorkshopOnboarding } from './components/AuthGate';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { PublicTrackingView } from './components/PublicTrackingView';
 import { ToastProvider } from './components/ToastProvider';
-import { WorkshopApp } from './components/WorkshopApp';
+
+const AuthScreen = React.lazy(() =>
+  import('./components/AuthGate').then((m) => ({ default: m.AuthScreen }))
+);
+const WorkshopOnboarding = React.lazy(() =>
+  import('./components/AuthGate').then((m) => ({ default: m.WorkshopOnboarding }))
+);
+const PublicTrackingView = React.lazy(() =>
+  import('./components/PublicTrackingView').then((m) => ({ default: m.PublicTrackingView }))
+);
+const WorkshopApp = React.lazy(() =>
+  import('./components/WorkshopApp').then((m) => ({ default: m.WorkshopApp }))
+);
+
+function RouteLoadingFallback() {
+  const { tr } = useI18n();
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-slate-50 dark:bg-slate-950">
+      <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#0072BB] text-white">
+        <Smartphone className="h-5 w-5" />
+      </span>
+      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+        {tr('Cargando módulo...', 'Loading module...', 'Carregando módulo...')}
+      </p>
+    </div>
+  );
+}
 
 function AuthenticatedGate({
   user,
@@ -293,7 +317,9 @@ export default function App() {
   return (
     <ErrorBoundary>
       <ToastProvider>
-        <AppContent />
+        <Suspense fallback={<RouteLoadingFallback />}>
+          <AppContent />
+        </Suspense>
       </ToastProvider>
     </ErrorBoundary>
   );
