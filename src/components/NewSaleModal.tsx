@@ -37,7 +37,6 @@ import type {
   WorkshopProfile,
 } from '../types/workshop';
 import {
-  convertBetweenCurrencies,
   convertFromBaseCurrency,
   convertToBaseCurrency,
   getCurrencyOption,
@@ -142,7 +141,41 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const baseCurrency: CurrencyCode = profile ? workshopMeta.currency : activeCurrency;
   const secondaryCurrencies = workshopMeta.secondaryCurrencies;
 
+  const editPayInfo = useMemo(
+    () => (editSale ? parseSalePaymentInfo(editSale) : null),
+    [editSale]
+  );
+
+  const selectableCurrencies = useMemo(() => {
+    const list: Array<{ code: CurrencyCode; rate: number; isBase: boolean }> = [
+      { code: baseCurrency, rate: 1, isBase: true },
+    ];
+    for (const sec of secondaryCurrencies) {
+      if (sec.code !== baseCurrency && !list.some((item) => item.code === sec.code)) {
+        list.push({ code: sec.code, rate: sec.rate, isBase: false });
+      }
+    }
+    if (
+      editPayInfo?.currency &&
+      editPayInfo.currency !== baseCurrency &&
+      !list.some((item) => item.code === editPayInfo.currency) &&
+      editPayInfo.rate &&
+      editPayInfo.rate > 0
+    ) {
+      list.push({
+        code: editPayInfo.currency,
+        rate: editPayInfo.rate,
+        isBase: false,
+      });
+    }
+    return list;
+  }, [baseCurrency, secondaryCurrencies, editPayInfo?.currency, editPayInfo?.rate]);
+
   const [selectedCurrency, setSelectedCurrency] = useState<CurrencyCode>(baseCurrency);
+  const [secondaryPreviewCode, setSecondaryPreviewCode] = useState<CurrencyCode | null>(
+    secondaryCurrencies[0]?.code ?? null
+  );
+  const initSessionKeyRef = useRef<string | null>(null);
   const [clientName, setClientName] = useState('');
   const [invoice, setInvoice] = useState('');
   const [cartItems, setCartItems] = useState<SaleCartItem[]>([]);
@@ -183,8 +216,18 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const selectedCurrencyOption = getCurrencyOption(selectedCurrency);
   const baseCurrencyOption = getCurrencyOption(baseCurrency);
   const currencySymbol = selectedCurrencyOption.symbol;
-  const activeRate =
-    getCurrencyRateFromBase(selectedCurrency, baseCurrency, secondaryCurrencies) ?? 1;
+
+  const getRateForCode = (code: CurrencyCode): number | null => {
+    if (code === baseCurrency) return 1;
+    const configured = getCurrencyRateFromBase(code, baseCurrency, secondaryCurrencies);
+    if (configured && configured > 0) return configured;
+    if (editPayInfo?.currency === code && editPayInfo.rate && editPayInfo.rate > 0) {
+      return editPayInfo.rate;
+    }
+    return null;
+  };
+
+  const activeRate = getRateForCode(selectedCurrency) ?? 1;
   const isSecondaryCurrency = selectedCurrency !== baseCurrency && activeRate !== 1;
 
   const stopScanner = () => {
@@ -201,9 +244,16 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
 
   useEffect(() => {
     if (!open) {
+      initSessionKeyRef.current = null;
       stopScanner();
       return;
     }
+
+    const sessionKey = `${ownerId}|${editSale?.id || ''}|${preselectedProduct?.id || ''}`;
+    if (initSessionKeyRef.current === sessionKey) {
+      return;
+    }
+    initSessionKeyRef.current = sessionKey;
 
     const loadedCfg = loadTransferConfig(ownerId);
     setTransferCfg(loadedCfg);
@@ -237,6 +287,9 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           : roundCurrencyValue(baseVal);
 
       setSelectedCurrency(editCur);
+      setSecondaryPreviewCode(
+        editCur !== baseCurrency ? editCur : (secondaryCurrencies[0]?.code ?? null)
+      );
       setClientName(editSale.clientName || '');
       setInvoice(editSale.invoice || '');
       setDueDate(editSale.dueDate || todayISO());
@@ -278,6 +331,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       setShowManualForm(false);
     } else if (preselectedProduct) {
       setSelectedCurrency(baseCurrency);
+      setSecondaryPreviewCode(secondaryCurrencies[0]?.code ?? null);
       setClientName('');
       setInvoice(`FV-${Math.floor(1000 + Math.random() * 9000)}`);
       setDueDate(todayISO());
@@ -305,6 +359,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       setShowManualForm(false);
     } else {
       setSelectedCurrency(baseCurrency);
+      setSecondaryPreviewCode(secondaryCurrencies[0]?.code ?? null);
       setClientName('');
       setInvoice(`FV-${Math.floor(1000 + Math.random() * 9000)}`);
       setDueDate(todayISO());
@@ -345,7 +400,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       cancelled = true;
       stopScanner();
     };
-  }, [open, ownerId, preselectedProduct, editSale, baseCurrency, profile, products.length]);
+  }, [open, ownerId, preselectedProduct, editSale, baseCurrency, secondaryCurrencies, profile, products.length]);
 
   const subtotalDisplay = useMemo(
     () =>
@@ -396,6 +451,54 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const baseEquivalentAmount = isSecondaryCurrency
     ? roundCurrencyValue(convertToBaseCurrency(totalDisplay, activeRate))
     : totalDisplay;
+
+  const effectiveSecondaryTarget = useMemo(() => {
+    if (isSecondaryCurrency) {
+      return { code: selectedCurrency, rate: activeRate };
+    }
+    if (secondaryCurrencies.length === 0) return null;
+    const matched = secondaryPreviewCode
+      ? secondaryCurrencies.find((item) => item.code === secondaryPreviewCode)
+      : undefined;
+    return matched ?? secondaryCurrencies[0];
+  }, [isSecondaryCurrency, selectedCurrency, activeRate, secondaryCurrencies, secondaryPreviewCode]);
+
+  const dualCurrencySummary = useMemo(() => {
+    if (!effectiveSecondaryTarget || effectiveSecondaryTarget.rate <= 0) return null;
+    const baseAmount = isSecondaryCurrency
+      ? baseEquivalentAmount
+      : roundCurrencyValue(totalDisplay);
+    const secondaryAmount = isSecondaryCurrency
+      ? roundCurrencyValue(totalDisplay)
+      : roundCurrencyValue(
+          convertFromBaseCurrency(totalDisplay, effectiveSecondaryTarget.rate)
+        );
+    const pendingCounterpartAmount = isSecondaryCurrency
+      ? roundCurrencyValue(convertToBaseCurrency(pendingBalance, activeRate))
+      : roundCurrencyValue(
+          convertFromBaseCurrency(pendingBalance, effectiveSecondaryTarget.rate)
+        );
+    return {
+      secondaryCode: effectiveSecondaryTarget.code,
+      secondaryOption: getCurrencyOption(effectiveSecondaryTarget.code),
+      rate: effectiveSecondaryTarget.rate,
+      baseAmount,
+      secondaryAmount,
+      pendingCounterpartAmount,
+      pendingCounterpartCode: isSecondaryCurrency
+        ? baseCurrency
+        : effectiveSecondaryTarget.code,
+    };
+  }, [
+    effectiveSecondaryTarget,
+    isSecondaryCurrency,
+    baseEquivalentAmount,
+    totalDisplay,
+    pendingBalance,
+    activeRate,
+    baseCurrency,
+  ]);
+
   const effectiveBrandName = profile?.brandName || brandName || 'TH3 BNB';
 
   useEffect(() => {
@@ -602,26 +705,21 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     const nextCode = sanitizeCurrencyCode(nextRaw);
     if (nextCode === selectedCurrency) return;
 
-    const convertVal = (val: number) =>
-      roundCurrencyValue(
-        convertBetweenCurrencies(
-          val,
-          selectedCurrency,
-          nextCode,
-          baseCurrency,
-          secondaryCurrencies
-        )
-      );
+    const fromRate = getRateForCode(selectedCurrency) ?? 1;
+    const toRate = getRateForCode(nextCode) ?? 1;
+    const convertVal = (val: number) => {
+      if (!Number.isFinite(val)) return 0;
+      if (fromRate === toRate) return roundCurrencyValue(val);
+      return roundCurrencyValue((val * fromRate) / toRate);
+    };
 
     setCartItems((prev) =>
       prev.map((it) => {
         const product = it.productId ? products.find((p) => p.id === it.productId) : undefined;
-        const nextRate =
-          getCurrencyRateFromBase(nextCode, baseCurrency, secondaryCurrencies) ?? 1;
         const nextUnit = product
           ? nextCode === baseCurrency
             ? roundCurrencyValue(product.price)
-            : roundCurrencyValue(convertFromBaseCurrency(product.price, nextRate))
+            : roundCurrencyValue(convertFromBaseCurrency(product.price, toRate))
           : convertVal(it.unitPrice);
         return {
           ...it,
@@ -639,6 +737,9 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     }
     if (status !== 'cobrado' && deposit.trim() && Number(deposit) > 0) {
       setDeposit(String(convertVal(Number(deposit))));
+    }
+    if (nextCode !== baseCurrency) {
+      setSecondaryPreviewCode(nextCode);
     }
     setSelectedCurrency(nextCode);
   };
@@ -1688,8 +1789,8 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           </div>
         </div>
 
-        {/* Currency Selector */}
-        {secondaryCurrencies.length > 0 && (
+        {/* Currency Selector & Configured Conversion Rates */}
+        {selectableCurrencies.length > 1 && (
           <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/40">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -1698,31 +1799,99 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   htmlFor="new-sale-currency-select"
                   className="text-xs font-bold text-slate-800 dark:text-slate-100"
                 >
-                  {tr('Divisa de la transacción', 'Transaction currency', 'Moeda da transação')}
+                  {tr('Moneda y conversión', 'Currency & conversion', 'Moeda e conversão')}
                 </label>
               </div>
-              {isSecondaryCurrency && (
+              {dualCurrencySummary && (
                 <span className="font-mono-num text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
-                  1 {currencySymbol} = {formatCurrency(activeRate, baseCurrency)}
+                  1 {dualCurrencySummary.secondaryOption.symbol} ={' '}
+                  {formatCurrency(dualCurrencySummary.rate, baseCurrency)}
                 </span>
               )}
             </div>
-            <select
-              id="new-sale-currency-select"
-              value={selectedCurrency}
-              onChange={(e) => handleCurrencyChange(e.target.value)}
-              className="mt-2 h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+
+            <div
+              className={`mt-2 grid gap-2 ${
+                !isSecondaryCurrency && secondaryCurrencies.length > 1
+                  ? 'sm:grid-cols-2'
+                  : 'grid-cols-1'
+              }`}
             >
-              <option value={baseCurrency}>{baseCurrencyOption.label} · Base</option>
-              {secondaryCurrencies.map((sec) => {
-                const secOpt = getCurrencyOption(sec.code);
-                return (
-                  <option key={sec.code} value={sec.code}>
-                    {secOpt.label} · 1 {secOpt.symbol} = {formatCurrency(sec.rate, baseCurrency)}
-                  </option>
-                );
-              })}
-            </select>
+              <div>
+                {!isSecondaryCurrency && secondaryCurrencies.length > 1 && (
+                  <label
+                    htmlFor="new-sale-currency-select"
+                    className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
+                  >
+                    {tr('Divisa de carga', 'Entry currency', 'Moeda de lançamento')}
+                  </label>
+                )}
+                <select
+                  id="new-sale-currency-select"
+                  value={selectedCurrency}
+                  onChange={(e) => handleCurrencyChange(e.target.value)}
+                  className="h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                >
+                  {selectableCurrencies.map((choice) => {
+                    const opt = getCurrencyOption(choice.code);
+                    if (choice.isBase) {
+                      return (
+                        <option key={choice.code} value={choice.code}>
+                          {opt.label} · Base
+                        </option>
+                      );
+                    }
+                    return (
+                      <option key={choice.code} value={choice.code}>
+                        {opt.label} · 1 {opt.symbol} = {formatCurrency(choice.rate, baseCurrency)}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              {!isSecondaryCurrency && secondaryCurrencies.length > 1 && effectiveSecondaryTarget && (
+                <div>
+                  <label
+                    htmlFor="new-sale-secondary-preview-select"
+                    className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
+                  >
+                    {tr('Moneda secundaria a mostrar', 'Secondary currency display', 'Moeda secundária exibida')}
+                  </label>
+                  <select
+                    id="new-sale-secondary-preview-select"
+                    value={effectiveSecondaryTarget.code}
+                    onChange={(e) => setSecondaryPreviewCode(sanitizeCurrencyCode(e.target.value))}
+                    className="h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                  >
+                    {secondaryCurrencies.map((sec) => {
+                      const secOpt = getCurrencyOption(sec.code);
+                      return (
+                        <option key={sec.code} value={sec.code}>
+                          {secOpt.label} · 1 {secOpt.symbol} = {formatCurrency(sec.rate, baseCurrency)}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {dualCurrencySummary && (
+              <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                {isSecondaryCurrency
+                  ? tr(
+                      `Cargás los importes en ${selectedCurrencyOption.code} y se guardan convertidos a ${baseCurrencyOption.code} según la tasa configurada.`,
+                      `Amounts are entered in ${selectedCurrencyOption.code} and saved converted to ${baseCurrencyOption.code} at the configured rate.`,
+                      `Os valores são lançados em ${selectedCurrencyOption.code} e salvos convertidos para ${baseCurrencyOption.code} pela taxa configurada.`
+                    )
+                  : tr(
+                      `Precios en ${baseCurrencyOption.code} con total automático en ${dualCurrencySummary.secondaryCode} junto a la moneda base.`,
+                      `Prices in ${baseCurrencyOption.code} with automatic ${dualCurrencySummary.secondaryCode} total alongside the base currency.`,
+                      `Preços em ${baseCurrencyOption.code} com total automático em ${dualCurrencySummary.secondaryCode} junto à moeda base.`
+                    )}
+              </p>
+            )}
           </div>
         )}
 
@@ -1806,17 +1975,57 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   </span>
                 </div>
               )}
-              <div className="flex justify-between pt-0.5 text-sm font-extrabold text-slate-900 dark:text-white">
-                <span>{tr('Total final', 'Final total', 'Total final')}</span>
-                <span className="font-mono-num">
-                  {formatCurrency(totalDisplay, selectedCurrency)}
-                </span>
-              </div>
-              {isSecondaryCurrency && totalDisplay > 0 && (
-                <div className="text-right font-mono-num text-[11px] text-slate-500">
-                  {tr('Equiv.', 'Equiv.', 'Equiv.')} {formatCurrency(baseEquivalentAmount, baseCurrency)}
+              <div className="pt-1">
+                <div className="flex items-baseline justify-between gap-2 text-sm font-extrabold text-slate-900 dark:text-white">
+                  <span>{tr('Total final', 'Final total', 'Total final')}</span>
+                  {!dualCurrencySummary && (
+                    <span className="font-mono-num">
+                      {formatCurrency(totalDisplay, selectedCurrency)}
+                    </span>
+                  )}
                 </div>
-              )}
+
+                {dualCurrencySummary && (
+                  <div className="mt-1.5 grid grid-cols-2 gap-2">
+                    <div
+                      className={`min-w-0 rounded-xl border px-2.5 py-1.5 ${
+                        !isSecondaryCurrency
+                          ? 'border-[#0072BB]/35 bg-sky-50/70 dark:border-sky-500/40 dark:bg-sky-950/30'
+                          : 'border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-800/60'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        <span>{baseCurrencyOption.code}</span>
+                        <span>{tr('Base', 'Base', 'Base')}</span>
+                      </div>
+                      <div className="mt-0.5 truncate font-mono-num text-sm font-extrabold text-slate-900 dark:text-white">
+                        {formatCurrency(dualCurrencySummary.baseAmount, baseCurrency)}
+                      </div>
+                    </div>
+
+                    <div
+                      className={`min-w-0 rounded-xl border px-2.5 py-1.5 ${
+                        isSecondaryCurrency
+                          ? 'border-emerald-400/50 bg-emerald-50/70 dark:border-emerald-500/40 dark:bg-emerald-950/30'
+                          : 'border-emerald-200 bg-emerald-50/50 dark:border-emerald-900/60 dark:bg-emerald-950/20'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                        <span>{dualCurrencySummary.secondaryCode}</span>
+                        <span className="truncate font-mono-num">
+                          1={formatCurrency(dualCurrencySummary.rate, baseCurrency)}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 truncate font-mono-num text-sm font-extrabold text-emerald-700 dark:text-emerald-300">
+                        {formatCurrency(
+                          dualCurrencySummary.secondaryAmount,
+                          dualCurrencySummary.secondaryCode
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1847,17 +2056,29 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                 placeholder="0"
                 className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 font-mono-num text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
-              <div className="mt-1 flex items-center justify-between text-[11px]">
+              <div className="mt-1 flex items-center justify-between gap-2 text-[11px]">
                 <span className="text-slate-500">{tr('Saldo pendiente:', 'Balance due:', 'Saldo pendente:')}</span>
-                <span
-                  className={`font-mono-num font-bold ${
-                    pendingBalance > 0
-                      ? 'text-amber-600 dark:text-amber-400'
-                      : 'text-emerald-600 dark:text-emerald-400'
-                  }`}
-                >
-                  {formatCurrency(pendingBalance, selectedCurrency)}
-                </span>
+                <div className="text-right">
+                  <span
+                    className={`font-mono-num font-bold ${
+                      pendingBalance > 0
+                        ? 'text-amber-600 dark:text-amber-400'
+                        : 'text-emerald-600 dark:text-emerald-400'
+                    }`}
+                  >
+                    {formatCurrency(pendingBalance, selectedCurrency)}
+                  </span>
+                  {pendingBalance > 0 && dualCurrencySummary && (
+                    <span className="ml-1.5 font-mono-num text-[10px] text-slate-500 dark:text-slate-400">
+                      (
+                      {formatCurrency(
+                        dualCurrencySummary.pendingCounterpartAmount,
+                        dualCurrencySummary.pendingCounterpartCode
+                      )}
+                      )
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
             <div>

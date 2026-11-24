@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   CalendarClock,
@@ -51,6 +51,25 @@ import {
   type LanguageCode,
 } from '../utils/i18n';
 import { compressImageToDataUrl, formatCurrency, todayISO } from '../utils/formatters';
+import {
+  DEFAULT_FX_INTERVAL_MINUTES,
+  DEFAULT_FX_PROVIDER,
+  FX_INTERVAL_OPTIONS,
+  FX_PROVIDER_OPTIONS,
+  FX_SERVICE_STATUS_EVENT,
+  fetchUsdRates,
+  readFxServiceStatus,
+  readStoredFxSnapshot,
+  resolveLiveRateToBase,
+  sanitizeFxIntervalMinutes,
+  sanitizeFxProvider,
+  writeFxServiceStatus,
+  type ArsQuoteSource,
+  type FxApiResponse,
+  type FxProviderId,
+  type FxServiceStatus,
+  type FxSyncIntervalMinutes,
+} from '../utils/fxRates';
 import {
   isPrivatePreviewOrigin,
   normalizeTrackingBaseUrl,
@@ -139,6 +158,22 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
       rate: String(item.rate),
     }))
   );
+  const [fxAutoSync, setFxAutoSync] = useState<boolean>(Boolean(initialMeta.fxAutoSync));
+  const [fxArsSource, setFxArsSource] = useState<ArsQuoteSource>(
+    initialMeta.fxArsSource || 'blue'
+  );
+  const [fxProvider, setFxProvider] = useState<FxProviderId>(
+    initialMeta.fxProvider || DEFAULT_FX_PROVIDER
+  );
+  const [fxIntervalMinutes, setFxIntervalMinutes] = useState<FxSyncIntervalMinutes>(
+    initialMeta.fxIntervalMinutes || DEFAULT_FX_INTERVAL_MINUTES
+  );
+  const [fxSnapshot, setFxSnapshot] = useState<FxApiResponse | null>(() => readStoredFxSnapshot());
+  const [fxServiceStatus, setFxServiceStatus] = useState<FxServiceStatus>(() =>
+    readFxServiceStatus()
+  );
+  const [syncingFxRates, setSyncingFxRates] = useState(false);
+  const initOpenProfileRef = useRef<string | null>(null);
   const [wordColors, setWordColors] = useState<string[]>(
     profile.wordColors || ['#0F172A', '#0072BB']
   );
@@ -235,7 +270,25 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
   }, [notify]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      initOpenProfileRef.current = null;
+      return;
+    }
+
+    const handleServiceStatus = (event: Event) => {
+      const detail = (event as CustomEvent<FxServiceStatus>).detail;
+      if (detail) setFxServiceStatus(detail);
+    };
+    window.addEventListener(FX_SERVICE_STATUS_EVENT, handleServiceStatus);
+    setFxServiceStatus(readFxServiceStatus());
+
+    if (initOpenProfileRef.current === profile.id) {
+      return () => {
+        window.removeEventListener(FX_SERVICE_STATUS_EVENT, handleServiceStatus);
+      };
+    }
+    initOpenProfileRef.current = profile.id;
+
     const meta = parseWorkshopMeta(profile);
     setBrandName(profile.brandName || 'TH3 BNB');
     setSubtitleText(meta.subtitle);
@@ -256,6 +309,17 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
         rate: String(item.rate),
       }))
     );
+    setFxAutoSync(Boolean(meta.fxAutoSync));
+    setFxArsSource(meta.fxArsSource || 'blue');
+    setFxProvider(meta.fxProvider || DEFAULT_FX_PROVIDER);
+    setFxIntervalMinutes(meta.fxIntervalMinutes || DEFAULT_FX_INTERVAL_MINUTES);
+    setFxSnapshot(readStoredFxSnapshot());
+    let active = true;
+    void fetchUsdRates({ force: false, provider: meta.fxProvider || DEFAULT_FX_PROVIDER })
+      .then((data) => {
+        if (active) setFxSnapshot(data);
+      })
+      .catch(() => {});
     setWordColors(profile.wordColors || ['#0F172A', '#0072BB']);
     setLogoDataUrl(profile.logoDataUrl || '');
     setLogoScale(profile.logoScale ?? 100);
@@ -275,6 +339,10 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
     if (isPlatformAdmin) {
       void runPlatformTokenCheck(false);
     }
+    return () => {
+      active = false;
+      window.removeEventListener(FX_SERVICE_STATUS_EVENT, handleServiceStatus);
+    };
   }, [open, profile, isPlatformAdmin, runPlatformTokenCheck]);
 
   const ownerDisplayName = [profile.firstName, profile.lastName]
@@ -317,14 +385,27 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
   const handleAddSecondaryCurrency = () => {
     const nextOption = unusedSecondaryOptions[0];
     if (!nextOption) return;
-    setSecondaryRows((prev) => [...prev, { code: nextOption.code, rate: '' }]);
+    const liveRate = resolveLiveRateToBase(nextOption.code, currency, fxSnapshot, fxArsSource);
+    setSecondaryRows((prev) => [
+      ...prev,
+      { code: nextOption.code, rate: liveRate ? String(liveRate) : '' },
+    ]);
   };
 
   const handleUpdateSecondaryCode = (index: number, nextRaw: string) => {
     const nextCode = sanitizeCurrencyCode(nextRaw);
     if (nextCode === currency) return;
+    const liveRate = resolveLiveRateToBase(nextCode, currency, fxSnapshot, fxArsSource);
     setSecondaryRows((prev) =>
-      prev.map((row, idx) => (idx === index ? { ...row, code: nextCode } : row))
+      prev.map((row, idx) =>
+        idx === index
+          ? {
+              ...row,
+              code: nextCode,
+              rate: liveRate ? String(liveRate) : row.rate,
+            }
+          : row
+      )
     );
   };
 
@@ -336,6 +417,68 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
 
   const handleRemoveSecondaryCurrency = (index: number) => {
     setSecondaryRows((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleSyncFxIntoRows = async (
+    sourceOverride?: ArsQuoteSource,
+    providerOverride?: FxProviderId
+  ) => {
+    const effectiveSource = sourceOverride ?? fxArsSource;
+    const effectiveProvider = providerOverride ?? fxProvider;
+    setSyncingFxRates(true);
+    try {
+      const latest = await fetchUsdRates({ force: true, provider: effectiveProvider });
+      setFxSnapshot(latest);
+      const now = Date.now();
+      const nextStatus: FxServiceStatus = {
+        lastCheckedAt: now,
+        lastUpdatedAt: now,
+        provider: latest.provider ?? effectiveProvider,
+        source: latest.source ?? null,
+        error: null,
+      };
+      writeFxServiceStatus(nextStatus);
+      setFxServiceStatus(nextStatus);
+
+      setSecondaryRows((prev) => {
+        if (prev.length === 0 && currency !== 'USD') {
+          const usdRate = resolveLiveRateToBase('USD', currency, latest, effectiveSource);
+          return usdRate ? [{ code: 'USD', rate: String(usdRate) }] : prev;
+        }
+        return prev.map((row) => {
+          const live = resolveLiveRateToBase(row.code, currency, latest, effectiveSource);
+          return live ? { ...row, rate: String(live) } : row;
+        });
+      });
+      notify(
+        tr(
+          `Tasas consultadas (${latest.source || effectiveProvider}). Guardá para aplicar.`,
+          `Rates fetched (${latest.source || effectiveProvider}). Save to apply.`,
+          `Taxas consultadas (${latest.source || effectiveProvider}). Salve para aplicar.`
+        )
+      );
+    } catch (err) {
+      const msg = sanitizeDbErrorMessage(
+        err,
+        tr(
+          'No se pudo obtener la cotización en vivo.',
+          'Could not fetch live exchange rate.',
+          'Não foi possível obter a cotação ao vivo.'
+        )
+      );
+      const prevStatus = readFxServiceStatus();
+      const nextStatus: FxServiceStatus = {
+        ...prevStatus,
+        lastCheckedAt: Date.now(),
+        provider: effectiveProvider,
+        error: msg,
+      };
+      writeFxServiceStatus(nextStatus);
+      setFxServiceStatus(nextStatus);
+      notify(msg, 'error');
+    } finally {
+      setSyncingFxRates(false);
+    }
   };
 
   const words = (brandName || 'TH3 BNB').trim().split(/\s+/).filter(Boolean);
@@ -420,6 +563,10 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
         currency: safeCurrency,
         language: safeLanguage,
         secondaryCurrencies: safeSecondaryCurrencies,
+        fxAutoSync,
+        fxArsSource,
+        fxProvider,
+        fxIntervalMinutes,
         techniciansEnabled,
         technicians: sanitizeTechnicianList(technicians),
         mercadoPago: latestMpConfig ?? existingMeta.mercadoPago,
@@ -543,6 +690,10 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
         footerNote: parsedMeta.footerNote,
         currency: parsedMeta.currency,
         secondaryCurrencies: parsedMeta.secondaryCurrencies,
+        fxAutoSync: parsedMeta.fxAutoSync,
+        fxArsSource: parsedMeta.fxArsSource,
+        fxProvider: parsedMeta.fxProvider,
+        fxIntervalMinutes: parsedMeta.fxIntervalMinutes,
         techniciansEnabled: parsedMeta.techniciansEnabled,
         technicians: parsedMeta.technicians,
       });
@@ -825,15 +976,191 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
                   )}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={handleAddSecondaryCurrency}
-                disabled={unusedSecondaryOptions.length === 0}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#0072BB]/30 bg-white px-2.5 text-xs font-semibold text-[#0072BB] transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-sky-700/50 dark:bg-slate-900 dark:text-sky-300 dark:hover:bg-sky-950/40"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                {tr('Agregar moneda', 'Add currency', 'Adicionar moeda')}
-              </button>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => void handleSyncFxIntoRows()}
+                  disabled={syncingFxRates}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-300 dark:hover:bg-emerald-950/80"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${syncingFxRates ? 'animate-spin' : ''}`} />
+                  {syncingFxRates
+                    ? tr('Consultando API...', 'Fetching API...', 'Consultando API...')
+                    : tr('Consultar API ahora', 'Fetch API now', 'Consultar API agora')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddSecondaryCurrency}
+                  disabled={unusedSecondaryOptions.length === 0}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#0072BB]/30 bg-white px-2.5 text-xs font-semibold text-[#0072BB] transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-sky-700/50 dark:bg-slate-900 dark:text-sky-300 dark:hover:bg-sky-950/40"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  {tr('Agregar moneda', 'Add currency', 'Adicionar moeda')}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-2.5 space-y-2.5 rounded-xl border border-slate-200 bg-white p-3 text-xs dark:border-slate-700 dark:bg-slate-900">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-100">
+                  <input
+                    type="checkbox"
+                    checked={fxAutoSync}
+                    onChange={(e) => {
+                      const nextVal = e.target.checked;
+                      setFxAutoSync(nextVal);
+                      if (nextVal && secondaryRows.length === 0 && currency !== 'USD' && fxSnapshot) {
+                        const usdRate = resolveLiveRateToBase('USD', currency, fxSnapshot, fxArsSource);
+                        if (usdRate) {
+                          setSecondaryRows([{ code: 'USD', rate: String(usdRate) }]);
+                        }
+                      }
+                    }}
+                    className="h-4 w-4 rounded accent-emerald-600"
+                  />
+                  <span>
+                    {tr(
+                      'Servicio automático de actualización periódica',
+                      'Automatic periodic rate update service',
+                      'Serviço automático de atualização periódica'
+                    )}
+                  </span>
+                </label>
+
+                <span
+                  className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                    fxAutoSync
+                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                      : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+                  }`}
+                >
+                  {fxAutoSync
+                    ? tr('Servicio activo', 'Service active', 'Serviço ativo')
+                    : tr('Manual', 'Manual', 'Manual')}
+                </span>
+              </div>
+
+              <div className="grid gap-2.5 sm:grid-cols-2">
+                <div>
+                  <label
+                    htmlFor="workshop-fx-provider-select"
+                    className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300"
+                  >
+                    {tr('Proveedor de tipos de cambio', 'Exchange rate API provider', 'Provedor de câmbio')}
+                  </label>
+                  <select
+                    id="workshop-fx-provider-select"
+                    value={fxProvider}
+                    onChange={(e) => {
+                      const nextProv = sanitizeFxProvider(e.target.value);
+                      setFxProvider(nextProv);
+                      void handleSyncFxIntoRows(fxArsSource, nextProv);
+                    }}
+                    className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  >
+                    {FX_PROVIDER_OPTIONS.map((opt) => (
+                      <option key={opt.id} value={opt.id}>
+                        {tr(opt.es, opt.en, opt.pt)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="workshop-fx-interval-select"
+                    className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300"
+                  >
+                    {tr('Frecuencia de actualización', 'Update frequency', 'Frequência de atualização')}
+                  </label>
+                  <select
+                    id="workshop-fx-interval-select"
+                    value={fxIntervalMinutes}
+                    disabled={!fxAutoSync}
+                    onChange={(e) =>
+                      setFxIntervalMinutes(sanitizeFxIntervalMinutes(Number(e.target.value)))
+                    }
+                    className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold text-slate-900 outline-none focus:border-[#0072BB] disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  >
+                    {FX_INTERVAL_OPTIONS.map((opt) => (
+                      <option key={opt.minutes} value={opt.minutes}>
+                        {tr(opt.es, opt.en, opt.pt)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2 text-[11px] dark:border-slate-800">
+                <div className="min-w-0 flex-1 text-slate-500 dark:text-slate-400">
+                  {fxServiceStatus.error ? (
+                    <span className="font-medium text-amber-600 dark:text-amber-400">
+                      {fxServiceStatus.error}
+                    </span>
+                  ) : (
+                    <span className="truncate">
+                      {tr('Fuente activa:', 'Active feed:', 'Fonte ativa:')}{' '}
+                      <strong className="font-mono-num text-slate-700 dark:text-slate-200">
+                        {fxSnapshot?.source || fxServiceStatus.source || 'ExchangeRate-API'}
+                      </strong>
+                      {(fxServiceStatus.lastCheckedAt || fxSnapshot?.updatedAt) && (
+                        <>
+                          {' · '}
+                          {new Intl.DateTimeFormat(getIntlLocale(), {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          }).format(
+                            new Date(fxServiceStatus.lastCheckedAt || fxSnapshot?.updatedAt || Date.now())
+                          )}
+                        </>
+                      )}
+                    </span>
+                  )}
+                  {fxProvider === 'fixer' && fxSnapshot?.configuredKeys && !fxSnapshot.configuredKeys.fixer && (
+                    <div className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">
+                      {tr(
+                        'FIXER_API_KEY no definida en el servidor: usa Frankfurter (BCE) + ExchangeRate-API como respaldo.',
+                        'FIXER_API_KEY not set on server: using Frankfurter (ECB) + ExchangeRate-API fallback.',
+                        'FIXER_API_KEY não definida no servidor: usando Frankfurter (BCE) + ExchangeRate-API.'
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {(currency === 'ARS' || secondaryRows.some((r) => r.code === 'ARS')) && (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {tr('Ref. ARS:', 'ARS ref:', 'Ref. ARS:')}
+                    </span>
+                    <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-[11px] font-semibold dark:bg-slate-800">
+                      {(['blue', 'oficial', 'mep'] as const).map((src) => (
+                        <button
+                          key={src}
+                          type="button"
+                          onClick={() => {
+                            setFxArsSource(src);
+                            if (fxSnapshot) {
+                              setSecondaryRows((prev) =>
+                                prev.map((row) => {
+                                  const live = resolveLiveRateToBase(row.code, currency, fxSnapshot, src);
+                                  return live ? { ...row, rate: String(live) } : row;
+                                })
+                              );
+                            }
+                          }}
+                          className={`rounded-md px-2 py-0.5 uppercase transition ${
+                            fxArsSource === src
+                              ? 'bg-white text-slate-900 shadow-2xs dark:bg-slate-700 dark:text-white'
+                              : 'text-slate-500 dark:text-slate-400'
+                          }`}
+                        >
+                          {src}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {secondaryRows.length === 0 ? (
@@ -859,6 +1186,10 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
                   const convertedSample = hasValidRate
                     ? convertFromBaseCurrency(15000, parsedRate)
                     : 0;
+                  const liveRate = resolveLiveRateToBase(row.code, currency, fxSnapshot, fxArsSource);
+                  const liveDiffers = Boolean(
+                    liveRate && (!hasValidRate || Math.abs(liveRate - parsedRate) / parsedRate > 0.0005)
+                  );
 
                   return (
                     <div
@@ -920,6 +1251,24 @@ export const BrandSettingsModal: React.FC<BrandSettingsModalProps> = ({
                           <span className="text-amber-600 dark:text-amber-400">
                             Ingresá cuántos {baseCurrencyOption.code} equivalen a 1 {rowOption.code}.
                           </span>
+                        )}
+
+                        {liveRate && (
+                          <div className="flex items-center gap-1.5 font-mono-num">
+                            <span className="text-slate-500 dark:text-slate-400">
+                              {tr('Dólar hoy:', 'Live rate:', 'Dólar hoje:')}{' '}
+                              {formatCurrency(liveRate, currency)}
+                            </span>
+                            {liveDiffers && (
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateSecondaryRate(index, String(liveRate))}
+                                className="rounded-md border border-[#0072BB]/30 bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold text-[#0072BB] hover:bg-sky-100 dark:border-sky-700 dark:bg-sky-950/40 dark:text-sky-300"
+                              >
+                                {tr('Aplicar', 'Apply', 'Aplicar')}
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>

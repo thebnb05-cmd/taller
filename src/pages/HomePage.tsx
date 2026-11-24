@@ -27,6 +27,7 @@ import type {
   PurchaseRecord,
   RepairRecord,
   SaleRecord,
+  WorkshopProfile,
 } from '../types/workshop';
 import {
   formatCompactCurrency,
@@ -44,12 +45,14 @@ interface HomePageProps {
   products?: ProductRecord[];
   sales: SaleRecord[];
   purchases?: PurchaseRecord[];
+  profile?: WorkshopProfile | null;
   onNavigate: (page: PageId) => void;
   onNewRepair: () => void;
   onNewClient: () => void;
   onNewProduct: () => void;
   onSelectRepair: (repair: RepairRecord) => void;
   onSelectClient: (client: ClientRecord) => void;
+  onOpenSettings?: () => void;
 }
 
 export const HomePage: React.FC<HomePageProps> = ({
@@ -58,12 +61,14 @@ export const HomePage: React.FC<HomePageProps> = ({
   products = [],
   sales,
   purchases = [],
+  profile,
   onNavigate,
   onNewRepair,
   onNewClient,
   onNewProduct,
   onSelectRepair,
   onSelectClient,
+  onOpenSettings,
 }) => {
   const { lang, locale, tr } = useI18n();
   const [selectedSalesWeek, setSelectedSalesWeek] = useState<number | null>(null);
@@ -330,7 +335,7 @@ export const HomePage: React.FC<HomePageProps> = ({
   return (
     <div className="space-y-6">
       {/* Live USD Exchange Rate Bar */}
-      <DollarRateBanner />
+      <DollarRateBanner profile={profile} onOpenSettings={onOpenSettings} />
 
       {/* KPI Summary Cards */}
       <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">

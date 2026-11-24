@@ -656,6 +656,8 @@ const FX_SUPPORTED_CODES = [
   'COP',
 ] as const;
 
+type ServerFxProviderId = 'auto' | 'exchangerate-api' | 'fixer' | 'frankfurter';
+
 interface ArsQuotePair {
   buy: number;
   sell: number;
@@ -663,6 +665,7 @@ interface ArsQuotePair {
 
 interface FxUsdSnapshot {
   base: 'USD';
+  provider: ServerFxProviderId;
   rates: Record<string, number>;
   arsQuotes: {
     oficial?: ArsQuotePair;
@@ -671,15 +674,79 @@ interface FxUsdSnapshot {
   } | null;
   updatedAt: number;
   source: string;
+  configuredKeys: {
+    fixer: boolean;
+    exchangerateV6: boolean;
+  };
 }
 
 const FX_CACHE_TTL_MS = 3 * 60 * 1000;
-const FX_FORCE_COOLDOWN_MS = 15 * 1000;
-let fxCachedSnapshot: FxUsdSnapshot | null = null;
-let fxLastFetchAttemptMs = 0;
+const FX_FORCE_COOLDOWN_MS = 10 * 1000;
+const fxCachedByProvider = new Map<ServerFxProviderId, FxUsdSnapshot>();
+const fxLastFetchAttemptByProvider = new Map<ServerFxProviderId, number>();
 
-async function fetchGlobalUsdRates(): Promise<{ rates: Record<string, number>; source: string }> {
-  // Primary: open.er-api.com (no key required)
+function resolveServerFxProvider(raw: string | null): ServerFxProviderId {
+  const val = String(raw || '').trim().toLowerCase();
+  if (val === 'exchangerate-api' || val === 'fixer' || val === 'frankfurter') {
+    return val;
+  }
+  return 'auto';
+}
+
+function resolveEnvSecret(name: string): string {
+  const direct = process.env[name];
+  if (direct) return String(direct).trim().replace(/^['"]+|['"]+$/g, '').trim();
+  const targetUpper = name.toUpperCase();
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.trim().toUpperCase() === targetUpper && v) {
+      return String(v).trim().replace(/^['"]+|['"]+$/g, '').trim();
+    }
+  }
+  return '';
+}
+
+function normalizeUsdRatesMap(rawMap: Record<string, unknown>, baseCode = 'USD'): Record<string, number> {
+  const baseUpper = baseCode.toUpperCase();
+  const usdInBase = baseUpper === 'USD' ? 1 : Number(rawMap.USD);
+  if (!Number.isFinite(usdInBase) || usdInBase <= 0) {
+    return {};
+  }
+  const rates: Record<string, number> = { USD: 1 };
+  for (const code of FX_SUPPORTED_CODES) {
+    if (code === 'USD') continue;
+    const rawVal = code === baseUpper ? 1 : Number(rawMap[code]);
+    if (Number.isFinite(rawVal) && rawVal > 0) {
+      rates[code] = rawVal / usdInBase;
+    }
+  }
+  return rates;
+}
+
+async function fetchFromExchangeRateApi(): Promise<{ rates: Record<string, number>; source: string } | null> {
+  const apiKey = resolveEnvSecret('EXCHANGERATE_API_KEY');
+  if (apiKey) {
+    try {
+      const v6Res = await fetch(
+        `https://v6.exchangerate-api.com/v6/${encodeURIComponent(apiKey)}/latest/USD`,
+        { signal: AbortSignal.timeout(4500), headers: { Accept: 'application/json' } }
+      );
+      if (v6Res.ok) {
+        const json = (await v6Res.json()) as {
+          result?: string;
+          conversion_rates?: Record<string, unknown>;
+        };
+        if (json?.conversion_rates && typeof json.conversion_rates === 'object') {
+          const rates = normalizeUsdRatesMap(json.conversion_rates, 'USD');
+          if (Object.keys(rates).length > 2) {
+            return { rates, source: 'exchangerate-api.com (v6)' };
+          }
+        }
+      }
+    } catch {
+      // Fall back to open ExchangeRate-API endpoint
+    }
+  }
+
   try {
     const res = await fetch('https://open.er-api.com/v6/latest/USD', {
       signal: AbortSignal.timeout(4500),
@@ -687,52 +754,158 @@ async function fetchGlobalUsdRates(): Promise<{ rates: Record<string, number>; s
     });
     if (res.ok) {
       const json = (await res.json()) as {
-        result?: string;
         rates?: Record<string, unknown>;
       };
-      if (json && json.rates && typeof json.rates === 'object') {
-        const rates: Record<string, number> = { USD: 1 };
-        for (const code of FX_SUPPORTED_CODES) {
-          const val = Number(json.rates[code]);
-          if (Number.isFinite(val) && val > 0) {
-            rates[code] = val;
-          }
-        }
+      if (json?.rates && typeof json.rates === 'object') {
+        const rates = normalizeUsdRatesMap(json.rates, 'USD');
         if (Object.keys(rates).length > 2) {
           return { rates, source: 'open.er-api.com' };
         }
       }
     }
   } catch {
-    // Fall through to secondary provider
+    // Fall through
   }
+  return null;
+}
 
-  // Fallback: fawazahmed0 currency-api on jsDelivr
-  const fallbackRes = await fetch(
-    'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json',
-    {
+async function fetchFromCurrencyApi(): Promise<{ rates: Record<string, number>; source: string } | null> {
+  try {
+    const fallbackRes = await fetch(
+      'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json',
+      {
+        signal: AbortSignal.timeout(4500),
+        headers: { Accept: 'application/json' },
+      }
+    );
+    if (!fallbackRes.ok) return null;
+    const fallbackJson = (await fallbackRes.json()) as {
+      usd?: Record<string, unknown>;
+    };
+    const usdMap = fallbackJson?.usd;
+    if (!usdMap || typeof usdMap !== 'object') return null;
+    const rates: Record<string, number> = { USD: 1 };
+    for (const code of FX_SUPPORTED_CODES) {
+      const val = Number(usdMap[code.toLowerCase()]);
+      if (Number.isFinite(val) && val > 0) {
+        rates[code] = val;
+      }
+    }
+    return Object.keys(rates).length > 2 ? { rates, source: 'currency-api' } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchFromFrankfurter(): Promise<{ rates: Record<string, number>; source: string } | null> {
+  try {
+    const res = await fetch('https://api.frankfurter.app/latest?from=USD', {
       signal: AbortSignal.timeout(4500),
       headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      base?: string;
+      rates?: Record<string, unknown>;
+    };
+    if (!json?.rates || typeof json.rates !== 'object') return null;
+    const rates = normalizeUsdRatesMap({ USD: 1, ...json.rates }, 'USD');
+    return Object.keys(rates).length >= 2 ? { rates, source: 'frankfurter.app (BCE)' } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchFromFixerIo(): Promise<{ rates: Record<string, number>; source: string } | null> {
+  const apiKey = resolveEnvSecret('FIXER_API_KEY');
+  if (!apiKey) return null;
+  try {
+    const symbols = FX_SUPPORTED_CODES.join(',');
+    const res = await fetch(
+      `https://data.fixer.io/api/latest?access_key=${encodeURIComponent(apiKey)}&symbols=${encodeURIComponent(symbols)}`,
+      {
+        signal: AbortSignal.timeout(4500),
+        headers: { Accept: 'application/json' },
+      }
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      success?: boolean;
+      base?: string;
+      rates?: Record<string, unknown>;
+    };
+    if (!json?.success || !json.rates || typeof json.rates !== 'object') return null;
+    const rates = normalizeUsdRatesMap(json.rates, String(json.base || 'EUR'));
+    return Object.keys(rates).length > 2 ? { rates, source: 'fixer.io' } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchGlobalUsdRates(
+  provider: ServerFxProviderId
+): Promise<{ rates: Record<string, number>; source: string }> {
+  if (provider === 'fixer') {
+    const fixerRes = await fetchFromFixerIo();
+    if (fixerRes) return fixerRes;
+    const [frankfurterRes, erRes] = await Promise.all([
+      fetchFromFrankfurter(),
+      fetchFromExchangeRateApi(),
+    ]);
+    if (frankfurterRes || erRes) {
+      const merged: Record<string, number> = {
+        ...(erRes?.rates || {}),
+        ...(frankfurterRes?.rates || {}),
+        USD: 1,
+      };
+      const sourceLabel = frankfurterRes
+        ? erRes
+          ? `${frankfurterRes.source} + ${erRes.source}`
+          : frankfurterRes.source
+        : erRes!.source;
+      return { rates: merged, source: sourceLabel };
     }
-  );
-  if (!fallbackRes.ok) {
-    throw new Error(`No se pudieron obtener cotizaciones (HTTP ${fallbackRes.status}).`);
   }
-  const fallbackJson = (await fallbackRes.json()) as {
-    usd?: Record<string, unknown>;
-  };
-  const usdMap = fallbackJson?.usd;
-  if (!usdMap || typeof usdMap !== 'object') {
-    throw new Error('Respuesta de cotizaciones inválida.');
+
+  if (provider === 'frankfurter') {
+    const [frankfurterRes, erRes] = await Promise.all([
+      fetchFromFrankfurter(),
+      fetchFromExchangeRateApi(),
+    ]);
+    if (frankfurterRes) {
+      const merged: Record<string, number> = {
+        ...(erRes?.rates || {}),
+        ...frankfurterRes.rates,
+        USD: 1,
+      };
+      return {
+        rates: merged,
+        source: erRes ? `${frankfurterRes.source} + ${erRes.source}` : frankfurterRes.source,
+      };
+    }
+    if (erRes) return erRes;
   }
-  const rates: Record<string, number> = { USD: 1 };
-  for (const code of FX_SUPPORTED_CODES) {
-    const val = Number(usdMap[code.toLowerCase()]);
-    if (Number.isFinite(val) && val > 0) {
-      rates[code] = val;
+
+  if (provider === 'exchangerate-api' || provider === 'auto') {
+    const erRes = await fetchFromExchangeRateApi();
+    if (erRes) return erRes;
+    const frankfurterRes = await fetchFromFrankfurter();
+    const currencyApiRes = await fetchFromCurrencyApi();
+    if (currencyApiRes || frankfurterRes) {
+      return {
+        rates: {
+          ...(currencyApiRes?.rates || {}),
+          ...(frankfurterRes?.rates || {}),
+          USD: 1,
+        },
+        source: currencyApiRes?.source || frankfurterRes!.source,
+      };
     }
   }
-  return { rates, source: 'currency-api' };
+
+  const finalFallback = await fetchFromCurrencyApi();
+  if (finalFallback) return finalFallback;
+  throw new Error('No se pudieron obtener cotizaciones desde los proveedores externos.');
 }
 
 async function fetchArgentinaDolares(): Promise<FxUsdSnapshot['arsQuotes']> {
@@ -765,22 +938,28 @@ async function fetchArgentinaDolares(): Promise<FxUsdSnapshot['arsQuotes']> {
   }
 }
 
-async function getUsdSnapshot(forceRefresh = false): Promise<FxUsdSnapshot> {
+async function getUsdSnapshot(
+  forceRefresh = false,
+  provider: ServerFxProviderId = 'auto'
+): Promise<FxUsdSnapshot> {
   const now = Date.now();
-  if (fxCachedSnapshot) {
-    const age = now - fxCachedSnapshot.updatedAt;
+  const cached = fxCachedByProvider.get(provider);
+  const lastAttempt = fxLastFetchAttemptByProvider.get(provider) ?? 0;
+
+  if (cached) {
+    const age = now - cached.updatedAt;
     if (!forceRefresh && age < FX_CACHE_TTL_MS) {
-      return fxCachedSnapshot;
+      return cached;
     }
-    if (forceRefresh && now - fxLastFetchAttemptMs < FX_FORCE_COOLDOWN_MS) {
-      return fxCachedSnapshot;
+    if (forceRefresh && now - lastAttempt < FX_FORCE_COOLDOWN_MS) {
+      return cached;
     }
   }
 
-  fxLastFetchAttemptMs = now;
+  fxLastFetchAttemptByProvider.set(provider, now);
   try {
     const [globalResult, arsQuotes] = await Promise.all([
-      fetchGlobalUsdRates(),
+      fetchGlobalUsdRates(provider),
       fetchArgentinaDolares(),
     ]);
     const rates = { ...globalResult.rates };
@@ -789,16 +968,21 @@ async function getUsdSnapshot(forceRefresh = false): Promise<FxUsdSnapshot> {
     }
     const snapshot: FxUsdSnapshot = {
       base: 'USD',
+      provider,
       rates,
       arsQuotes,
       updatedAt: Date.now(),
       source: arsQuotes ? `${globalResult.source} + dolarapi` : globalResult.source,
+      configuredKeys: {
+        fixer: Boolean(resolveEnvSecret('FIXER_API_KEY')),
+        exchangerateV6: Boolean(resolveEnvSecret('EXCHANGERATE_API_KEY')),
+      },
     };
-    fxCachedSnapshot = snapshot;
+    fxCachedByProvider.set(provider, snapshot);
     return snapshot;
   } catch (err) {
-    if (fxCachedSnapshot) {
-      return fxCachedSnapshot;
+    if (cached) {
+      return cached;
     }
     throw err;
   }
@@ -827,8 +1011,9 @@ export async function handleApiRequest(
     const rawUrl = req.originalUrl || req.url || '/';
     const parsedUrl = new URL(rawUrl, 'http://localhost');
     const force = parsedUrl.searchParams.get('force') === '1';
+    const provider = resolveServerFxProvider(parsedUrl.searchParams.get('provider'));
     try {
-      const snapshot = await getUsdSnapshot(force);
+      const snapshot = await getUsdSnapshot(force, provider);
       sendJson(res, 200, {
         ok: true,
         ...snapshot,

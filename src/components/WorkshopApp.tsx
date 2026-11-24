@@ -34,6 +34,7 @@ import {
 } from '../lib/db';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useGlobalShortcuts } from '../hooks/useGlobalShortcuts';
+import { useFxAutoSyncService } from '../hooks/useFxAutoSyncService';
 import { useActiveCurrency } from '../utils/currency';
 import { useI18n } from '../utils/i18n';
 import {
@@ -231,6 +232,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   const { notify } = useToast();
   const { tr } = useI18n();
   useActiveCurrency();
+  useFxAutoSyncService(profile);
   const isMac = useMemo(() => isMacPlatform(), []);
 
   const navGroups = useMemo<Array<{ title: string; items: NavItem[] }>>(
@@ -1229,6 +1231,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                   products={products}
                   sales={sales}
                   purchases={purchases}
+                  profile={profile}
                   onNavigate={navigateTo}
                   onNewRepair={() => openNewRepairFlow()}
                   onNewClient={() => {
@@ -1241,6 +1244,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                   }}
                   onSelectRepair={(r) => setSelectedRepairId(r.id)}
                   onSelectClient={(c) => setSelectedClientId(c.id)}
+                  onOpenSettings={() => setShowBrandSettings(true)}
                 />
               )}
 

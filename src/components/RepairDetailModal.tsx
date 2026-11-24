@@ -129,6 +129,7 @@ import { getTranslatedStatusLabel, useI18n } from '../utils/i18n';
 import { ModalShell } from './ModalShell';
 import { PatternLock } from './PatternLock';
 import { RepairPrintDocuments } from './RepairPrintDocuments';
+import { RepairStatusTimeline } from './RepairStatusTimeline';
 import { useToast } from './ToastProvider';
 
 interface RepairDetailModalProps {
@@ -1835,6 +1836,8 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
               )}
             </div>
 
+            <RepairStatusTimeline key={repair.id} repair={repair} timeline={detailMeta.timeline} />
+
             {/* Presupuesto online, Plantillas WhatsApp y Garantía */}
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
@@ -2348,41 +2351,6 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                     {tr('PIN / Clave:', 'PIN / Password:', 'PIN / Senha:')} {repair.securityPin}
                   </div>
                 )}
-              </div>
-            )}
-
-            {detailMeta.timeline.length > 0 && (
-              <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
-                <h4 className="mb-3 flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400">
-                  <Clock className="h-3.5 w-3.5" />
-                  {tr('Historial de avances', 'Progress timeline', 'Histórico de progresso')}
-                </h4>
-                <div className="space-y-2.5">
-                  {[...detailMeta.timeline].reverse().map((ev, idx) => (
-                    <div key={ev.id} className="flex items-start gap-2.5 text-xs">
-                      <span
-                        className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
-                          idx === 0 ? 'bg-[#0072BB] dark:bg-sky-400' : 'bg-slate-300 dark:bg-slate-600'
-                        }`}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="font-semibold text-slate-900 dark:text-white">
-                            {ev.label}
-                          </span>
-                          <span className="font-mono-num text-[11px] text-slate-400">
-                            {formatDateShort(ev.at)}
-                          </span>
-                        </div>
-                        {ev.note && (
-                          <p className="mt-0.5 text-[11px] text-slate-600 dark:text-slate-300">
-                            {ev.note}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
               </div>
             )}
 

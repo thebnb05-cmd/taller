@@ -19,6 +19,15 @@ import {
   type MercadoPagoConfig,
 } from './mercadoPago';
 import type { SignedSubscriptionRecord } from './subscription';
+import {
+  DEFAULT_FX_INTERVAL_MINUTES,
+  DEFAULT_FX_PROVIDER,
+  sanitizeFxIntervalMinutes,
+  sanitizeFxProvider,
+  type ArsQuoteSource,
+  type FxProviderId,
+  type FxSyncIntervalMinutes,
+} from './fxRates';
 
 export interface WorkshopReceiptMeta {
   subtitle: string;
@@ -31,6 +40,10 @@ export interface WorkshopReceiptMeta {
   language: LanguageCode;
   hasExplicitLanguage?: boolean;
   secondaryCurrencies: SecondaryCurrencyConfig[];
+  fxAutoSync?: boolean;
+  fxArsSource?: ArsQuoteSource;
+  fxProvider?: FxProviderId;
+  fxIntervalMinutes?: FxSyncIntervalMinutes;
   techniciansEnabled: boolean;
   technicians: string[];
   mercadoPago?: MercadoPagoConfig;
@@ -90,6 +103,10 @@ export function parseWorkshopMeta(
         c: string;
         l: string;
         sc: unknown;
+        fa: boolean;
+        fs: string;
+        fp: string;
+        fi: number;
         te: boolean;
         ts: unknown;
         mp: Partial<{
@@ -105,6 +122,12 @@ export function parseWorkshopMeta(
       const currency = sanitizeCurrencyCode(parsed.c);
       const hasExplicitLanguage = isValidLanguageCode(parsed.l);
       const language = sanitizeLanguageCode(parsed.l);
+      const fxArsSource: ArsQuoteSource =
+        parsed.fs === 'oficial' || parsed.fs === 'mep' || parsed.fs === 'blue'
+          ? parsed.fs
+          : 'blue';
+      const fxProvider = sanitizeFxProvider(parsed.fp);
+      const fxIntervalMinutes = sanitizeFxIntervalMinutes(parsed.fi);
       const mp =
         parsed.mp && typeof parsed.mp === 'object'
           ? sanitizeMercadoPagoConfig({
@@ -136,6 +159,10 @@ export function parseWorkshopMeta(
         language,
         hasExplicitLanguage,
         secondaryCurrencies: sanitizeSecondaryCurrencies(parsed.sc, currency),
+        fxAutoSync: Boolean(parsed.fa),
+        fxArsSource,
+        fxProvider,
+        fxIntervalMinutes,
         techniciansEnabled: Boolean(parsed.te),
         technicians: sanitizeTechnicianList(parsed.ts),
         ...(hasMercadoPagoFields(mp) ? { mercadoPago: mp } : {}),
@@ -157,6 +184,10 @@ export function parseWorkshopMeta(
     language: DEFAULT_LANGUAGE,
     hasExplicitLanguage: false,
     secondaryCurrencies: [],
+    fxAutoSync: false,
+    fxArsSource: 'blue',
+    fxProvider: DEFAULT_FX_PROVIDER,
+    fxIntervalMinutes: DEFAULT_FX_INTERVAL_MINUTES,
     techniciansEnabled: false,
     technicians: [],
   };
@@ -172,6 +203,10 @@ export function serializeWorkshopSubtitle(meta: {
   currency?: CurrencyCode;
   language?: LanguageCode;
   secondaryCurrencies?: SecondaryCurrencyConfig[];
+  fxAutoSync?: boolean;
+  fxArsSource?: ArsQuoteSource;
+  fxProvider?: FxProviderId;
+  fxIntervalMinutes?: FxSyncIntervalMinutes;
   techniciansEnabled?: boolean;
   technicians?: string[];
   mercadoPago?: MercadoPagoConfig;
@@ -189,6 +224,11 @@ export function serializeWorkshopSubtitle(meta: {
     c: item.code,
     r: item.rate,
   }));
+  const fa = Boolean(meta.fxAutoSync);
+  const fs: ArsQuoteSource =
+    meta.fxArsSource === 'oficial' || meta.fxArsSource === 'mep' ? meta.fxArsSource : 'blue';
+  const fp = sanitizeFxProvider(meta.fxProvider);
+  const fi = sanitizeFxIntervalMinutes(meta.fxIntervalMinutes);
   const te = Boolean(meta.techniciansEnabled);
   const ts = sanitizeTechnicianList(meta.technicians);
   const cleanMp = meta.mercadoPago ? sanitizeMercadoPagoConfig(meta.mercadoPago) : undefined;
@@ -207,6 +247,10 @@ export function serializeWorkshopSubtitle(meta: {
     c === DEFAULT_CURRENCY &&
     l === DEFAULT_LANGUAGE &&
     sc.length === 0 &&
+    !fa &&
+    fs === 'blue' &&
+    fp === DEFAULT_FX_PROVIDER &&
+    fi === DEFAULT_FX_INTERVAL_MINUTES &&
     !te &&
     ts.length === 0 &&
     !includeMp &&
@@ -225,6 +269,10 @@ export function serializeWorkshopSubtitle(meta: {
     ...(c !== DEFAULT_CURRENCY ? { c } : {}),
     ...(l !== DEFAULT_LANGUAGE ? { l } : {}),
     ...(sc.length > 0 ? { sc } : {}),
+    ...(fa ? { fa: true } : {}),
+    ...(fs !== 'blue' ? { fs } : {}),
+    ...(fp !== DEFAULT_FX_PROVIDER ? { fp } : {}),
+    ...(fi !== DEFAULT_FX_INTERVAL_MINUTES ? { fi } : {}),
     ...(te ? { te: true } : {}),
     ...(ts.length > 0 ? { ts } : {}),
     ...(includeMp && cleanMp
@@ -296,3 +344,35 @@ export async function saveSubscriptionToProfile(
     })
   );
 }
+
+export async function syncSecondaryCurrenciesToProfile(
+  profile: WorkshopProfile,
+  secondaryCurrencies: SecondaryCurrencyConfig[],
+  options?: {
+    fxAutoSync?: boolean;
+    fxArsSource?: ArsQuoteSource;
+    fxProvider?: FxProviderId;
+    fxIntervalMinutes?: FxSyncIntervalMinutes;
+  }
+): Promise<void> {
+  const currentMeta = parseWorkshopMeta(profile);
+  const safeSecondary = sanitizeSecondaryCurrencies(secondaryCurrencies, currentMeta.currency);
+  const encodedSubtitle = serializeWorkshopSubtitle({
+    ...currentMeta,
+    secondaryCurrencies: safeSecondary,
+    fxAutoSync: options?.fxAutoSync ?? currentMeta.fxAutoSync,
+    fxArsSource: options?.fxArsSource ?? currentMeta.fxArsSource,
+    fxProvider: options?.fxProvider ?? currentMeta.fxProvider,
+    fxIntervalMinutes: options?.fxIntervalMinutes ?? currentMeta.fxIntervalMinutes,
+  });
+
+  await updateRow(
+    'workshop_profiles',
+    profile.id,
+    stripUndefined({
+      subtitle: clampStr(encodedSubtitle, 8000),
+      updatedAt: new Date().toISOString(),
+    })
+  );
+}
+
