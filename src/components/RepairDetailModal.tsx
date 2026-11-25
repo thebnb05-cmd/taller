@@ -115,10 +115,13 @@ import {
   appendTimelineEntry,
   computeWarrantyInfo,
   createRepairMetaId,
+  loadSavedTransferQrIvaPct,
   mergeCheckoutPaymentLedger,
   mergeWorkDetailPublicMeta,
   parseRepairPaymentLedger,
   parseRepairPublicMeta,
+  saveTransferQrIvaPct,
+  TRANSFER_QR_IVA_PRESETS,
   type RepairPublicMeta,
 } from '../utils/repairMeta';
 import {
@@ -168,6 +171,8 @@ interface ActiveRepairMpOrder {
   companionPointApiFamily?: 'orders_v1' | 'legacy_qr' | 'legacy_intent';
   companionPointExternalReference?: string;
   companionPointWarning?: string;
+  ivaExtraBase?: number;
+  ivaPct?: number;
 }
 
 interface RepairDetailModalProps {
@@ -256,6 +261,8 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   const [mpBusy, setMpBusy] = useState(false);
   const [showQrOnPointSmart, setShowQrOnPointSmart] = useState(true);
   const [mpChargeTarget, setMpChargeTarget] = useState<'full' | 'partial'>('full');
+  const [applyTransferIva, setApplyTransferIva] = useState(true);
+  const [transferIvaPct, setTransferIvaPct] = useState(() => String(loadSavedTransferQrIvaPct()));
   const handledMpOrdersRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -278,6 +285,9 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     setLightboxImage(null);
     setPartSearch('');
     setSyncPartPrice(true);
+    const openMeta = parseRepairPublicMeta(repair.workDetail);
+    setApplyTransferIva(!(openMeta.transferQrIvaPct && openMeta.transferQrIvaPct > 0));
+    setTransferIvaPct(String(loadSavedTransferQrIvaPct()));
   }, [repair?.id, initialTab]);
 
   useEffect(() => {
@@ -376,6 +386,17 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   const currentPendingBalance = repair
     ? Math.max(0, Number(repair.price || 0) - Number(repair.deposit || 0))
     : 0;
+  const parsedDetailIvaPct = Math.max(
+    0,
+    Math.min(100, parseSafePositiveNumber(transferIvaPct, 0))
+  );
+  const currentTransferQrTotal =
+    paymentMethod === 'transferencia' &&
+    applyTransferIva &&
+    currentPendingBalance > 0 &&
+    parsedDetailIvaPct > 0
+      ? Math.round(currentPendingBalance * (1 + parsedDetailIvaPct / 100) * 100) / 100
+      : currentPendingBalance;
 
   useEffect(() => {
     if (!repair || paymentMethod !== 'transferencia' || transferConfig.qrImageDataUrl) {
@@ -387,7 +408,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       profile?.brandName || 'TH3 BNB',
       repair.code,
       repair.clientName,
-      currentPendingBalance
+      currentTransferQrTotal
     );
     if (!payload) {
       setQrDataUrl('');
@@ -408,7 +429,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [repair, paymentMethod, transferConfig, profile?.brandName, currentPendingBalance]);
+  }, [repair, paymentMethod, transferConfig, profile?.brandName, currentTransferQrTotal]);
 
   const commitApprovedMpPayment = useCallback(
     async (orderSnapshot: ActiveRepairMpOrder, paidViaCompanionPoint: boolean) => {
@@ -422,10 +443,12 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
         orderSnapshot.mode === 'point' ? 'tarjeta' : 'transferencia';
       const paidAmt = Math.max(0, Math.round(Number(orderSnapshot.amount || 0) * 100) / 100);
       const budget = Math.max(0, Number(repair.price || 0));
+      const ivaExtra = Math.max(0, Math.round(Number(orderSnapshot.ivaExtraBase || 0) * 100) / 100);
+      const nextBudget = Math.round((budget + ivaExtra) * 100) / 100;
       const prevDeposit = Math.max(0, Number(repair.deposit || 0));
       const rawNextDeposit = Math.round((prevDeposit + paidAmt) * 100) / 100;
-      const isFullNow = budget > 0 ? rawNextDeposit >= budget - 0.01 : true;
-      const nextDeposit = budget > 0 && isFullNow ? budget : rawNextDeposit;
+      const isFullNow = nextBudget > 0 ? rawNextDeposit >= nextBudget - 0.01 : true;
+      const nextDeposit = nextBudget > 0 && isFullNow ? nextBudget : rawNextDeposit;
       const nextBaseStatus: 'pendiente' | 'parcial' | 'pagado' = isFullNow ? 'pagado' : 'parcial';
       const nowIso = new Date().toISOString();
 
@@ -434,6 +457,10 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
         : orderSnapshot.mode === 'point'
           ? 'Cobro aprobado Point Smart [Point MP]'
           : 'Cobro aprobado QR MP [QR MP]';
+      const ivaSuffix =
+        ivaExtra > 0 && orderSnapshot.ivaPct
+          ? ` (incl. IVA Transf./QR ${orderSnapshot.ivaPct}%)`
+          : '';
 
       if (paidAmt > 0 && repair.ownerId) {
         recordRecoveredPayment({
@@ -443,7 +470,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
           method: methodForOrder,
           mpChannel,
           amount: paidAmt,
-          totalAmount: budget || paidAmt,
+          totalAmount: nextBudget || paidAmt,
           clientName: repair.clientName || 'Cliente',
           title: `${repair.code} · ${repair.brand} ${repair.model}`,
           subtitle: paidViaCompanionPoint
@@ -489,11 +516,13 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
           mpChannel,
           mpOrderId: orderSnapshot.orderId,
           mpExternalReference: orderSnapshot.externalReference,
-          note: isFullNow
-            ? prevDeposit > 0
-              ? `Cancelación de saldo · ${channelNote}`
-              : `Pago total · ${channelNote}`
-            : `Seña / Abono · ${channelNote}`,
+          note: `${
+            isFullNow
+              ? prevDeposit > 0
+                ? `Cancelación de saldo · ${channelNote}`
+                : `Pago total · ${channelNote}`
+              : `Seña / Abono · ${channelNote}`
+          }${ivaSuffix}`,
         },
       ]);
 
@@ -510,6 +539,16 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
             : undefined,
         technician: parsedCurr.technician || undefined,
       });
+
+      const nextWorkDetail =
+        ivaExtra > 0
+          ? mergeWorkDetailPublicMeta(repair.workDetail, (prev) => ({
+              ...prev,
+              transferQrIvaPct: orderSnapshot.ivaPct || prev.transferQrIvaPct,
+              transferQrIvaAmount:
+                Math.round(((prev.transferQrIvaAmount || 0) + ivaExtra) * 100) / 100,
+            }))
+          : undefined;
 
       setMpOrder((prev) =>
         prev
@@ -538,21 +577,33 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       );
 
       try {
-        await updateRow('repairs', repair.id, {
-          deposit: nextDeposit,
-          paidAmount: nextDeposit,
-          paymentStatus: nextPaymentStatus,
-          checkoutState: nextCheckoutState,
-          updatedAt: nowIso,
-        });
+        await updateRow(
+          'repairs',
+          repair.id,
+          stripUndefined({
+            price: nextBudget,
+            deposit: nextDeposit,
+            paidAmount: nextDeposit,
+            paymentStatus: nextPaymentStatus,
+            checkoutState: nextCheckoutState,
+            workDetail: nextWorkDetail,
+            updatedAt: nowIso,
+          })
+        );
 
         if (repair.trackingCode) {
           const ticket = await fetchSingleById<{ id: string }>('public_tickets', repair.trackingCode);
           if (ticket) {
-            await updateRow('public_tickets', repair.trackingCode, {
-              deposit: nextDeposit,
-              updatedAt: nowIso,
-            });
+            await updateRow(
+              'public_tickets',
+              repair.trackingCode,
+              stripUndefined({
+                price: nextBudget,
+                deposit: nextDeposit,
+                workDetail: nextWorkDetail,
+                updatedAt: nowIso,
+              })
+            );
           }
         }
 
@@ -570,6 +621,13 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
           parsedCurr.currency && parsedCurr.currency !== baseCurrency && parsedCurr.rate
             ? parsedCurr.rate
             : 1;
+        setPrice(
+          String(
+            localRate !== 1
+              ? Math.round(convertFromBaseCurrency(nextBudget, localRate) * 100) / 100
+              : nextBudget
+          )
+        );
         setDeposit(
           String(
             localRate !== 1
@@ -604,7 +662,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
             method: methodForOrder,
             mpChannel,
             amount: paidAmt,
-            totalAmount: budget || paidAmt,
+            totalAmount: nextBudget || paidAmt,
             clientName: repair.clientName || 'Cliente',
             title: `${repair.code} · ${repair.brand} ${repair.model}`,
             subtitle: `${channelNote} (error al guardar en nube)`,
@@ -1299,6 +1357,15 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     notify('Enlace agregado. Tocá "Enviar al seguimiento" o "Guardar cambios".');
   };
 
+  const fullTransferIvaExtra =
+    paymentMethod === 'transferencia' &&
+    applyTransferIva &&
+    pendingBalance > 0 &&
+    parsedDetailIvaPct > 0
+      ? Math.round(pendingBalance * (parsedDetailIvaPct / 100) * 100) / 100
+      : 0;
+  const fullTransferChargeTotal = Math.round((pendingBalance + fullTransferIvaExtra) * 100) / 100;
+
   const handleRegisterFullPayment = async () => {
     const budget = parseSafePositiveNumber(repair.price, 0);
     if (budget <= 0) {
@@ -1306,17 +1373,30 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       return;
     }
     setPaying(true);
+    const ivaExtra = paymentMethod === 'transferencia' ? fullTransferIvaExtra : 0;
+    const nextBudget = Math.round((budget + ivaExtra) * 100) / 100;
+    setPrice(
+      String(
+        isEditSecondary
+          ? Math.round(convertFromBaseCurrency(nextBudget, editRate) * 100) / 100
+          : nextBudget
+      )
+    );
     setDeposit(
       String(
         isEditSecondary
-          ? Math.round(convertFromBaseCurrency(budget, editRate) * 100) / 100
-          : budget
+          ? Math.round(convertFromBaseCurrency(nextBudget, editRate) * 100) / 100
+          : nextBudget
       )
     );
     const nowIso = new Date().toISOString();
     const prevDeposit = parseSafePositiveNumber(repair.deposit, 0);
-    const paidNow = Math.max(0, Math.round((budget - prevDeposit) * 100) / 100) || budget;
+    const paidNow = Math.max(0, Math.round((nextBudget - prevDeposit) * 100) / 100) || nextBudget;
     const prevLedger = parseRepairPaymentLedger(repair.checkoutState);
+    const ivaNoteSuffix =
+      ivaExtra > 0 && parsedDetailIvaPct > 0
+        ? ` (incl. IVA Transf./QR ${parsedDetailIvaPct}%)`
+        : '';
     const nextCheckoutState = mergeCheckoutPaymentLedger(repair.checkoutState, [
       ...prevLedger,
       {
@@ -1324,7 +1404,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
         amount: paidNow,
         method: paymentMethod,
         date: nowIso,
-        note: prevDeposit > 0 ? 'Cancelación de saldo' : 'Pago total',
+        note: `${prevDeposit > 0 ? 'Cancelación de saldo' : 'Pago total'}${ivaNoteSuffix}`,
       },
     ]);
     const nextPaymentStatus = serializeRepairPaymentStatus({
@@ -1340,22 +1420,43 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
           : undefined,
       technician: paymentInfo.technician || undefined,
     });
+    const nextWorkDetail =
+      ivaExtra > 0
+        ? mergeWorkDetailPublicMeta(repair.workDetail, (prev) => ({
+            ...prev,
+            transferQrIvaPct: parsedDetailIvaPct || prev.transferQrIvaPct,
+            transferQrIvaAmount:
+              Math.round(((prev.transferQrIvaAmount || 0) + ivaExtra) * 100) / 100,
+          }))
+        : undefined;
     try {
-      await updateRow('repairs', repair.id, {
-        deposit: budget,
-        paidAmount: budget,
-        paymentStatus: nextPaymentStatus,
-        checkoutState: nextCheckoutState,
-        updatedAt: nowIso,
-      });
+      await updateRow(
+        'repairs',
+        repair.id,
+        stripUndefined({
+          price: nextBudget,
+          deposit: nextBudget,
+          paidAmount: nextBudget,
+          paymentStatus: nextPaymentStatus,
+          checkoutState: nextCheckoutState,
+          workDetail: nextWorkDetail,
+          updatedAt: nowIso,
+        })
+      );
 
       if (repair.trackingCode) {
         const ticket = await fetchSingleById<{ id: string }>('public_tickets', repair.trackingCode);
         if (ticket) {
-          await updateRow('public_tickets', repair.trackingCode, {
-            deposit: budget,
-            updatedAt: nowIso,
-          });
+          await updateRow(
+            'public_tickets',
+            repair.trackingCode,
+            stripUndefined({
+              price: nextBudget,
+              deposit: nextBudget,
+              workDetail: nextWorkDetail,
+              updatedAt: nowIso,
+            })
+          );
         }
       }
 
@@ -1371,7 +1472,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
           source: 'reparacion',
           method: paymentMethod,
           amount: paidNow,
-          totalAmount: budget,
+          totalAmount: nextBudget,
           clientName: repair.clientName || 'Cliente',
           title: `${repair.code} · ${repair.brand} ${repair.model}`,
           subtitle: prevDeposit > 0 ? 'Cancelación de saldo (error al guardar en nube)' : 'Pago total (error al guardar en nube)',
@@ -1499,11 +1600,22 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   const hasValidPartialForMp =
     partialBaseEquivalent > 0 && partialBaseEquivalent < pendingBalance;
   const effectiveMpTarget = hasValidPartialForMp ? mpChargeTarget : 'full';
-  const mpChargeAmount = Math.max(
+  const mpBaseChargeAmount = Math.max(
     0,
     Math.round(
       (effectiveMpTarget === 'partial' ? partialBaseEquivalent : pendingBalance) * 100
     ) / 100
+  );
+  const mpTransferIvaExtra =
+    paymentMethod === 'transferencia' &&
+    applyTransferIva &&
+    mpBaseChargeAmount > 0 &&
+    parsedDetailIvaPct > 0
+      ? Math.round(mpBaseChargeAmount * (parsedDetailIvaPct / 100) * 100) / 100
+      : 0;
+  const mpChargeAmount = Math.max(
+    0,
+    Math.round((mpBaseChargeAmount + mpTransferIvaExtra) * 100) / 100
   );
 
   const handleCreateMercadoPagoOrder = async (mode: 'qr' | 'point') => {
@@ -1654,6 +1766,9 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                 `Order sent to ${mpConfig.terminalId} · Waiting for card on Point...`,
                 `Pedido enviado para ${mpConfig.terminalId} · Aguardando cartão no Point...`
               ),
+        ...(mode === 'qr' && mpTransferIvaExtra > 0
+          ? { ivaExtraBase: mpTransferIvaExtra, ivaPct: parsedDetailIvaPct }
+          : {}),
         ...(res.companionPointOrderId ? { companionPointOrderId: res.companionPointOrderId } : {}),
         ...(res.companionPointApiFamily
           ? { companionPointApiFamily: res.companionPointApiFamily }
@@ -2085,51 +2200,75 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-4 text-right">
-                  <div>
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                      {tr('Presupuesto', 'Estimate', 'Orçamento')}
-                    </div>
-                    <div className="font-mono-num text-sm font-bold text-slate-900 dark:text-white">
-                      {formatCurrency(repair.price, baseCurrency)}
-                    </div>
-                    {hasForeignDisplay && savedCurrency && savedRate && (
-                      <div className="font-mono-num text-[10px] font-semibold text-[#0072BB] dark:text-sky-300">
-                        {formatCurrency(convertFromBaseCurrency(repair.price, savedRate), savedCurrency)}
+                <div className="space-y-1.5 text-right">
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {tr('Presupuesto', 'Estimate', 'Orçamento')}
                       </div>
-                    )}
-                  </div>
-                  <div>
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                      {tr('Seña', 'Deposit', 'Sinal')}
+                      <div className="font-mono-num text-sm font-bold text-slate-900 dark:text-white">
+                        {formatCurrency(repair.price, baseCurrency)}
+                      </div>
+                      {detailMeta.transferQrIvaPct && detailMeta.transferQrIvaPct > 0 && (
+                        <div className="text-[10px] font-semibold text-[#0072BB] dark:text-sky-300">
+                          {tr(
+                            `Incl. IVA Transf./QR (${detailMeta.transferQrIvaPct}%)`,
+                            `Incl. Transfer/QR VAT (${detailMeta.transferQrIvaPct}%)`,
+                            `Incl. IVA Transf./QR (${detailMeta.transferQrIvaPct}%)`
+                          )}
+                        </div>
+                      )}
+                      {hasForeignDisplay && savedCurrency && savedRate && (
+                        <div className="font-mono-num text-[10px] font-semibold text-[#0072BB] dark:text-sky-300">
+                          {formatCurrency(convertFromBaseCurrency(repair.price, savedRate), savedCurrency)}
+                        </div>
+                      )}
                     </div>
-                    <div className="font-mono-num text-sm font-bold text-emerald-600 dark:text-emerald-400">
-                      {formatCurrency(repair.deposit, baseCurrency)}
+                    <div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {tr('Seña', 'Deposit', 'Sinal')}
+                      </div>
+                      <div className="font-mono-num text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                        {formatCurrency(repair.deposit, baseCurrency)}
+                      </div>
+                      {hasForeignDisplay && savedCurrency && savedRate && (
+                        <div className="font-mono-num text-[10px] font-semibold text-emerald-700/80 dark:text-emerald-300/80">
+                          {formatCurrency(
+                            convertFromBaseCurrency(repair.deposit, savedRate),
+                            savedCurrency
+                          )}
+                        </div>
+                      )}
                     </div>
-                    {hasForeignDisplay && savedCurrency && savedRate && (
-                      <div className="font-mono-num text-[10px] font-semibold text-emerald-700/80 dark:text-emerald-300/80">
+                    <div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {fullTransferIvaExtra > 0
+                          ? tr('Total c/ IVA', 'Total w/ VAT', 'Total c/ IVA')
+                          : tr('Pendiente', 'Balance due', 'Pendente')}
+                      </div>
+                      <div className="font-mono-num text-sm font-bold text-[#0072BB] dark:text-sky-400">
                         {formatCurrency(
-                          convertFromBaseCurrency(repair.deposit, savedRate),
-                          savedCurrency
+                          fullTransferIvaExtra > 0 ? fullTransferChargeTotal : pendingBalance,
+                          baseCurrency
                         )}
                       </div>
-                    )}
-                  </div>
-                  <div>
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                      {tr('Pendiente', 'Balance due', 'Pendente')}
+                      {fullTransferIvaExtra > 0 && (
+                        <div className="font-mono-num text-[10px] font-semibold text-sky-700 dark:text-sky-300">
+                          +{formatCurrency(fullTransferIvaExtra, baseCurrency)} IVA ({parsedDetailIvaPct}%)
+                        </div>
+                      )}
+                      {hasForeignDisplay && savedCurrency && savedRate && (
+                        <div className="font-mono-num text-[10px] font-semibold text-[#0072BB]/80 dark:text-sky-300/80">
+                          {formatCurrency(
+                            convertFromBaseCurrency(
+                              fullTransferIvaExtra > 0 ? fullTransferChargeTotal : pendingBalance,
+                              savedRate
+                            ),
+                            savedCurrency
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <div className="font-mono-num text-sm font-bold text-[#0072BB] dark:text-sky-400">
-                      {formatCurrency(pendingBalance, baseCurrency)}
-                    </div>
-                    {hasForeignDisplay && savedCurrency && savedRate && (
-                      <div className="font-mono-num text-[10px] font-semibold text-[#0072BB]/80 dark:text-sky-300/80">
-                        {formatCurrency(
-                          convertFromBaseCurrency(pendingBalance, savedRate),
-                          savedCurrency
-                        )}
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
@@ -2332,7 +2471,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                       brandName: profile?.brandName || 'TH3 BNB Servicio Técnico',
                       code: repair.code,
                       clientName: repair.clientName,
-                      amount: pendingBalance,
+                      amount: fullTransferChargeTotal,
                       currencyCode: baseCurrency,
                     });
                     const transferWaHref = cleanPhoneForWa
@@ -2341,6 +2480,97 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
 
                     return (
                       <div className="space-y-3 rounded-2xl border border-sky-200 bg-sky-50/70 p-3.5 dark:border-sky-900/60 dark:bg-sky-950/30">
+                        <div className="space-y-2 rounded-xl border border-sky-200/80 bg-white/90 px-3 py-2.5 dark:border-sky-900/60 dark:bg-slate-900/80">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-100">
+                              <input
+                                type="checkbox"
+                                checked={applyTransferIva}
+                                onChange={(e) => setApplyTransferIva(e.target.checked)}
+                                className="h-4 w-4 rounded border-slate-300 text-[#0072BB] focus:ring-[#0072BB]"
+                              />
+                              <span>
+                                {tr(
+                                  'Sumar IVA Transferencia / QR',
+                                  'Add Transfer / QR VAT',
+                                  'Adicionar IVA Transferência / QR'
+                                )}
+                              </span>
+                              <span className="rounded-md bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300">
+                                {tr('Solo Transf. / QR', 'Transfer / QR only', 'Só Transf. / QR')}
+                              </span>
+                            </label>
+
+                            {applyTransferIva && (
+                              <div className="flex flex-wrap items-center gap-1">
+                                {TRANSFER_QR_IVA_PRESETS.map((presetPct) => {
+                                  const isPresetActive =
+                                    Math.abs(parsedDetailIvaPct - presetPct) < 0.01;
+                                  return (
+                                    <button
+                                      key={presetPct}
+                                      type="button"
+                                      onClick={() => {
+                                        const saved = saveTransferQrIvaPct(presetPct);
+                                        setTransferIvaPct(String(saved));
+                                      }}
+                                      className={`h-7 rounded-lg border px-2 font-mono-num text-[11px] font-semibold transition ${
+                                        isPresetActive
+                                          ? 'border-[#0072BB] bg-[#0072BB] text-white'
+                                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                                      }`}
+                                    >
+                                      {presetPct === 6.5 ? '6.5% MP' : `${presetPct}%`}
+                                    </button>
+                                  );
+                                })}
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max="100"
+                                    step="0.1"
+                                    value={transferIvaPct}
+                                    onChange={(e) => {
+                                      setTransferIvaPct(e.target.value);
+                                      const num = Number(e.target.value);
+                                      if (Number.isFinite(num) && num > 0 && num <= 100) {
+                                        saveTransferQrIvaPct(num);
+                                      }
+                                    }}
+                                    aria-label={tr('Porcentaje IVA Transferencia / QR', 'Transfer / QR VAT %', 'Porcentagem IVA Transferência / QR')}
+                                    className="h-7 w-14 rounded-lg border border-slate-200 bg-white px-1.5 text-center font-mono-num text-xs font-semibold text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                                  />
+                                  <span className="text-xs font-bold text-slate-500">%</span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+                            <span>
+                              {detailMeta.transferQrIvaPct && detailMeta.transferQrIvaPct > 0
+                                ? tr(
+                                    `Nota: el presupuesto inicial ya incluía IVA Transf./QR (${detailMeta.transferQrIvaPct}%).`,
+                                    `Note: initial estimate already included Transfer/QR VAT (${detailMeta.transferQrIvaPct}%).`,
+                                    `Nota: o orçamento inicial já incluía IVA Transf./QR (${detailMeta.transferQrIvaPct}%).`
+                                  )
+                                : tr(
+                                    'Porcentaje semejante a Mercado Pago (solo para cobros por Transferencia / QR).',
+                                    'Mercado Pago equivalent percentage (for Transfer / QR only).',
+                                    'Porcentagem semelhante ao Mercado Pago (somente para Transferência / QR).'
+                                  )}
+                            </span>
+                            {applyTransferIva && fullTransferIvaExtra > 0 && (
+                              <span className="font-mono-num font-bold text-[#0072BB] dark:text-sky-300">
+                                {formatCurrency(pendingBalance, baseCurrency)} +{' '}
+                                {formatCurrency(fullTransferIvaExtra, baseCurrency)} IVA ={' '}
+                                {formatCurrency(fullTransferChargeTotal, baseCurrency)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
                         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-200/80 bg-white/85 px-3 py-2.5 dark:border-sky-900/60 dark:bg-slate-900/75">
                           <div className="flex items-center gap-2 text-xs">
                             <QrCode className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
@@ -2529,12 +2759,12 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                                 {tr('Cobro por transferencia', 'Transfer payment', 'Pagamento por transferência')}
                               </span>
                               <span className="font-mono-num text-sm font-extrabold text-[#0072BB] dark:text-sky-400">
-                                {formatCurrency(pendingBalance, baseCurrency)}
+                                {formatCurrency(fullTransferChargeTotal, baseCurrency)}
                                 {hasForeignDisplay && savedCurrency && savedRate && (
                                   <span className="ml-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                                     (
                                     {formatCurrency(
-                                      convertFromBaseCurrency(pendingBalance, savedRate),
+                                      convertFromBaseCurrency(fullTransferChargeTotal, savedRate),
                                       savedCurrency
                                     )}
                                     )
@@ -2819,14 +3049,26 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                         <CheckCircle2 className="h-4 w-4" />
                         {paying
                           ? tr('Registrando pago...', 'Recording payment...', 'Registrando pagamento...')
-                          : `${tr('Cancelar saldo', 'Pay balance', 'Quitar saldo')} (${formatCurrency(pendingBalance, baseCurrency)}${
+                          : `${tr('Cancelar saldo', 'Pay balance', 'Quitar saldo')} (${formatCurrency(
+                              paymentMethod === 'transferencia'
+                                ? fullTransferChargeTotal
+                                : pendingBalance,
+                              baseCurrency
+                            )}${
                               hasForeignDisplay && savedCurrency && savedRate
                                 ? ` / ${formatCurrency(
-                                    convertFromBaseCurrency(pendingBalance, savedRate),
+                                    convertFromBaseCurrency(
+                                      paymentMethod === 'transferencia'
+                                        ? fullTransferChargeTotal
+                                        : pendingBalance,
+                                      savedRate
+                                    ),
                                     savedCurrency
                                   )}`
                                 : ''
-                            }) · ${PAYMENT_METHOD_LABELS[paymentMethod]}`}
+                            }) · ${PAYMENT_METHOD_LABELS[paymentMethod]}${
+                              fullTransferIvaExtra > 0 ? ` (+${parsedDetailIvaPct}% IVA)` : ''
+                            }`}
                       </button>
                     </div>
                   </div>
@@ -4092,6 +4334,36 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                   />
                 </div>
               </div>
+              {editBudgetNum > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-200/80 bg-sky-50/70 px-3 py-2 text-xs dark:border-sky-900/50 dark:bg-sky-950/30">
+                  <span className="font-semibold text-slate-700 dark:text-slate-200">
+                    {tr(
+                      'Sumar IVA Transferencia / QR al presupuesto:',
+                      'Add Transfer / QR VAT to estimate:',
+                      'Somar IVA Transferência / QR ao orçamento:'
+                    )}
+                  </span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {TRANSFER_QR_IVA_PRESETS.map((presetPct) => (
+                      <button
+                        key={presetPct}
+                        type="button"
+                        onClick={() => {
+                          const saved = saveTransferQrIvaPct(presetPct);
+                          setTransferIvaPct(String(saved));
+                          const nextVal = Math.round(editBudgetNum * (1 + saved / 100) * 100) / 100;
+                          setPrice(String(nextVal));
+                          notify(`IVA Transferencia/QR (+${saved}%) sumado al presupuesto.`);
+                        }}
+                        className="h-7 rounded-lg border border-sky-200 bg-white px-2 font-mono-num text-[11px] font-semibold text-[#0072BB] hover:bg-sky-100 dark:border-sky-800 dark:bg-slate-900 dark:text-sky-300"
+                      >
+                        +{presetPct === 6.5 ? '6.5% MP' : `${presetPct}%`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {isEditSecondary && (
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200/80 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
                   <span>

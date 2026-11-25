@@ -6,6 +6,7 @@ import {
   Coins,
   Layers,
   Plus,
+  QrCode,
   Trash2,
   UserCheck,
 } from 'lucide-react';
@@ -56,8 +57,11 @@ import { recordRecoveredPayment } from '../utils/paymentLedger';
 import {
   appendTimelineEntry,
   createRepairMetaId,
+  loadSavedTransferQrIvaPct,
   mergeCheckoutPaymentLedger,
   mergeWorkDetailPublicMeta,
+  saveTransferQrIvaPct,
+  TRANSFER_QR_IVA_PRESETS,
 } from '../utils/repairMeta';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
 import { appendBatchRefToNotes, generateBatchRef } from '../utils/batchRef';
@@ -115,6 +119,8 @@ interface DraftRepairItem {
   budget: number;
   deposit: number;
   depositMethod: PaymentMethod;
+  transferQrIvaPct: number;
+  transferQrIvaAmount: number;
   currency: CurrencyCode;
   rate: number;
   status: RepairStatus;
@@ -439,6 +445,11 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
   const [price, setPrice] = useState('');
   const [deposit, setDeposit] = useState('');
   const [depositMethod, setDepositMethod] = useState<PaymentMethod>('efectivo');
+  const [applyTransferQrIva, setApplyTransferQrIva] = useState(false);
+  const [transferQrIvaPct, setTransferQrIvaPct] = useState(() =>
+    String(loadSavedTransferQrIvaPct())
+  );
+  const [ivaTouchedManually, setIvaTouchedManually] = useState(false);
   const [status, setStatus] = useState<RepairStatus>('recibido');
   const [technician, setTechnician] = useState('');
   const [warrantyDays, setWarrantyDays] = useState<number>(0);
@@ -501,6 +512,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     setPrice('');
     setDeposit('');
     setDepositMethod('efectivo');
+    setApplyTransferQrIva(false);
+    setTransferQrIvaPct(String(loadSavedTransferQrIvaPct()));
+    setIvaTouchedManually(false);
     setStatus('recibido');
     setTechnician('');
     setWarrantyDays(0);
@@ -620,6 +634,9 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     setPrice('');
     setDeposit('');
     setDepositMethod('efectivo');
+    setApplyTransferQrIva(false);
+    setTransferQrIvaPct(String(loadSavedTransferQrIvaPct()));
+    setIvaTouchedManually(false);
     setSelectedCurrency(baseCurrency);
     setStatus('recibido');
     setTechnician('');
@@ -661,17 +678,31 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     deviceType === 'Celular' || deviceType === 'Tablet' || deviceType === 'Smartwatch';
 
   const manualBudget = parseSafePositiveNumber(price, 0);
-  const totalBudgetDisplay = Math.round((manualBudget + selectedPartsTotalDisplay) * 100) / 100;
+  const subtotalBudgetDisplay = Math.round((manualBudget + selectedPartsTotalDisplay) * 100) / 100;
+  const parsedTransferQrIvaPct = Math.max(
+    0,
+    Math.min(100, parseSafePositiveNumber(transferQrIvaPct, 0))
+  );
+  const transferQrIvaDisplay =
+    applyTransferQrIva && subtotalBudgetDisplay > 0 && parsedTransferQrIvaPct > 0
+      ? Math.round(subtotalBudgetDisplay * (parsedTransferQrIvaPct / 100) * 100) / 100
+      : 0;
+  const totalBudgetDisplay = Math.round((subtotalBudgetDisplay + transferQrIvaDisplay) * 100) / 100;
   const depositDisplay = parseSafePositiveNumber(deposit, 0);
   const pendingBalanceDisplay = Math.max(
     0,
     Math.round((totalBudgetDisplay - depositDisplay) * 100) / 100
   );
-  const baseBudget = isSecondaryCurrency
+  const subtotalBase = isSecondaryCurrency
     ? Math.round(
         (convertToBaseCurrency(manualBudget, activeRate) + selectedPartsTotalBase) * 100
       ) / 100
     : Math.round((manualBudget + selectedPartsTotalBase) * 100) / 100;
+  const transferQrIvaBase =
+    applyTransferQrIva && subtotalBase > 0 && parsedTransferQrIvaPct > 0
+      ? Math.round(subtotalBase * (parsedTransferQrIvaPct / 100) * 100) / 100
+      : 0;
+  const baseBudget = Math.round((subtotalBase + transferQrIvaBase) * 100) / 100;
   const baseDeposit = isSecondaryCurrency
     ? Math.round(convertToBaseCurrency(depositDisplay, activeRate) * 100) / 100
     : depositDisplay;
@@ -800,6 +831,8 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
       budget: baseBudget,
       deposit: baseDeposit,
       depositMethod,
+      transferQrIvaPct: applyTransferQrIva ? parsedTransferQrIvaPct : 0,
+      transferQrIvaAmount: transferQrIvaBase,
       currency: selectedCurrency,
       rate: activeRate,
       status,
@@ -942,6 +975,12 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
           const withBase = {
             ...prev,
             ...(item.warrantyDays > 0 ? { warrantyDays: item.warrantyDays } : {}),
+            ...(item.transferQrIvaPct > 0
+              ? {
+                  transferQrIvaPct: item.transferQrIvaPct,
+                  transferQrIvaAmount: item.transferQrIvaAmount,
+                }
+              : {}),
             ...(warrantyFromRepair
               ? {
                   parentRepairId: warrantyFromRepair.id,
@@ -2131,7 +2170,12 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                       <button
                         key={methodKey}
                         type="button"
-                        onClick={() => setDepositMethod(methodKey)}
+                        onClick={() => {
+                          setDepositMethod(methodKey);
+                          if (!ivaTouchedManually) {
+                            setApplyTransferQrIva(methodKey === 'transferencia');
+                          }
+                        }}
                         className={`h-8 rounded-lg px-2.5 text-xs font-semibold transition ${
                           active
                             ? 'bg-[#0072BB] text-white'
@@ -2146,13 +2190,158 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
               </div>
             )}
 
+            <div
+              className={`space-y-2.5 rounded-xl border p-3 transition ${
+                applyTransferQrIva
+                  ? 'border-sky-300 bg-sky-50/80 dark:border-sky-800 dark:bg-sky-950/35'
+                  : 'border-slate-200 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-900/50'
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-100">
+                  <input
+                    type="checkbox"
+                    checked={applyTransferQrIva}
+                    onChange={(e) => {
+                      setIvaTouchedManually(true);
+                      setApplyTransferQrIva(e.target.checked);
+                    }}
+                    className="h-4 w-4 rounded border-slate-300 text-[#0072BB] focus:ring-[#0072BB]"
+                  />
+                  <QrCode className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
+                  <span>
+                    {tr(
+                      'Agregar IVA Transferencia / QR',
+                      'Add Transfer / QR VAT',
+                      'Adicionar IVA Transferência / QR'
+                    )}
+                  </span>
+                  <span className="rounded-md bg-white/90 px-1.5 py-0.5 text-[10px] font-bold text-[#0072BB] dark:bg-slate-800 dark:text-sky-300">
+                    {tr('Solo Transf. / QR', 'Transfer / QR only', 'Só Transf. / QR')}
+                  </span>
+                </label>
+
+                {applyTransferQrIva && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {TRANSFER_QR_IVA_PRESETS.map((presetPct) => {
+                      const isPresetActive = Math.abs(parsedTransferQrIvaPct - presetPct) < 0.01;
+                      return (
+                        <button
+                          key={presetPct}
+                          type="button"
+                          onClick={() => {
+                            const saved = saveTransferQrIvaPct(presetPct);
+                            setTransferQrIvaPct(String(saved));
+                          }}
+                          className={`h-7 rounded-lg border px-2 font-mono-num text-[11px] font-semibold transition ${
+                            isPresetActive
+                              ? 'border-[#0072BB] bg-[#0072BB] text-white'
+                              : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                          }`}
+                        >
+                          {presetPct === 6.5 ? '6.5% MP' : `${presetPct}%`}
+                        </button>
+                      );
+                    })}
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        value={transferQrIvaPct}
+                        onChange={(e) => {
+                          setTransferQrIvaPct(e.target.value);
+                          const num = Number(e.target.value);
+                          if (Number.isFinite(num) && num > 0 && num <= 100) {
+                            saveTransferQrIvaPct(num);
+                          }
+                        }}
+                        aria-label={tr('Porcentaje de IVA Transferencia / QR', 'Transfer / QR VAT percentage', 'Porcentagem de IVA Transferência / QR')}
+                        className="h-7 w-16 rounded-lg border border-slate-200 bg-white px-2 text-center font-mono-num text-xs font-semibold text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                      />
+                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">%</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {applyTransferQrIva && (
+                <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                  {tr(
+                    `Solo aplica por Transferencia o QR (porcentaje equivalente a Mercado Pago: ${parsedTransferQrIvaPct}%). Si paga en Efectivo queda sin IVA.`,
+                    `Only applies to Transfer or QR (${parsedTransferQrIvaPct}% Mercado Pago equivalent). Cash payments have no VAT surcharge.`,
+                    `Aplica-se somente para Transferência ou QR (${parsedTransferQrIvaPct}% equivalente ao Mercado Pago). Pagamento em dinheiro fica sem acréscimo.`
+                  )}
+                </p>
+              )}
+            </div>
+
+            {(subtotalBudgetDisplay > 0 || depositDisplay > 0 || applyTransferQrIva) && (
+              <div className="rounded-xl border border-slate-200 bg-slate-50/90 p-3 text-xs dark:border-slate-800 dark:bg-slate-800/40">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {selectedPartIds.length > 0
+                        ? tr('Presup. + Repuestos', 'Est. + Parts', 'Orçam. + Peças')
+                        : tr('Presupuesto', 'Estimate', 'Orçamento')}
+                    </div>
+                    <div className="font-mono-num text-sm font-bold text-slate-900 dark:text-white">
+                      {formatCurrency(subtotalBudgetDisplay, selectedCurrency)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {applyTransferQrIva
+                        ? tr(`IVA Transf./QR (${parsedTransferQrIvaPct}%)`, `Transfer/QR VAT (${parsedTransferQrIvaPct}%)`, `IVA Transf./QR (${parsedTransferQrIvaPct}%)`)
+                        : tr('IVA Transf./QR', 'Transfer/QR VAT', 'IVA Transf./QR')}
+                    </div>
+                    <div
+                      className={`font-mono-num text-sm font-bold ${
+                        transferQrIvaDisplay > 0
+                          ? 'text-[#0072BB] dark:text-sky-400'
+                          : 'text-slate-400 dark:text-slate-500'
+                      }`}
+                    >
+                      {transferQrIvaDisplay > 0
+                        ? `+${formatCurrency(transferQrIvaDisplay, selectedCurrency)}`
+                        : formatCurrency(0, selectedCurrency)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {tr('Seña', 'Deposit', 'Sinal')}
+                    </div>
+                    <div className="font-mono-num text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                      {formatCurrency(depositDisplay, selectedCurrency)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {depositDisplay > 0
+                        ? tr('Total / Pendiente', 'Total / Balance', 'Total / Pendente')
+                        : tr('Total', 'Total', 'Total')}
+                    </div>
+                    <div className="font-mono-num text-sm font-extrabold text-[#0072BB] dark:text-sky-300">
+                      {formatCurrency(totalBudgetDisplay, selectedCurrency)}
+                      {depositDisplay > 0 && (
+                        <span className="ml-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                          ({tr('rest.', 'bal.', 'rest.')} {formatCurrency(pendingBalanceDisplay, selectedCurrency)})
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {isSecondaryCurrency && (
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200/80 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
                 <span>
                   {tr('Conversión', 'Conversion', 'Conversão')} (1 {selectedCurrency} = {formatCurrency(activeRate, baseCurrency)}):
                 </span>
                 <span className="font-mono-num font-bold">
-                  {tr('Presup. base', 'Base est.', 'Orçam. base')} {formatCurrency(baseBudget, baseCurrency)}
+                  {tr('Total base', 'Base total', 'Total base')} {formatCurrency(baseBudget, baseCurrency)}
                   {baseDeposit > 0 ? ` · ${tr('Seña', 'Deposit', 'Sinal')} ${formatCurrency(baseDeposit, baseCurrency)}` : ''}
                 </span>
               </div>
@@ -2161,7 +2350,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
             {selectedPartIds.length > 0 && (
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-200 bg-sky-50/70 px-3 py-2 text-xs text-slate-700 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-slate-200">
                 <span>
-                  {tr('Presupuesto', 'Estimate', 'Orçamento')} (
+                  {tr('Mano de obra', 'Labor', 'Mão de obra')} (
                   <strong className="font-mono-num">
                     {formatCurrency(manualBudget, selectedCurrency)}
                   </strong>
@@ -2170,6 +2359,16 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
                     {formatCurrency(selectedPartsTotalDisplay, selectedCurrency)}
                   </strong>
                   )
+                  {transferQrIvaDisplay > 0 && (
+                    <>
+                      {' '}
+                      + IVA Transf./QR (
+                      <strong className="font-mono-num">
+                        {formatCurrency(transferQrIvaDisplay, selectedCurrency)}
+                      </strong>
+                      )
+                    </>
+                  )}
                 </span>
                 <span className="font-mono-num font-bold text-[#0072BB] dark:text-sky-300">
                   Total: {formatCurrency(totalBudgetDisplay, selectedCurrency)}

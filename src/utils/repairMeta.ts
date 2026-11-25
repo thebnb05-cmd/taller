@@ -36,6 +36,42 @@ export interface RepairPublicMeta {
   deliveredAt?: string;
   parentRepairId?: string;
   parentRepairCode?: string;
+  transferQrIvaPct?: number;
+  transferQrIvaAmount?: number;
+}
+
+export const DEFAULT_TRANSFER_QR_IVA_PCT = 6.5;
+export const TRANSFER_QR_IVA_PRESETS = [5, 6.5, 8, 10.5, 21] as const;
+const TRANSFER_QR_IVA_STORAGE_KEY = 'th3bnb_repair_transfer_qr_iva_pct';
+
+export function loadSavedTransferQrIvaPct(): number {
+  try {
+    if (typeof window === 'undefined') return DEFAULT_TRANSFER_QR_IVA_PCT;
+    const raw = window.localStorage.getItem(TRANSFER_QR_IVA_STORAGE_KEY);
+    if (!raw) return DEFAULT_TRANSFER_QR_IVA_PCT;
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0 && parsed <= 100) {
+      return Math.round(parsed * 100) / 100;
+    }
+  } catch {
+    // ignore storage failures
+  }
+  return DEFAULT_TRANSFER_QR_IVA_PCT;
+}
+
+export function saveTransferQrIvaPct(pct: number): number {
+  const safe =
+    Number.isFinite(pct) && pct > 0 && pct <= 100
+      ? Math.round(pct * 100) / 100
+      : DEFAULT_TRANSFER_QR_IVA_PCT;
+  try {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(TRANSFER_QR_IVA_STORAGE_KEY, String(safe));
+    }
+  } catch {
+    // ignore storage failures
+  }
+  return safe;
 }
 
 export interface RepairPaymentEntry {
@@ -103,6 +139,15 @@ export function parseRepairPublicMeta(workDetail?: string | null): RepairPublicM
         ? Math.max(0, Math.min(3650, Math.round(Number(parsed.warrantyDays))))
         : undefined;
 
+    const transferQrIvaPct =
+      parsed.transferQrIvaPct !== undefined && Number.isFinite(Number(parsed.transferQrIvaPct))
+        ? Math.max(0, Math.min(100, Math.round(Number(parsed.transferQrIvaPct) * 100) / 100))
+        : undefined;
+    const transferQrIvaAmount =
+      parsed.transferQrIvaAmount !== undefined && Number.isFinite(Number(parsed.transferQrIvaAmount))
+        ? Math.max(0, Math.round(Number(parsed.transferQrIvaAmount) * 100) / 100)
+        : undefined;
+
     return {
       timeline,
       quote,
@@ -114,6 +159,8 @@ export function parseRepairPublicMeta(workDetail?: string | null): RepairPublicM
       ...(parsed.parentRepairCode
         ? { parentRepairCode: sanitizePlainLine(String(parsed.parentRepairCode), 40) }
         : {}),
+      ...(transferQrIvaPct !== undefined && transferQrIvaPct > 0 ? { transferQrIvaPct } : {}),
+      ...(transferQrIvaAmount !== undefined && transferQrIvaAmount > 0 ? { transferQrIvaAmount } : {}),
     };
   } catch {
     return empty;
@@ -153,6 +200,12 @@ export function mergeWorkDetailPublicMeta(
     ...(next.deliveredAt ? { deliveredAt: sanitizePlainLine(next.deliveredAt, 40) } : {}),
     ...(next.parentRepairId ? { parentRepairId: sanitizePlainLine(next.parentRepairId, 120) } : {}),
     ...(next.parentRepairCode ? { parentRepairCode: sanitizePlainLine(next.parentRepairCode, 40) } : {}),
+    ...(next.transferQrIvaPct !== undefined && next.transferQrIvaPct > 0
+      ? { transferQrIvaPct: Math.min(100, Math.round(Number(next.transferQrIvaPct) * 100) / 100) }
+      : {}),
+    ...(next.transferQrIvaAmount !== undefined && next.transferQrIvaAmount > 0
+      ? { transferQrIvaAmount: Math.round(Number(next.transferQrIvaAmount) * 100) / 100 }
+      : {}),
   };
 
   const hasContent =
@@ -161,7 +214,8 @@ export function mergeWorkDetailPublicMeta(
     (cleanMeta.warrantyDays !== undefined && cleanMeta.warrantyDays > 0) ||
     Boolean(cleanMeta.deliveredAt) ||
     Boolean(cleanMeta.parentRepairId) ||
-    Boolean(cleanMeta.parentRepairCode);
+    Boolean(cleanMeta.parentRepairCode) ||
+    Boolean(cleanMeta.transferQrIvaPct && cleanMeta.transferQrIvaPct > 0);
 
   if (!hasContent) return baseWithoutRmeta;
 
