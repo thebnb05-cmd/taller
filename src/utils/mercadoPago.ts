@@ -22,6 +22,7 @@ export interface MpTerminalSummary {
 export interface MpPosSummary {
   id: string;
   externalId: string;
+  hasExternalId?: boolean;
   name: string;
   storeId: string;
 }

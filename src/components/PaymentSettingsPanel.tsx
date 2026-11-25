@@ -141,6 +141,7 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
       setTerminals(foundTerminals);
       setPosList(foundPos);
 
+      const validPos = foundPos.find((p) => p.externalId && p.hasExternalId !== false);
       const nextConfig: MercadoPagoConfig = {
         ...config,
         accessToken: trimmedToken,
@@ -150,7 +151,7 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
         posExternalId:
           config.posExternalId ||
           foundTerminals[0]?.externalPosId ||
-          foundPos[0]?.externalId ||
+          validPos?.externalId ||
           '',
       };
 
@@ -471,36 +472,51 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
         </div>
       )}
 
-      {posList.length > 0 ? (
+      {posList.length > 0 && (
         <div className="space-y-1.5">
           <div className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
             Cajas / Puntos de venta QR detectados (tocá para seleccionar):
           </div>
           <div className="flex flex-wrap gap-1.5">
             {posList.map((pos) => {
-              const active = config.posExternalId === pos.externalId;
+              const hasExt = Boolean(pos.externalId) && pos.hasExternalId !== false;
+              const active = hasExt && config.posExternalId === pos.externalId;
               return (
                 <button
                   key={pos.id || pos.externalId}
                   type="button"
-                  onClick={() =>
-                    setConfig((prev) => ({ ...prev, posExternalId: pos.externalId }))
-                  }
+                  disabled={!hasExt}
+                  onClick={() => {
+                    if (!hasExt) return;
+                    setConfig((prev) => ({ ...prev, posExternalId: pos.externalId }));
+                  }}
                   className={`rounded-lg border px-2.5 py-1 text-[11px] font-medium transition ${
-                    active
-                      ? 'border-[#0072BB] bg-sky-50 text-[#0072BB] dark:border-sky-400 dark:bg-sky-950/60 dark:text-sky-300'
-                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'
+                    !hasExt
+                      ? 'cursor-not-allowed border-amber-200 bg-amber-50/60 text-amber-800 opacity-80 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300'
+                      : active
+                        ? 'border-[#0072BB] bg-sky-50 text-[#0072BB] dark:border-sky-400 dark:bg-sky-950/60 dark:text-sky-300'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'
                   }`}
                 >
-                  {pos.name} (<span className="font-mono-num">{pos.externalId}</span>)
+                  {pos.name} (
+                  <span className="font-mono-num">
+                    {hasExt ? pos.externalId : 'sin ID externo'}
+                  </span>
+                  )
                 </button>
               );
             })}
           </div>
         </div>
-      ) : connectionStatus === 'ok' ? (
+      )}
+
+      {connectionStatus === 'ok' && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-          <span>No tenés ninguna Caja QR creada todavía en tu cuenta.</span>
+          <span>
+            {posList.some((p) => Boolean(p.externalId) && p.hasExternalId !== false)
+              ? '¿El QR te da error de Caja? Creá o vinculá una Caja QR nueva:'
+              : 'No tenés ninguna Caja QR con ID externo creada en tu cuenta.'}
+          </span>
           <button
             type="button"
             onClick={() => void handleAutoCreatePos()}
@@ -511,7 +527,7 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
             Crear Caja QR automática ({config.posExternalId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 40) || 'CAJA01'})
           </button>
         </div>
-      ) : null}
+      )}
 
       <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
         <button

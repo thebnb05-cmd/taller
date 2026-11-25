@@ -444,12 +444,18 @@ function extractMpErrorMessage(
   context: MpErrorContext = 'generic'
 ): string {
   if (!payload || typeof payload !== 'object') return fallback;
-  const err = payload as MpErrorPayload;
+  const err = payload as MpErrorPayload & {
+    errors?: Array<{ message?: string; description?: string; code?: string; details?: unknown[] }>;
+  };
   let raw = '';
+  let detailSuffix = '';
   if (Array.isArray(err.errors) && err.errors.length > 0) {
     const first = err.errors[0];
     if (first?.message || first?.description) {
       raw = String(first.message || first.description);
+    }
+    if (Array.isArray(first?.details) && first.details.length > 0) {
+      detailSuffix = String(first.details[0] || '').trim();
     }
   }
   if (!raw && Array.isArray(err.causes) && err.causes.length > 0) {
@@ -462,7 +468,15 @@ function extractMpErrorMessage(
   if (isMpPolicyUnauthorizedMessage(raw)) {
     return formatMpUnauthorizedMessage(context);
   }
-  return raw;
+  const combined = detailSuffix && !raw.includes(detailSuffix) ? `${raw} (${detailSuffix})` : raw;
+  const lower = combined.toLowerCase();
+  if (lower.includes('error occurred when getting point of sale') || lower.includes('pos_not_found')) {
+    return `Mercado Pago no encontró la Caja QR configurada ("${raw}"). Entrá a Configuración de pagos → "Probar y detectar dispositivos" y tocá "Crear Caja QR automática" para vincularla correctamente.`;
+  }
+  if (lower.includes('operating_mode') || (lower.includes('pdv') && lower.includes('mode'))) {
+    return `La terminal Point no está en modo PDV ("${combined}"). En Configuración de pagos → tocá "Probar y detectar dispositivos" y luego "Pasar Point a modo PDV".`;
+  }
+  return combined;
 }
 
 async function mpFetch(
@@ -1220,6 +1234,7 @@ export async function handleApiRequest(
       const posList: Array<{
         id: string;
         externalId: string;
+        hasExternalId: boolean;
         name: string;
         storeId: string;
       }> = [];
@@ -1233,7 +1248,8 @@ export async function handleApiRequest(
           if (!externalId && !id) continue;
           posList.push({
             id,
-            externalId: externalId || id,
+            externalId,
+            hasExternalId: Boolean(externalId),
             name: String(row.name || externalId || `Caja ${id}`),
             storeId: String(row.store_id || ''),
           });
@@ -1583,34 +1599,59 @@ export async function handleApiRequest(
           return true;
         }
 
-        const orderRes = await mpFetch('/v1/orders', token, {
-          method: 'POST',
-          idempotencyKey,
-          body: {
-            type: 'qr',
-            external_reference: externalReference,
-            expiration_time: 'PT15M',
-            total_amount: formattedAmount,
-            description,
-            config: {
-              qr: {
-                external_pos_id: posExternalId,
-                mode: 'dynamic',
+        const createQrOrder = (targetExternalPosId: string) =>
+          mpFetch('/v1/orders', token, {
+            method: 'POST',
+            idempotencyKey: crypto.randomUUID(),
+            body: {
+              type: 'qr',
+              external_reference: externalReference,
+              expiration_time: 'PT15M',
+              total_amount: formattedAmount,
+              description,
+              config: {
+                qr: {
+                  external_pos_id: targetExternalPosId,
+                  mode: 'dynamic',
+                },
               },
-            },
-            transactions: {
-              payments: [{ amount: formattedAmount }],
-            },
-            items: [
-              {
-                title: description,
-                unit_price: formattedAmount,
-                quantity: 1,
-                unit_measure: 'unit',
+              transactions: {
+                payments: [{ amount: formattedAmount }],
               },
-            ],
-          },
-        });
+              items: [
+                {
+                  title: description,
+                  unit_price: formattedAmount,
+                  quantity: 1,
+                  unit_measure: 'unit',
+                },
+              ],
+            },
+          });
+
+        let resolvedPosExternalId = posExternalId;
+        let orderRes = await createQrOrder(resolvedPosExternalId);
+
+        if (!orderRes.ok) {
+          const posLookup = await mpFetch('/pos?limit=50', token);
+          if (posLookup.ok && Array.isArray(posLookup.data.results)) {
+            const matchedByIdOrName = posLookup.data.results.find((item) => {
+              if (!item || typeof item !== 'object') return false;
+              const row = item as Record<string, unknown>;
+              const ext = String(row.external_id || '').trim();
+              if (!ext) return false;
+              return (
+                String(row.id || '').trim() === posExternalId ||
+                ext.toUpperCase() === posExternalId.toUpperCase()
+              );
+            }) as Record<string, unknown> | undefined;
+            const betterExtId = String(matchedByIdOrName?.external_id || '').trim();
+            if (betterExtId && betterExtId !== resolvedPosExternalId) {
+              resolvedPosExternalId = betterExtId;
+              orderRes = await createQrOrder(resolvedPosExternalId);
+            }
+          }
+        }
 
         const typeResp = orderRes.data.type_response as { qr_data?: string } | undefined;
         const qrData = String(typeResp?.qr_data || orderRes.data.qr_data || '').trim();
@@ -1633,7 +1674,7 @@ export async function handleApiRequest(
         const sellerId = String(meRes.data.id || '').trim();
         if (sellerId) {
           const legacyQrRes = await mpFetch(
-            `/instore/orders/qr/seller/collectors/${encodeURIComponent(sellerId)}/pos/${encodeURIComponent(posExternalId)}/qrs`,
+            `/instore/orders/qr/seller/collectors/${encodeURIComponent(sellerId)}/pos/${encodeURIComponent(resolvedPosExternalId)}/qrs`,
             token,
             {
               method: 'POST',
@@ -1708,35 +1749,36 @@ export async function handleApiRequest(
         return true;
       }
 
-      const pointOrderRes = await mpFetch('/v1/orders', token, {
-        method: 'POST',
-        idempotencyKey,
-        body: {
-          type: 'point',
-          external_reference: externalReference,
-          expiration_time: 'PT15M',
-          processing_mode: 'automatic',
-          total_amount: formattedAmount,
-          description,
-          config: {
-            point: {
-              terminal_id: terminalId,
-              print_on_terminal: printOnTerminal ? 'seller_ticket' : 'no_ticket',
+      const sendV1PointOrder = (includePrintOption: boolean) =>
+        mpFetch('/v1/orders', token, {
+          method: 'POST',
+          idempotencyKey: includePrintOption ? idempotencyKey : crypto.randomUUID(),
+          body: {
+            type: 'point',
+            external_reference: externalReference,
+            expiration_time: 'PT15M',
+            description,
+            config: {
+              point: {
+                terminal_id: terminalId,
+                ...(includePrintOption
+                  ? { print_on_terminal: printOnTerminal ? 'seller_ticket' : 'no_ticket' }
+                  : {}),
+              },
+            },
+            transactions: {
+              payments: [{ amount: formattedAmount }],
             },
           },
-          transactions: {
-            payments: [{ amount: formattedAmount }],
-          },
-          items: [
-            {
-              title: description,
-              unit_price: formattedAmount,
-              quantity: 1,
-              unit_measure: 'unit',
-            },
-          ],
-        },
-      });
+        });
+
+      let pointOrderRes = await sendV1PointOrder(true);
+      if (!pointOrderRes.ok && pointOrderRes.status === 400) {
+        const retryWithoutPrint = await sendV1PointOrder(false);
+        if (retryWithoutPrint.ok) {
+          pointOrderRes = retryWithoutPrint;
+        }
+      }
 
       if (pointOrderRes.ok) {
         const normalized = normalizeOrderStatus(
@@ -1793,9 +1835,11 @@ export async function handleApiRequest(
         'point'
       );
       const finalPointError =
-        legacyIntentRes.status !== 401 && legacyIntentRes.status !== 403 && legacyMsg
-          ? legacyMsg
-          : v1Msg;
+        v1Msg && pointOrderRes.status !== 401 && pointOrderRes.status !== 403
+          ? v1Msg
+          : legacyIntentRes.status !== 401 && legacyIntentRes.status !== 403 && legacyMsg
+            ? legacyMsg
+            : v1Msg;
 
       sendJson(res, pointOrderRes.status >= 400 ? pointOrderRes.status : 400, {
         ok: false,
