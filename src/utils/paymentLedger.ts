@@ -21,6 +21,12 @@ export interface DraftStockDelta {
   delta: number;
 }
 
+export type PaymentAttemptStatus =
+  | 'approved'
+  | 'failed_attempt'
+  | 'pending_verification'
+  | 'force_reconciled';
+
 export interface RecoveredPaymentEntry {
   id: string;
   ownerId: string;
@@ -39,6 +45,12 @@ export interface RecoveredPaymentEntry {
   mpCompanionOrderId?: string;
   mpExternalReference?: string;
   mpPaymentId?: string;
+  mpApiFamily?: string;
+  attemptStatus?: PaymentAttemptStatus;
+  forceReconciled?: boolean;
+  forceReconciledAt?: string;
+  forceReconcileNote?: string;
+  rawError?: string;
   saveFailed: boolean;
   saveError?: string;
   dismissed?: boolean;
@@ -86,6 +98,14 @@ function sanitizeEntry(raw: Partial<RecoveredPaymentEntry>, ownerId: string): Re
       ? raw.mpChannel
       : undefined;
 
+  const attemptStatus: PaymentAttemptStatus | undefined =
+    raw.attemptStatus === 'failed_attempt' ||
+    raw.attemptStatus === 'pending_verification' ||
+    raw.attemptStatus === 'force_reconciled' ||
+    raw.attemptStatus === 'approved'
+      ? raw.attemptStatus
+      : undefined;
+
   return {
     id: sanitizePlainLine(String(raw.id || `rec-${createdAt}`), 80) || `rec-${createdAt}`,
     ownerId,
@@ -113,6 +133,16 @@ function sanitizeEntry(raw: Partial<RecoveredPaymentEntry>, ownerId: string): Re
       ? { mpExternalReference: sanitizePlainLine(String(raw.mpExternalReference), 80) }
       : {}),
     ...(raw.mpPaymentId ? { mpPaymentId: sanitizePlainLine(String(raw.mpPaymentId), 80) } : {}),
+    ...(raw.mpApiFamily ? { mpApiFamily: sanitizePlainLine(String(raw.mpApiFamily), 40) } : {}),
+    ...(attemptStatus ? { attemptStatus } : {}),
+    ...(raw.forceReconciled ? { forceReconciled: true } : {}),
+    ...(raw.forceReconciledAt
+      ? { forceReconciledAt: sanitizePlainLine(String(raw.forceReconciledAt), 40) }
+      : {}),
+    ...(raw.forceReconcileNote
+      ? { forceReconcileNote: sanitizePlainLine(String(raw.forceReconcileNote), 200) }
+      : {}),
+    ...(raw.rawError ? { rawError: sanitizeText(String(raw.rawError), 240) } : {}),
     saveFailed: Boolean(raw.saveFailed),
     ...(raw.saveError ? { saveError: sanitizeText(String(raw.saveError), 240) } : {}),
     ...(raw.dismissed ? { dismissed: true } : {}),
@@ -214,6 +244,7 @@ export function recordRecoveredPayment(
   const clean = sanitizeEntry(
     {
       ...input,
+      attemptStatus: input.attemptStatus || (input.forceReconciled ? 'force_reconciled' : 'approved'),
       createdAt: nowMs,
       at: input.at || new Date(nowMs).toISOString(),
     },
@@ -229,9 +260,21 @@ export function recordRecoveredPayment(
       ...clean,
       id: prev.id,
       createdAt: Math.min(prev.createdAt, clean.createdAt),
+      attemptStatus: prev.forceReconciled
+        ? 'force_reconciled'
+        : clean.attemptStatus || 'approved',
+      forceReconciled: Boolean(prev.forceReconciled || clean.forceReconciled),
+      forceReconciledAt: prev.forceReconciledAt || clean.forceReconciledAt,
+      forceReconcileNote: clean.forceReconcileNote || prev.forceReconcileNote,
+      rawError: clean.attemptStatus === 'approved' ? undefined : clean.rawError || prev.rawError,
       reconciledSaleId: prev.reconciledSaleId || clean.reconciledSaleId,
       reconciledRepairId: prev.reconciledRepairId || clean.reconciledRepairId,
-      dismissed: prev.dismissed && !clean.saveFailed ? prev.dismissed : clean.dismissed,
+      dismissed:
+        prev.attemptStatus === 'failed_attempt' || prev.attemptStatus === 'pending_verification'
+          ? false
+          : prev.dismissed && !clean.saveFailed
+            ? prev.dismissed
+            : clean.dismissed,
       draftSalePayload: clean.draftSalePayload || prev.draftSalePayload,
       draftClientPayload: clean.draftClientPayload || prev.draftClientPayload,
       draftStockDeltas: clean.draftStockDeltas || prev.draftStockDeltas,
@@ -245,6 +288,146 @@ export function recordRecoveredPayment(
   const next = [clean, ...current];
   saveRecoveredPayments(input.ownerId, next);
   return clean;
+}
+
+export function recordPaymentAttempt(
+  input: Omit<RecoveredPaymentEntry, 'createdAt' | 'at' | 'saveFailed'> & {
+    attemptStatus: 'pending_verification' | 'failed_attempt';
+    createdAt?: number;
+    at?: string;
+  }
+): RecoveredPaymentEntry | null {
+  if (!input.ownerId || !isSafeId(input.ownerId)) return null;
+  const current = loadRecoveredPayments(input.ownerId);
+  const nowMs = input.createdAt ?? Date.now();
+  const clean = sanitizeEntry(
+    {
+      ...input,
+      saveFailed: false,
+      createdAt: nowMs,
+      at: input.at || new Date(nowMs).toISOString(),
+    },
+    input.ownerId
+  );
+  if (!clean) return null;
+
+  const existingIdx = current.findIndex((item) => matchesLedgerEntry(item, clean));
+  if (existingIdx >= 0) {
+    const prev = current[existingIdx];
+    // Never downgrade an already approved or force-reconciled payment
+    if (
+      prev.attemptStatus === 'approved' ||
+      prev.attemptStatus === 'force_reconciled' ||
+      prev.forceReconciled ||
+      prev.saveFailed ||
+      prev.reconciledSaleId ||
+      prev.reconciledRepairId
+    ) {
+      return prev;
+    }
+    const merged: RecoveredPaymentEntry = {
+      ...prev,
+      ...clean,
+      id: prev.id,
+      createdAt: Math.min(prev.createdAt, clean.createdAt),
+      dismissed: prev.dismissed && input.attemptStatus !== 'failed_attempt' ? prev.dismissed : false,
+      draftSalePayload: clean.draftSalePayload || prev.draftSalePayload,
+      draftClientPayload: clean.draftClientPayload || prev.draftClientPayload,
+      draftStockDeltas: clean.draftStockDeltas || prev.draftStockDeltas,
+    };
+    const next = [...current];
+    next[existingIdx] = merged;
+    saveRecoveredPayments(input.ownerId, next);
+    return merged;
+  }
+
+  const next = [clean, ...current];
+  saveRecoveredPayments(input.ownerId, next);
+  return clean;
+}
+
+export function forceReconcilePaymentAttempt(params: {
+  ownerId: string;
+  entryId?: string;
+  clientConfirmedNote?: string;
+  methodOverride?: PaymentMethod;
+  mpChannelOverride?: MpPaymentChannel;
+  manualAttempt?: {
+    source: 'venta' | 'reparacion';
+    method: PaymentMethod;
+    mpChannel?: MpPaymentChannel;
+    amount: number;
+    clientName: string;
+    title: string;
+    subtitle?: string;
+    mpExternalReference?: string;
+    rawError?: string;
+  };
+}): RecoveredPaymentEntry | null {
+  const { ownerId, entryId, clientConfirmedNote, methodOverride, mpChannelOverride, manualAttempt } = params;
+  if (!ownerId || !isSafeId(ownerId)) return null;
+  const nowIso = new Date().toISOString();
+  const cleanNote =
+    sanitizePlainLine(clientConfirmedNote || '', 200) ||
+    'Confirmado por el cliente (reconciliación forzada)';
+
+  if (entryId) {
+    const current = loadRecoveredPayments(ownerId);
+    const idx = current.findIndex((e) => e.id === entryId);
+    if (idx < 0) return null;
+    const prev = current[idx];
+    const nextMethod = methodOverride || prev.method;
+    const nextMpChannel =
+      mpChannelOverride !== undefined
+        ? mpChannelOverride
+        : nextMethod === 'efectivo'
+          ? undefined
+          : prev.mpChannel;
+
+    const updated: RecoveredPaymentEntry = {
+      ...prev,
+      method: nextMethod,
+      ...(nextMpChannel ? { mpChannel: nextMpChannel } : { mpChannel: undefined }),
+      attemptStatus: 'force_reconciled',
+      forceReconciled: true,
+      forceReconciledAt: nowIso,
+      forceReconcileNote: cleanNote,
+      dismissed: false,
+      subtitle: cleanNote,
+    };
+    const next = [...current];
+    next[idx] = updated;
+    saveRecoveredPayments(ownerId, next);
+    return updated;
+  }
+
+  if (manualAttempt && safeMoney(manualAttempt.amount) > 0) {
+    return recordRecoveredPayment({
+      id: `frc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      ownerId,
+      source: manualAttempt.source,
+      method: methodOverride || manualAttempt.method,
+      ...(mpChannelOverride || manualAttempt.mpChannel
+        ? { mpChannel: mpChannelOverride || manualAttempt.mpChannel }
+        : {}),
+      amount: safeMoney(manualAttempt.amount),
+      totalAmount: safeMoney(manualAttempt.amount),
+      clientName: manualAttempt.clientName || 'Mostrador',
+      title: manualAttempt.title || 'Cobro fallido confirmado por cliente',
+      subtitle: manualAttempt.subtitle || cleanNote,
+      ...(manualAttempt.mpExternalReference
+        ? { mpExternalReference: manualAttempt.mpExternalReference }
+        : {}),
+      ...(manualAttempt.rawError ? { rawError: manualAttempt.rawError } : {}),
+      attemptStatus: 'force_reconciled',
+      forceReconciled: true,
+      forceReconciledAt: nowIso,
+      forceReconcileNote: cleanNote,
+      saveFailed: false,
+    });
+  }
+
+  return null;
 }
 
 export function markPaymentReconciled(params: {
@@ -337,11 +520,27 @@ export function mergeSyncedMpPayments(
       saveFailed: false,
     };
 
-    const existingIdx = next.findIndex((item) => matchesLedgerEntry(item, candidate));
+    const existingIdx = next.findIndex((item) => {
+      if (matchesLedgerEntry(item, candidate)) return true;
+      if (
+        (item.attemptStatus === 'pending_verification' ||
+          item.attemptStatus === 'failed_attempt') &&
+        item.method === candidate.method &&
+        Math.abs(item.amount - candidate.amount) < 0.05 &&
+        Math.abs(item.createdAt - candidate.createdAt) <= 15 * 60 * 1000
+      ) {
+        return true;
+      }
+      return false;
+    });
     if (existingIdx >= 0) {
       const prev = next[existingIdx];
-      // Enrich missing MP metadata on existing local entry without reviving reconciled/dismissed state
+      const wasUnconfirmedAttempt =
+        prev.attemptStatus === 'pending_verification' ||
+        prev.attemptStatus === 'failed_attempt';
+      // Enrich missing MP metadata or auto-promote failed/pending attempt when MP confirms payment
       if (
+        wasUnconfirmedAttempt ||
         !prev.mpPaymentId ||
         (!prev.mpOrderId && candidate.mpOrderId) ||
         (!prev.mpChannel && candidate.mpChannel)
@@ -352,11 +551,19 @@ export function mergeSyncedMpPayments(
           mpOrderId: prev.mpOrderId || candidate.mpOrderId,
           mpExternalReference: prev.mpExternalReference || candidate.mpExternalReference,
           mpChannel: prev.mpChannel || candidate.mpChannel,
+          ...(wasUnconfirmedAttempt
+            ? {
+                attemptStatus: 'approved',
+                rawError: undefined,
+                dismissed: false,
+                subtitle: `${candidate.subtitle || 'Aprobado en Mercado Pago'} (auto-conciliado)`,
+              }
+            : {}),
         };
         changed = true;
       }
     } else {
-      next.unshift(candidate);
+      next.unshift({ ...candidate, attemptStatus: 'approved' });
       changed = true;
     }
   }
@@ -432,10 +639,19 @@ export function getUnreconciledPayments(
 
   return entries.filter((entry) => {
     if (entry.dismissed) return false;
+    // Do NOT count failed/pending attempts in revenue totals unless confirmed via MP or force-reconciled or saveFailed
+    if (
+      (entry.attemptStatus === 'failed_attempt' ||
+        entry.attemptStatus === 'pending_verification') &&
+      !entry.forceReconciled &&
+      !entry.saveFailed
+    ) {
+      return false;
+    }
     if (entry.reconciledSaleId && savedSaleIds.has(entry.reconciledSaleId)) return false;
-    if (entry.reconciledSaleId && !entry.saveFailed) return false;
+    if (entry.reconciledSaleId && !entry.saveFailed && !entry.forceReconciled) return false;
     if (entry.reconciledRepairId && savedRepairIds.has(entry.reconciledRepairId)) return false;
-    if (entry.reconciledRepairId && !entry.saveFailed) return false;
+    if (entry.reconciledRepairId && !entry.saveFailed && !entry.forceReconciled) return false;
 
     if (entry.mpOrderId && savedOrderIds.has(entry.mpOrderId)) return false;
     if (entry.mpCompanionOrderId && savedOrderIds.has(entry.mpCompanionOrderId)) return false;
@@ -459,6 +675,47 @@ export function getUnreconciledPayments(
       }
     }
 
+    return true;
+  });
+}
+
+export function getPendingFailedAttempts(
+  entries: RecoveredPaymentEntry[],
+  sales: SaleRecord[],
+  repairs: RepairRecord[]
+): RecoveredPaymentEntry[] {
+  const savedOrderIds = new Set<string>();
+  const savedExtRefs = new Set<string>();
+  const savedPaymentIds = new Set<string>();
+
+  for (const s of sales) {
+    const details = parseSaleDetails(s);
+    if (details.mpOrderId) savedOrderIds.add(details.mpOrderId);
+    if (details.mpExternalReference) savedExtRefs.add(normalizeExtRef(details.mpExternalReference));
+    if (details.mpPaymentId) savedPaymentIds.add(details.mpPaymentId);
+  }
+  for (const r of repairs) {
+    const ledger = parseRepairPaymentLedger(r.checkoutState);
+    for (const p of ledger) {
+      if (p.mpOrderId) savedOrderIds.add(p.mpOrderId);
+      if (p.mpExternalReference) savedExtRefs.add(normalizeExtRef(p.mpExternalReference));
+    }
+  }
+
+  return entries.filter((entry) => {
+    if (entry.dismissed || entry.forceReconciled || entry.saveFailed) return false;
+    if (
+      entry.attemptStatus !== 'failed_attempt' &&
+      entry.attemptStatus !== 'pending_verification'
+    ) {
+      return false;
+    }
+    if (entry.reconciledSaleId || entry.reconciledRepairId) return false;
+    if (entry.mpOrderId && savedOrderIds.has(entry.mpOrderId)) return false;
+    if (entry.mpCompanionOrderId && savedOrderIds.has(entry.mpCompanionOrderId)) return false;
+    if (entry.mpPaymentId && savedPaymentIds.has(entry.mpPaymentId)) return false;
+    const normExt = normalizeExtRef(entry.mpExternalReference);
+    if (normExt && savedExtRefs.has(normExt)) return false;
     return true;
   });
 }

@@ -69,7 +69,12 @@ import {
   type PaymentMethod,
   type TransferConfig,
 } from '../utils/payment';
-import { markPaymentReconciled, recordRecoveredPayment } from '../utils/paymentLedger';
+import {
+  dismissRecoveredPayment,
+  markPaymentReconciled,
+  recordPaymentAttempt,
+  recordRecoveredPayment,
+} from '../utils/paymentLedger';
 import {
   cancelMercadoPagoOrder,
   checkMercadoPagoOrderStatus,
@@ -670,6 +675,26 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
             : prev
         );
       } else if (res.isFailed) {
+        if (repair.ownerId) {
+          recordPaymentAttempt({
+            id: orderSnapshot.orderId,
+            ownerId: repair.ownerId,
+            source: 'reparacion',
+            method: orderSnapshot.mode === 'point' ? 'tarjeta' : 'transferencia',
+            mpChannel: orderSnapshot.mode === 'point' ? 'mp_point' : 'mp_qr',
+            amount: orderSnapshot.amount,
+            totalAmount: Number(repair.price || orderSnapshot.amount),
+            clientName: repair.clientName || 'Cliente',
+            title: `${repair.code} · ${repair.brand} ${repair.model}`,
+            subtitle: 'Intento fallido o rechazado en Mercado Pago',
+            mpOrderId: orderSnapshot.orderId,
+            mpCompanionOrderId: orderSnapshot.companionPointOrderId,
+            mpExternalReference: orderSnapshot.externalReference,
+            mpApiFamily: orderSnapshot.apiFamily,
+            attemptStatus: 'failed_attempt',
+            rawError: 'El pago fue rechazado o falló en Mercado Pago.',
+          });
+        }
         setMpOrder((prev) =>
           prev && prev.orderId === orderSnapshot.orderId
             ? {
@@ -1517,8 +1542,8 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     }
 
     setMpBusy(true);
+    const extRef = `REP-${(repair.code || repair.id.slice(0, 6)).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 20)}-${Date.now().toString(36).toUpperCase()}`;
     try {
-      const extRef = `REP-${(repair.code || repair.id.slice(0, 6)).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 20)}-${Date.now().toString(36).toUpperCase()}`;
       const res = await createMercadoPagoOrder({
         mode,
         accessToken: token,
@@ -1533,6 +1558,23 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       });
 
       if (!res.ok || !res.orderId) {
+        if (repair.ownerId) {
+          recordPaymentAttempt({
+            id: `fail-rep-${extRef}`,
+            ownerId: repair.ownerId,
+            source: 'reparacion',
+            method: mode === 'point' ? 'tarjeta' : 'transferencia',
+            mpChannel: mode === 'point' ? 'mp_point' : 'mp_qr',
+            amount: mpChargeAmount,
+            totalAmount: Number(repair.price || mpChargeAmount),
+            clientName: repair.clientName || 'Cliente',
+            title: `${repair.code} · ${repair.brand} ${repair.model}`,
+            subtitle: 'Error al iniciar cobro en Mercado Pago',
+            mpExternalReference: extRef,
+            attemptStatus: 'failed_attempt',
+            rawError: res.error || 'No se pudo generar el cobro en Mercado Pago.',
+          });
+        }
         notify(res.error || 'No se pudo generar el cobro en Mercado Pago.', 'error');
         return;
       }
@@ -1562,6 +1604,30 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       }
 
       const shownOnPoint = Boolean(res.companionPointOrderId);
+      if (!res.isPaid && repair.ownerId) {
+        recordPaymentAttempt({
+          id: res.orderId,
+          ownerId: repair.ownerId,
+          source: 'reparacion',
+          method: mode === 'point' ? 'tarjeta' : 'transferencia',
+          mpChannel: mode === 'point' ? 'mp_point' : 'mp_qr',
+          amount: mpChargeAmount,
+          totalAmount: Number(repair.price || mpChargeAmount),
+          clientName: repair.clientName || 'Cliente',
+          title: `${repair.code} · ${repair.brand} ${repair.model}`,
+          subtitle: shownOnPoint
+            ? 'QR enviado a pantalla y Point Smart (pendiente de confirmar)'
+            : mode === 'point'
+              ? 'Orden enviada al Point Smart (pendiente de confirmar)'
+              : 'QR MP generado (pendiente de confirmar)',
+          mpOrderId: res.orderId,
+          mpCompanionOrderId: res.companionPointOrderId,
+          mpExternalReference: res.externalReference || extRef,
+          mpApiFamily: res.apiFamily || 'orders_v1',
+          attemptStatus: 'pending_verification',
+        });
+      }
+
       const nextOrder: ActiveRepairMpOrder = {
         mode,
         apiFamily: res.apiFamily || 'orders_v1',
@@ -1611,6 +1677,23 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
         );
       }
     } catch {
+      if (repair.ownerId) {
+        recordPaymentAttempt({
+          id: `err-rep-${extRef}`,
+          ownerId: repair.ownerId,
+          source: 'reparacion',
+          method: mode === 'point' ? 'tarjeta' : 'transferencia',
+          mpChannel: mode === 'point' ? 'mp_point' : 'mp_qr',
+          amount: mpChargeAmount,
+          totalAmount: Number(repair.price || mpChargeAmount),
+          clientName: repair.clientName || 'Cliente',
+          title: `${repair.code} · ${repair.brand} ${repair.model}`,
+          subtitle: 'Error de red al conectar con Mercado Pago',
+          mpExternalReference: extRef,
+          attemptStatus: 'failed_attempt',
+          rawError: 'Error de conexión con el servidor de Mercado Pago.',
+        });
+      }
       notify('Error de conexión con el servidor de Mercado Pago.', 'error');
     } finally {
       setMpBusy(false);
@@ -1712,6 +1795,9 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       if (!res.ok) {
         notify(res.error || 'No se pudo cancelar en Mercado Pago.', 'error');
         return;
+      }
+      if (repair.ownerId) {
+        dismissRecoveredPayment(repair.ownerId, mpOrder.orderId);
       }
       setMpOrder(null);
       notify('Orden de Mercado Pago cancelada.');

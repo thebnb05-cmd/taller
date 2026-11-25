@@ -30,6 +30,11 @@ export interface CashShiftData {
   countedCash?: number;
   expectedCash?: number;
   discrepancy?: number;
+  mpPointTotal?: number;
+  mpQrTotal?: number;
+  forceReconciledCount?: number;
+  forceReconciledTotal?: number;
+  totalPeriodIncome?: number;
   closingNote?: string;
   movements: CashMovement[];
   status: 'abierta' | 'cerrada';
@@ -47,6 +52,7 @@ export interface ShiftLedgerEntry {
   title: string;
   subtitle?: string;
   isRecovered?: boolean;
+  forceReconciled?: boolean;
   saveFailed?: boolean;
   saveError?: string;
   recoveredEntry?: RecoveredPaymentEntry;
@@ -56,8 +62,11 @@ export interface ShiftFinancialSummary {
   totalsByMethod: Record<PaymentMethod, number>;
   mpPointTotal: number;
   mpQrTotal: number;
+  mpTotal: number;
   recoveredTotal: number;
   recoveredCount: number;
+  forceReconciledTotal: number;
+  forceReconciledCount: number;
   salesTotal: number;
   repairsTotal: number;
   manualInTotal: number;
@@ -109,6 +118,31 @@ export function parseCashShiftFromTask(task: TaskRecord): CashShiftData | null {
         : {}),
       ...(parsed.discrepancy !== undefined
         ? { discrepancy: Math.round(Number(parsed.discrepancy) * 100) / 100 }
+        : {}),
+      ...(parsed.mpPointTotal !== undefined
+        ? { mpPointTotal: Math.max(0, Math.round(Number(parsed.mpPointTotal) * 100) / 100) }
+        : {}),
+      ...(parsed.mpQrTotal !== undefined
+        ? { mpQrTotal: Math.max(0, Math.round(Number(parsed.mpQrTotal) * 100) / 100) }
+        : {}),
+      ...(parsed.forceReconciledCount !== undefined
+        ? { forceReconciledCount: Math.max(0, Math.round(Number(parsed.forceReconciledCount))) }
+        : {}),
+      ...(parsed.forceReconciledTotal !== undefined
+        ? {
+            forceReconciledTotal: Math.max(
+              0,
+              Math.round(Number(parsed.forceReconciledTotal) * 100) / 100
+            ),
+          }
+        : {}),
+      ...(parsed.totalPeriodIncome !== undefined
+        ? {
+            totalPeriodIncome: Math.max(
+              0,
+              Math.round(Number(parsed.totalPeriodIncome) * 100) / 100
+            ),
+          }
         : {}),
       ...(parsed.closingNote ? { closingNote: sanitizeText(String(parsed.closingNote), 300) } : {}),
       movements,
@@ -164,6 +198,8 @@ export function computeShiftFinancials(params: {
   let mpQrTotal = 0;
   let recoveredTotal = 0;
   let recoveredCount = 0;
+  let forceReconciledTotal = 0;
+  let forceReconciledCount = 0;
   let salesTotal = 0;
   let repairsTotal = 0;
   let manualInTotal = 0;
@@ -293,8 +329,13 @@ export function computeShiftFinancials(params: {
     if (rec.mpChannel === 'mp_point') mpPointTotal += rec.amount;
     else if (rec.mpChannel === 'mp_qr') mpQrTotal += rec.amount;
 
+    const isForced = Boolean(rec.forceReconciled || rec.attemptStatus === 'force_reconciled');
     recoveredTotal += rec.amount;
     recoveredCount += 1;
+    if (isForced) {
+      forceReconciledTotal += rec.amount;
+      forceReconciledCount += 1;
+    }
 
     entries.push({
       id: `rec-${rec.id}`,
@@ -306,10 +347,13 @@ export function computeShiftFinancials(params: {
       ...(rec.mpChannel ? { mpChannel: rec.mpChannel } : {}),
       amount: rec.amount,
       title: rec.clientName ? `${rec.clientName} · ${rec.title}` : rec.title,
-      subtitle: rec.saveFailed
-        ? rec.saveError || 'Cobrado · Error al guardar en la nube'
-        : rec.subtitle || 'Cobro acreditado en Mercado Pago',
+      subtitle: isForced
+        ? rec.forceReconcileNote || rec.subtitle || 'Reconciliación forzada · Confirmado por cliente'
+        : rec.saveFailed
+          ? rec.saveError || 'Cobrado · Error al guardar en la nube'
+          : rec.subtitle || 'Cobro acreditado en Mercado Pago',
       isRecovered: true,
+      ...(isForced ? { forceReconciled: true } : {}),
       saveFailed: rec.saveFailed,
       saveError: rec.saveError,
       recoveredEntry: rec,
@@ -351,12 +395,18 @@ export function computeShiftFinancials(params: {
 
   entries.sort((a, b) => b.atMs - a.atMs);
 
+  const roundedPoint = Math.round(mpPointTotal * 100) / 100;
+  const roundedQr = Math.round(mpQrTotal * 100) / 100;
+
   return {
     totalsByMethod,
-    mpPointTotal: Math.round(mpPointTotal * 100) / 100,
-    mpQrTotal: Math.round(mpQrTotal * 100) / 100,
+    mpPointTotal: roundedPoint,
+    mpQrTotal: roundedQr,
+    mpTotal: Math.round((roundedPoint + roundedQr) * 100) / 100,
     recoveredTotal: Math.round(recoveredTotal * 100) / 100,
     recoveredCount,
+    forceReconciledTotal: Math.round(forceReconciledTotal * 100) / 100,
+    forceReconciledCount,
     salesTotal: Math.round(salesTotal * 100) / 100,
     repairsTotal: Math.round(repairsTotal * 100) / 100,
     manualInTotal: Math.round(manualInTotal * 100) / 100,

@@ -73,7 +73,9 @@ import {
   type SalePaymentEntry,
 } from '../utils/saleMeta';
 import {
+  dismissRecoveredPayment,
   markPaymentReconciled,
+  recordPaymentAttempt,
   recordRecoveredPayment,
 } from '../utils/paymentLedger';
 import {
@@ -664,6 +666,28 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
             return;
           }
           if (res.ok && res.isFailed && (!ptRes.ok || ptRes.isFailed)) {
+            recordPaymentAttempt({
+              id: mpOrder.orderId,
+              ownerId,
+              source: 'venta',
+              method: mpOrder.mode === 'point' ? 'tarjeta' : 'transferencia',
+              mpChannel: mpOrder.mode === 'point' ? 'mp_point' : 'mp_qr',
+              amount: mpOrder.amount,
+              totalAmount: mpOrder.amount,
+              clientName: clientName.trim() || 'Mostrador',
+              title:
+                cartItems.length > 0
+                  ? summarizeSaleItemsLabel(cartItems)
+                  : manualName.trim() || 'Intento de cobro MP',
+              subtitle: 'Intento fallido o rechazado en Mercado Pago',
+              invoice: invoice.trim() || undefined,
+              mpOrderId: mpOrder.orderId,
+              mpCompanionOrderId: mpOrder.companionPointOrderId,
+              mpExternalReference: mpOrder.externalReference,
+              mpApiFamily: mpOrder.apiFamily,
+              attemptStatus: 'failed_attempt',
+              rawError: 'El pago fue rechazado o requiere acción en Mercado Pago.',
+            });
             setMpOrder((prev) =>
               prev && prev.orderId === mpOrder.orderId
                 ? {
@@ -687,6 +711,28 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                 : prev
             );
           } else if (res.isFailed) {
+            recordPaymentAttempt({
+              id: mpOrder.orderId,
+              ownerId,
+              source: 'venta',
+              method: mpOrder.mode === 'point' ? 'tarjeta' : 'transferencia',
+              mpChannel: mpOrder.mode === 'point' ? 'mp_point' : 'mp_qr',
+              amount: mpOrder.amount,
+              totalAmount: mpOrder.amount,
+              clientName: clientName.trim() || 'Mostrador',
+              title:
+                cartItems.length > 0
+                  ? summarizeSaleItemsLabel(cartItems)
+                  : manualName.trim() || 'Intento de cobro MP',
+              subtitle: 'Intento fallido o rechazado en Mercado Pago',
+              invoice: invoice.trim() || undefined,
+              mpOrderId: mpOrder.orderId,
+              mpCompanionOrderId: mpOrder.companionPointOrderId,
+              mpExternalReference: mpOrder.externalReference,
+              mpApiFamily: mpOrder.apiFamily,
+              attemptStatus: 'failed_attempt',
+              rawError: 'El pago fue rechazado o requiere acción en Mercado Pago.',
+            });
             setMpOrder((prev) =>
               prev && prev.orderId === mpOrder.orderId
                 ? {
@@ -1547,6 +1593,22 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       });
 
       if (!res.ok || !res.orderId) {
+        recordPaymentAttempt({
+          id: `fail-sale-${extRef}`,
+          ownerId,
+          source: 'venta',
+          method: mode === 'point' ? 'tarjeta' : 'transferencia',
+          mpChannel: mode === 'point' ? 'mp_point' : 'mp_qr',
+          amount: mpChargeAmount,
+          totalAmount: mpChargeAmount,
+          clientName: clientName.trim() || 'Mostrador',
+          title: description,
+          subtitle: 'Error al iniciar cobro en Mercado Pago',
+          invoice: invoice.trim() || undefined,
+          mpExternalReference: extRef,
+          attemptStatus: 'failed_attempt',
+          rawError: res.error || 'No se pudo iniciar la orden en Mercado Pago.',
+        });
         notify(res.error || 'No se pudo iniciar la orden en Mercado Pago.', 'error');
         return;
       }
@@ -1574,6 +1636,31 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       }
 
       const shownOnPoint = Boolean(res.companionPointOrderId);
+      if (!res.isPaid) {
+        recordPaymentAttempt({
+          id: res.orderId,
+          ownerId,
+          source: 'venta',
+          method: mode === 'point' ? 'tarjeta' : 'transferencia',
+          mpChannel: mode === 'point' ? 'mp_point' : 'mp_qr',
+          amount: mpChargeAmount,
+          totalAmount: mpChargeAmount,
+          clientName: clientName.trim() || 'Mostrador',
+          title: description,
+          subtitle: shownOnPoint
+            ? 'QR enviado a pantalla y Point Smart (pendiente de confirmar)'
+            : mode === 'point'
+              ? 'Orden enviada al Point Smart (pendiente de confirmar)'
+              : 'QR MP generado (pendiente de confirmar)',
+          invoice: invoice.trim() || undefined,
+          mpOrderId: res.orderId,
+          mpCompanionOrderId: res.companionPointOrderId,
+          mpExternalReference: res.externalReference || extRef,
+          mpApiFamily: res.apiFamily || 'orders_v1',
+          attemptStatus: 'pending_verification',
+        });
+      }
+
       setMpOrder({
         mode,
         apiFamily: res.apiFamily || 'orders_v1',
@@ -1618,6 +1705,22 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           : 'Orden enviada al dispositivo Point.'
       );
     } catch {
+      recordPaymentAttempt({
+        id: `err-sale-${extRef}`,
+        ownerId,
+        source: 'venta',
+        method: mode === 'point' ? 'tarjeta' : 'transferencia',
+        mpChannel: mode === 'point' ? 'mp_point' : 'mp_qr',
+        amount: mpChargeAmount,
+        totalAmount: mpChargeAmount,
+        clientName: clientName.trim() || 'Mostrador',
+        title: description,
+        subtitle: 'Error de red al conectar con Mercado Pago',
+        invoice: invoice.trim() || undefined,
+        mpExternalReference: extRef,
+        attemptStatus: 'failed_attempt',
+        rawError: 'Error de conexión con el servidor de Mercado Pago.',
+      });
       notify('Error de conexión con el servidor de Mercado Pago.', 'error');
     } finally {
       setMpBusy(false);
@@ -1779,6 +1882,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         notify(res.error || 'No se pudo cancelar la orden en Mercado Pago.', 'error');
         return;
       }
+      dismissRecoveredPayment(ownerId, mpOrder.orderId);
       setMpOrder(null);
       notify('Orden cancelada en Mercado Pago.');
     } finally {
