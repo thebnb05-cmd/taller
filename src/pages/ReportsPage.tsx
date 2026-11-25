@@ -40,11 +40,17 @@ import {
   todayISO,
 } from '../utils/formatters';
 import { parsePaymentInfo } from '../utils/payment';
+import {
+  getUnreconciledPayments,
+  toSyntheticSalesFromRecovered,
+  useRecoveredPayments,
+} from '../utils/paymentLedger';
 import { parseRepairPaymentLedger } from '../utils/repairMeta';
 import { parseSaleDetails, parseSalePaymentInfo } from '../utils/saleMeta';
 import { useI18n } from '../utils/i18n';
 
 interface ReportsPageProps {
+  ownerId?: string;
   profile?: WorkshopProfile | null;
   repairs: RepairRecord[];
   clients: ClientRecord[];
@@ -133,6 +139,7 @@ interface TimelineBucket {
 }
 
 export const ReportsPage: React.FC<ReportsPageProps> = ({
+  ownerId = '',
   profile,
   repairs,
   clients,
@@ -143,6 +150,16 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
 }) => {
   const { notify } = useToast();
   const { locale, tr } = useI18n();
+
+  const recoveredEntries = useRecoveredPayments(ownerId);
+  const unreconciledRecovered = useMemo(
+    () => getUnreconciledPayments(recoveredEntries, sales, repairs),
+    [recoveredEntries, sales, repairs]
+  );
+  const effectiveSales = useMemo(
+    () => [...sales, ...toSyntheticSalesFromRecovered(unreconciledRecovered)],
+    [sales, unreconciledRecovered]
+  );
   const [range, setRange] = useState<RangeId>('30');
   const [customFrom, setCustomFrom] = useState<string>(() => {
     const d = new Date();
@@ -256,20 +273,26 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
     const inPrevious = (ts: number) =>
       prevStartMs !== null && prevEndMs !== null && ts >= prevStartMs && ts <= prevEndMs;
 
+    const unreconciledRepairs = unreconciledRecovered.filter((r) => r.source === 'reparacion');
+
     const rFiltered = repairs.filter((r) => inCurrent(r.createdAt));
-    const sFiltered = sales.filter((s) => inCurrent(s.createdAt));
+    const sFiltered = effectiveSales.filter((s) => inCurrent(s.createdAt));
     const pFiltered = purchases.filter((p) => inCurrent(p.createdAt));
+    const recRepFiltered = unreconciledRepairs.filter((r) => inCurrent(r.createdAt));
 
     const rPrev = repairs.filter((r) => inPrevious(r.createdAt));
-    const sPrev = sales.filter((s) => inPrevious(s.createdAt));
+    const sPrev = effectiveSales.filter((s) => inPrevious(s.createdAt));
     const pPrev = purchases.filter((p) => inPrevious(p.createdAt));
+    const recRepPrev = unreconciledRepairs.filter((r) => inPrevious(r.createdAt));
 
     // Financial aggregates
-    const repairIncome = rFiltered.reduce((s, r) => s + Number(r.price || 0), 0);
-    const repairPaid = rFiltered.reduce(
-      (s, r) => s + Math.min(Number(r.price || 0) || Number(r.deposit || 0), Number(r.deposit || 0)),
-      0
-    );
+    const recRepairAmount = recRepFiltered.reduce((s, r) => s + r.amount, 0);
+    const repairIncome = rFiltered.reduce((s, r) => s + Number(r.price || 0), 0) + recRepairAmount;
+    const repairPaid =
+      rFiltered.reduce(
+        (s, r) => s + Math.min(Number(r.price || 0) || Number(r.deposit || 0), Number(r.deposit || 0)),
+        0
+      ) + recRepairAmount;
     const salesIncome = sFiltered.reduce((s, x) => s + Number(x.amount || 0), 0);
     const salesPaid = sFiltered.reduce((s, x) => s + parseSalePaymentInfo(x).deposit, 0);
 
@@ -283,7 +306,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
     const avgTicket = rFiltered.length > 0 ? repairIncome / rFiltered.length : 0;
 
     // Previous period comparison
-    const prevRepairIncome = rPrev.reduce((s, r) => s + Number(r.price || 0), 0);
+    const prevRepairIncome =
+      rPrev.reduce((s, r) => s + Number(r.price || 0), 0) +
+      recRepPrev.reduce((s, r) => s + r.amount, 0);
     const prevSalesIncome = sPrev.reduce((s, x) => s + Number(x.amount || 0), 0);
     const prevRevenue = prevRepairIncome + prevSalesIncome;
     const prevPurchases = pPrev.reduce((s, p) => s + Number(p.amount || 0), 0);
@@ -346,10 +371,19 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
         else payTotals.sin_metodo += collected;
       }
     });
+    let mpPointTotal = 0;
+    let mpQrTotal = 0;
+    recRepFiltered.forEach((rec) => {
+      payTotals[rec.method] += rec.amount;
+      if (rec.mpChannel === 'mp_point') mpPointTotal += rec.amount;
+      else if (rec.mpChannel === 'mp_qr') mpQrTotal += rec.amount;
+    });
     sFiltered.forEach((s) => {
       const info = parseSalePaymentInfo(s);
       if (info.deposit <= 0) return;
       const details = parseSaleDetails(s);
+      if (details.mpChannel === 'mp_point') mpPointTotal += info.deposit;
+      else if (details.mpChannel === 'mp_qr') mpQrTotal += info.deposit;
       if (details.payments.length > 0) {
         let allocated = 0;
         for (const entry of details.payments) {
@@ -378,20 +412,23 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
         amount: payTotals.efectivo,
         barClass: 'bg-emerald-500 dark:bg-emerald-400',
         dotClass: 'bg-emerald-500',
+        subLabel: '',
       },
       {
         id: 'transferencia',
-        label: 'Transferencia',
+        label: 'Transferencia / QR',
         amount: payTotals.transferencia,
         barClass: 'bg-sky-500 dark:bg-sky-400',
         dotClass: 'bg-sky-500',
+        subLabel: mpQrTotal > 0 ? `MP QR: ${formatCurrency(mpQrTotal)}` : '',
       },
       {
         id: 'tarjeta',
-        label: 'Tarjeta',
+        label: 'Tarjeta / Point',
         amount: payTotals.tarjeta,
         barClass: 'bg-violet-500 dark:bg-violet-400',
         dotClass: 'bg-violet-500',
+        subLabel: mpPointTotal > 0 ? `MP Point: ${formatCurrency(mpPointTotal)}` : '',
       },
       {
         id: 'sin_metodo',
@@ -399,6 +436,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
         amount: payTotals.sin_metodo,
         barClass: 'bg-slate-400 dark:bg-slate-500',
         dotClass: 'bg-slate-400',
+        subLabel: '',
       },
     ].filter((item) => item.amount > 0 || totalCollected === 0);
 
@@ -644,7 +682,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
       timeline,
       maxTimelineValue,
     };
-  }, [products, purchases, range, repairs, sales, windowBounds]);
+  }, [products, purchases, range, repairs, effectiveSales, unreconciledRecovered, windowBounds, locale, tr]);
 
   const selectedBucket =
     activeBucketIndex !== null
@@ -1238,7 +1276,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
       </div>
 
       {/* 30-Day Repairs & Sales Revenue Trend (Recharts) */}
-      <RevenueTrendChart repairs={repairs} sales={sales} />
+      <RevenueTrendChart repairs={repairs} sales={effectiveSales} />
 
       {/* Block 3: Evolución Temporal */}
       <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
@@ -1414,11 +1452,16 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                   const pct = Math.round((item.amount / report.totalCollected) * 100);
                   return (
                     <div key={item.id} className="flex items-center justify-between py-2.5 text-xs">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className={`h-2.5 w-2.5 rounded-xs ${item.dotClass}`} />
                         <span className="font-semibold text-slate-800 dark:text-slate-200">
                           {item.label}
                         </span>
+                        {item.subLabel && (
+                          <span className="rounded bg-sky-50 px-1.5 py-0.5 font-mono-num text-[10px] font-semibold text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300">
+                            {item.subLabel}
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-3 font-mono-num">
                         <span className="text-slate-400 dark:text-slate-500">{pct}%</span>

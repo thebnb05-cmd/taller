@@ -1,11 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   ArrowRight,
   Boxes,
   Package,
   Plus,
+  QrCode,
   Scale,
   ShoppingBag,
+  Smartphone,
   TrendingUp,
   UserPlus,
   Users,
@@ -36,10 +39,17 @@ import {
   getStatusMeta,
   isActiveRepairStatus,
 } from '../utils/formatters';
+import {
+  getUnreconciledPayments,
+  toSyntheticSalesFromRecovered,
+  useRecoveredPayments,
+} from '../utils/paymentLedger';
+import { parseSaleDetails, parseSalePaymentInfo } from '../utils/saleMeta';
 import { useI18n } from '../utils/i18n';
 import { DollarRateBanner } from '../components/DollarRateBanner';
 
 interface HomePageProps {
+  ownerId?: string;
   repairs: RepairRecord[];
   clients: ClientRecord[];
   products?: ProductRecord[];
@@ -56,6 +66,7 @@ interface HomePageProps {
 }
 
 export const HomePage: React.FC<HomePageProps> = ({
+  ownerId = '',
   repairs,
   clients,
   products = [],
@@ -76,6 +87,16 @@ export const HomePage: React.FC<HomePageProps> = ({
   const [balanceScope, setBalanceScope] = useState<'total' | 'month'>('total');
   const [selectedBalanceBar, setSelectedBalanceBar] = useState<'income' | 'expense' | null>(null);
 
+  const recoveredEntries = useRecoveredPayments(ownerId);
+  const unreconciledRecovered = useMemo(
+    () => getUnreconciledPayments(recoveredEntries, sales, repairs),
+    [recoveredEntries, sales, repairs]
+  );
+  const effectiveSales = useMemo(
+    () => [...sales, ...toSyntheticSalesFromRecovered(unreconciledRecovered)],
+    [sales, unreconciledRecovered]
+  );
+
   const stats = useMemo(() => {
     const active = repairs.filter((r) => isActiveRepairStatus(r.status));
     const ready = repairs.filter((r) => r.status === 'listo');
@@ -84,8 +105,12 @@ export const HomePage: React.FC<HomePageProps> = ({
     const closedCount = ready.length + delivered.length;
     const closureRate = repairs.length > 0 ? Math.round((closedCount / totalCount) * 100) : 0;
 
-    const repairRevenue = repairs.reduce((sum, r) => sum + Number(r.price || 0), 0);
-    const salesRevenue = sales.reduce((sum, s) => sum + Number(s.amount || 0), 0);
+    const unreconciledRepairs = unreconciledRecovered.filter((r) => r.source === 'reparacion');
+    const extraRepairRevenue = unreconciledRepairs.reduce((sum, r) => sum + r.amount, 0);
+
+    const repairRevenue =
+      repairs.reduce((sum, r) => sum + Number(r.price || 0), 0) + extraRepairRevenue;
+    const salesRevenue = effectiveSales.reduce((sum, s) => sum + Number(s.amount || 0), 0);
     const totalExpenses = purchases.reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
     const now = new Date();
@@ -118,17 +143,55 @@ export const HomePage: React.FC<HomePageProps> = ({
     };
 
     const monthlyRepairs = repairs.filter((r) => isCurrentMonth(r.createdAt, r.dateIn));
-    const monthlySales = sales.filter((s) => isCurrentMonth(s.createdAt, s.dueDate));
-    const prevMonthSales = sales.filter((s) => isPrevMonth(s.createdAt, s.dueDate));
+    const monthlyExtraRepairs = unreconciledRepairs.filter((r) =>
+      isCurrentMonth(r.createdAt, r.at.slice(0, 10))
+    );
+    const monthlySales = effectiveSales.filter((s) => isCurrentMonth(s.createdAt, s.dueDate));
+    const prevMonthSales = effectiveSales.filter((s) => isPrevMonth(s.createdAt, s.dueDate));
     const monthlyPurchases = purchases.filter((p) => isCurrentMonth(p.createdAt, p.dueDate));
 
-    const monthlyRepairIncome = monthlyRepairs.reduce((sum, r) => sum + Number(r.price || 0), 0);
+    const monthlyRepairIncome =
+      monthlyRepairs.reduce((sum, r) => sum + Number(r.price || 0), 0) +
+      monthlyExtraRepairs.reduce((sum, r) => sum + r.amount, 0);
     const monthlySalesTotal = monthlySales.reduce((sum, s) => sum + Number(s.amount || 0), 0);
     const prevMonthSalesTotal = prevMonthSales.reduce((sum, s) => sum + Number(s.amount || 0), 0);
     const monthlyExpenses = monthlyPurchases.reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
     const monthlyEstimatedIncome = monthlyRepairIncome + monthlySalesTotal;
     const monthlyOpsCount = monthlyRepairs.length + monthlySales.length;
+
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    let todayMpPoint = 0;
+    let todayMpQr = 0;
+    for (const s of sales) {
+      const details = parseSaleDetails(s);
+      if (!details.mpChannel) continue;
+      if (details.payments.length > 0) {
+        for (const p of details.payments) {
+          const ms = Date.parse(p.date);
+          if (!Number.isNaN(ms) && ms >= todayStart && p.amount > 0) {
+            if (details.mpChannel === 'mp_point') todayMpPoint += p.amount;
+            else if (details.mpChannel === 'mp_qr') todayMpQr += p.amount;
+          }
+        }
+      } else if (Number(s.createdAt || 0) >= todayStart) {
+        const dep = parseSalePaymentInfo(s).deposit;
+        if (dep > 0) {
+          if (details.mpChannel === 'mp_point') todayMpPoint += dep;
+          else if (details.mpChannel === 'mp_qr') todayMpQr += dep;
+        }
+      }
+    }
+    let todayRecoveredCount = 0;
+    let todayRecoveredAmount = 0;
+    for (const rec of unreconciledRecovered) {
+      if (rec.createdAt >= todayStart) {
+        todayRecoveredCount += 1;
+        todayRecoveredAmount += rec.amount;
+        if (rec.mpChannel === 'mp_point') todayMpPoint += rec.amount;
+        else if (rec.mpChannel === 'mp_qr') todayMpQr += rec.amount;
+      }
+    }
 
     const salesDeltaPct =
       prevMonthSalesTotal > 0
@@ -297,8 +360,12 @@ export const HomePage: React.FC<HomePageProps> = ({
       maxDay,
       last7Days,
       last7DaysTotal,
+      todayMpPoint: Math.round(todayMpPoint * 100) / 100,
+      todayMpQr: Math.round(todayMpQr * 100) / 100,
+      todayRecoveredCount,
+      todayRecoveredAmount: Math.round(todayRecoveredAmount * 100) / 100,
     };
-  }, [products, purchases, repairs, sales, lang, locale]);
+  }, [products, purchases, repairs, sales, effectiveSales, unreconciledRecovered, lang, locale]);
 
   const recentActivity = useMemo(() => {
     const top: RepairRecord[] = [];
@@ -336,6 +403,43 @@ export const HomePage: React.FC<HomePageProps> = ({
     <div className="space-y-6">
       {/* Live USD Exchange Rate Bar */}
       <DollarRateBanner profile={profile} onOpenSettings={onOpenSettings} />
+
+      {/* Today's Mercado Pago Point/QR & Recovered Payments Strip */}
+      {(stats.todayMpPoint > 0 || stats.todayMpQr > 0 || stats.todayRecoveredCount > 0) && (
+        <button
+          type="button"
+          onClick={() => onNavigate('cash')}
+          className="flex w-full flex-wrap items-center justify-between gap-2 rounded-2xl border border-sky-200 bg-sky-50/70 px-4 py-2.5 text-left text-xs transition hover:border-[#0072BB] dark:border-sky-900/60 dark:bg-sky-950/25 dark:hover:border-sky-500"
+        >
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="font-bold text-slate-800 dark:text-slate-100">
+              Hoy en Mercado Pago:
+            </span>
+            {stats.todayMpPoint > 0 && (
+              <span className="inline-flex items-center gap-1 font-mono-num font-bold text-indigo-700 dark:text-indigo-300">
+                <Smartphone className="h-3.5 w-3.5" />
+                Point (Tarjeta): {formatCurrency(stats.todayMpPoint)}
+              </span>
+            )}
+            {stats.todayMpQr > 0 && (
+              <span className="inline-flex items-center gap-1 font-mono-num font-bold text-[#0072BB] dark:text-sky-300">
+                <QrCode className="h-3.5 w-3.5" />
+                QR: {formatCurrency(stats.todayMpQr)}
+              </span>
+            )}
+            {stats.todayRecoveredCount > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-0.5 font-mono-num text-[11px] font-bold text-amber-800 dark:bg-amber-950/70 dark:text-amber-300">
+                <AlertTriangle className="h-3 w-3" />
+                {stats.todayRecoveredCount} resguardado{stats.todayRecoveredCount === 1 ? '' : 's'} (
+                {formatCurrency(stats.todayRecoveredAmount)})
+              </span>
+            )}
+          </div>
+          <span className="inline-flex items-center gap-1 font-semibold text-[#0072BB] dark:text-sky-400">
+            Ver Caja diaria <ArrowRight className="h-3.5 w-3.5" />
+          </span>
+        </button>
+      )}
 
       {/* KPI Summary Cards */}
       <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">

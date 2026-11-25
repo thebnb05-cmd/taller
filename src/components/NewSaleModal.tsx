@@ -73,6 +73,10 @@ import {
   type SalePaymentEntry,
 } from '../utils/saleMeta';
 import {
+  markPaymentReconciled,
+  recordRecoveredPayment,
+} from '../utils/paymentLedger';
+import {
   parseWorkshopMeta,
   saveMercadoPagoConfigToProfile,
   syncMercadoPagoConfigFromProfile,
@@ -124,6 +128,10 @@ interface ActiveMpOrder {
   qrImageDataUrl?: string;
   status: 'pending' | 'paid' | 'canceled' | 'failed';
   statusText: string;
+  companionPointOrderId?: string;
+  companionPointApiFamily?: 'orders_v1';
+  companionPointExternalReference?: string;
+  companionPointWarning?: string;
 }
 
 export const NewSaleModal: React.FC<NewSaleModalProps> = ({
@@ -217,6 +225,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const [showMpSettings, setShowMpSettings] = useState(false);
   const [mpOrder, setMpOrder] = useState<ActiveMpOrder | null>(null);
   const [mpBusy, setMpBusy] = useState(false);
+  const [showQrOnPointSmart, setShowQrOnPointSmart] = useState(true);
 
   const selectedCurrencyOption = getCurrencyOption(selectedCurrency);
   const baseCurrencyOption = getCurrencyOption(baseCurrency);
@@ -543,56 +552,151 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     };
   }, [open, paymentMethod, transferCfg, effectiveBrandName, invoice, clientName, qrChargeAmount]);
 
-  // Automatic status polling for active Mercado Pago QR or Point orders
+  // Automatic status polling for active Mercado Pago QR, companion Point QR, or Point card orders
   useEffect(() => {
     if (!open || !mpOrder || mpOrder.status !== 'pending' || !mpConfig.accessToken.trim()) {
       return;
     }
 
     let cancelled = false;
+    const token = mpConfig.accessToken.trim();
+
+    const handlePaidConfirmation = (viaCompanionPoint: boolean) => {
+      const mpChannel = mpOrder.mode === 'point' ? 'mp_point' : 'mp_qr';
+      const methodForOrder: PaymentMethod = mpOrder.mode === 'point' ? 'tarjeta' : 'transferencia';
+      const itemSummary =
+        cartItems.length > 0
+          ? summarizeSaleItemsLabel(cartItems)
+          : manualName.trim() || (mpOrder.mode === 'point' ? 'Cobro Point Smart' : 'Cobro QR Mercado Pago');
+
+      recordRecoveredPayment({
+        id: mpOrder.orderId,
+        ownerId,
+        source: 'venta',
+        method: methodForOrder,
+        mpChannel,
+        amount: mpOrder.amount,
+        totalAmount: mpOrder.amount,
+        clientName: clientName.trim() || 'Mostrador',
+        title: itemSummary,
+        subtitle: viaCompanionPoint
+          ? 'Aprobado vía QR en Point Smart (pendiente de guardar venta)'
+          : mpOrder.mode === 'point'
+            ? 'Aprobado en Point Smart (pendiente de guardar venta)'
+            : 'Aprobado vía QR Mercado Pago (pendiente de guardar venta)',
+        invoice: invoice.trim() || undefined,
+        mpOrderId: mpOrder.orderId,
+        mpCompanionOrderId: mpOrder.companionPointOrderId,
+        mpExternalReference: mpOrder.externalReference,
+        saveFailed: false,
+      });
+
+      // Cancel the counterpart order so the customer cannot pay twice
+      if (viaCompanionPoint && mpOrder.orderId) {
+        void cancelMercadoPagoOrder({
+          accessToken: token,
+          orderId: mpOrder.orderId,
+          apiFamily: mpOrder.apiFamily,
+          posExternalId: mpConfig.posExternalId.trim(),
+        }).catch(() => {});
+      } else if (!viaCompanionPoint && mpOrder.companionPointOrderId) {
+        void cancelMercadoPagoOrder({
+          accessToken: token,
+          orderId: mpOrder.companionPointOrderId,
+          apiFamily: mpOrder.companionPointApiFamily || 'orders_v1',
+          terminalId: mpConfig.terminalId.trim(),
+        }).catch(() => {});
+      }
+
+      setMpOrder((prev) =>
+        prev && prev.orderId === mpOrder.orderId
+          ? {
+              ...prev,
+              status: 'paid',
+              statusText: viaCompanionPoint
+                ? 'Pago aprobado vía QR en Point Smart y acreditado en Mercado Pago.'
+                : 'Pago aprobado y acreditado en Mercado Pago.',
+            }
+          : prev
+      );
+      setStatus('cobrado');
+      setDeposit(String(totalDisplay));
+      notify('¡Pago aprobado en Mercado Pago!');
+    };
+
     const poll = async () => {
       try {
         const res = await checkMercadoPagoOrderStatus({
-          accessToken: mpConfig.accessToken.trim(),
+          accessToken: token,
           orderId: mpOrder.orderId,
           apiFamily: mpOrder.apiFamily,
           externalReference: mpOrder.externalReference,
         });
-        if (cancelled || !res.ok) return;
+        if (cancelled) return;
 
-        if (res.isPaid) {
-          setMpOrder((prev) =>
-            prev && prev.orderId === mpOrder.orderId
-              ? {
-                  ...prev,
-                  status: 'paid',
-                  statusText: 'Pago aprobado y acreditado en Mercado Pago.',
-                }
-              : prev
-          );
-          setStatus('cobrado');
-          setDeposit(String(totalDisplay));
-          notify('¡Pago aprobado en Mercado Pago!');
-        } else if (res.isCanceled) {
-          setMpOrder((prev) =>
-            prev && prev.orderId === mpOrder.orderId
-              ? {
-                  ...prev,
-                  status: 'canceled',
-                  statusText: 'La orden fue cancelada o expiró.',
-                }
-              : prev
-          );
-        } else if (res.isFailed) {
-          setMpOrder((prev) =>
-            prev && prev.orderId === mpOrder.orderId
-              ? {
-                  ...prev,
-                  status: 'failed',
-                  statusText: 'El pago fue rechazado o requiere acción.',
-                }
-              : prev
-          );
+        if (res.ok && res.isPaid) {
+          handlePaidConfirmation(false);
+          return;
+        }
+
+        if (mpOrder.companionPointOrderId) {
+          const ptRes = await checkMercadoPagoOrderStatus({
+            accessToken: token,
+            orderId: mpOrder.companionPointOrderId,
+            apiFamily: mpOrder.companionPointApiFamily || 'orders_v1',
+            externalReference: mpOrder.companionPointExternalReference,
+          });
+          if (cancelled) return;
+          if (ptRes.ok && ptRes.isPaid) {
+            handlePaidConfirmation(true);
+            return;
+          }
+          if (res.ok && res.isCanceled && (!ptRes.ok || ptRes.isCanceled)) {
+            setMpOrder((prev) =>
+              prev && prev.orderId === mpOrder.orderId
+                ? {
+                    ...prev,
+                    status: 'canceled',
+                    statusText: 'La orden fue cancelada o expiró.',
+                  }
+                : prev
+            );
+            return;
+          }
+          if (res.ok && res.isFailed && (!ptRes.ok || ptRes.isFailed)) {
+            setMpOrder((prev) =>
+              prev && prev.orderId === mpOrder.orderId
+                ? {
+                    ...prev,
+                    status: 'failed',
+                    statusText: 'El pago fue rechazado o requiere acción.',
+                  }
+                : prev
+            );
+            return;
+          }
+        } else if (res.ok) {
+          if (res.isCanceled) {
+            setMpOrder((prev) =>
+              prev && prev.orderId === mpOrder.orderId
+                ? {
+                    ...prev,
+                    status: 'canceled',
+                    statusText: 'La orden fue cancelada o expiró.',
+                  }
+                : prev
+            );
+          } else if (res.isFailed) {
+            setMpOrder((prev) =>
+              prev && prev.orderId === mpOrder.orderId
+                ? {
+                    ...prev,
+                    status: 'failed',
+                    statusText: 'El pago fue rechazado o requiere acción.',
+                  }
+                : prev
+            );
+          }
         }
       } catch {
         // Ignore transient poll failure
@@ -607,7 +711,20 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [open, mpOrder, mpConfig.accessToken, totalDisplay, notify]);
+  }, [
+    open,
+    mpOrder,
+    mpConfig.accessToken,
+    mpConfig.posExternalId,
+    mpConfig.terminalId,
+    totalDisplay,
+    notify,
+    ownerId,
+    cartItems,
+    manualName,
+    clientName,
+    invoice,
+  ]);
 
   const addProductToCart = (product: ProductRecord) => {
     const unitDisplay = isSecondaryCurrency
@@ -1096,6 +1213,22 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
             ];
     }
 
+    const mpPaidChannel =
+      mpOrder &&
+      (mpOrder.status === 'paid' ||
+        (status === 'cobrado' &&
+          ((mpOrder.mode === 'point' && paymentMethod === 'tarjeta') ||
+            (mpOrder.mode === 'qr' && paymentMethod === 'transferencia'))))
+        ? mpOrder.mode === 'point'
+          ? ('mp_point' as const)
+          : ('mp_qr' as const)
+        : undefined;
+
+    const existingDetails = editSale ? parseSaleDetails(editSale) : null;
+    const effectiveMpChannel = mpPaidChannel || existingDetails?.mpChannel;
+    const effectiveMpOrderId = mpOrder?.orderId || existingDetails?.mpOrderId;
+    const effectiveMpExtRef = mpOrder?.externalReference || existingDetails?.mpExternalReference;
+
     const serializedStatus = serializeSaleStatus({
       status,
       method: paymentMethod,
@@ -1122,6 +1255,9 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           : {}),
         payments: nextPayments,
         note: sanitizeText(saleNote, 400),
+        ...(effectiveMpChannel ? { mpChannel: effectiveMpChannel } : {}),
+        ...(effectiveMpOrderId ? { mpOrderId: effectiveMpOrderId } : {}),
+        ...(effectiveMpExtRef ? { mpExternalReference: effectiveMpExtRef } : {}),
       },
     });
 
@@ -1142,57 +1278,73 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     const firstProductItem = resolvedItems.find((it) => Boolean(it.productId));
     const summaryProductLabel = summarizeSaleItemsLabel(baseItems);
 
+    const needsNewClient = !(matchedClient?.id || editSale?.clientId);
+    const resolvedClientId = matchedClient?.id || editSale?.clientId || generateDocId('clients');
+    const draftClientPayload = needsNewClient
+      ? stripUndefined({
+          id: resolvedClientId,
+          ownerId,
+          name: cleanClientName,
+        })
+      : undefined;
+
+    const saleId = editSale?.id || generateDocId('sales');
+    const finalInvoice = sanitizePlainLine(
+      invoice || `FV-${Date.now().toString().slice(-4)}`,
+      60
+    );
+    const finalDueDate = clampStr(dueDate, 40);
+    const salePayload = stripUndefined({
+      id: saleId,
+      ownerId,
+      clientId: clampStr(resolvedClientId, 128),
+      clientName: cleanClientName,
+      invoice: finalInvoice,
+      productId: clampStr(firstProductItem?.productId, 128),
+      productName: summaryProductLabel,
+      quantity: totalQuantity,
+      amount: cleanAmount,
+      status: serializedStatus,
+      dueDate: finalDueDate,
+    });
+
+    const stockDeltas: Array<{ productId: string; delta: number }> = [];
+    for (const prodId of allTouchedProductIds) {
+      const product = products.find((p) => p.id === prodId);
+      if (!product || !product.trackStock) continue;
+      const oldQty = prevQtyByProduct.get(prodId) || 0;
+      const newQty = nextQtyByProduct.get(prodId) || 0;
+      const delta = newQty - oldQty;
+      if (delta !== 0) {
+        stockDeltas.push({ productId: product.id, delta });
+      }
+    }
+
     setSaving(true);
     try {
-      let resolvedClientId = matchedClient?.id || editSale?.clientId;
-
-      if (!resolvedClientId) {
-        resolvedClientId = generateDocId('clients');
-        await upsertRow(
-          'clients',
-          stripUndefined({
-            id: resolvedClientId,
-            ownerId,
-            name: cleanClientName,
-          })
-        );
+      if (draftClientPayload) {
+        await upsertRow('clients', draftClientPayload);
       }
-
-      const saleId = editSale?.id || generateDocId('sales');
-      const finalInvoice = sanitizePlainLine(
-        invoice || `FV-${Date.now().toString().slice(-4)}`,
-        60
-      );
-      const finalDueDate = clampStr(dueDate, 40);
-      const salePayload = stripUndefined({
-        id: saleId,
-        ownerId,
-        clientId: clampStr(resolvedClientId, 128),
-        clientName: cleanClientName,
-        invoice: finalInvoice,
-        productId: clampStr(firstProductItem?.productId, 128),
-        productName: summaryProductLabel,
-        quantity: totalQuantity,
-        amount: cleanAmount,
-        status: serializedStatus,
-        dueDate: finalDueDate,
-      });
 
       await upsertRow('sales', salePayload);
 
       // Apply stock delta per inventory product
-      for (const prodId of allTouchedProductIds) {
-        const product = products.find((p) => p.id === prodId);
+      for (const sd of stockDeltas) {
+        const product = products.find((p) => p.id === sd.productId);
         if (!product || !product.trackStock) continue;
-        const oldQty = prevQtyByProduct.get(prodId) || 0;
-        const newQty = nextQtyByProduct.get(prodId) || 0;
-        const delta = newQty - oldQty;
-        if (delta !== 0) {
-          await updateRow('products', product.id, {
-            stock: Math.max(0, Number(product.stock || 0) - delta),
-          });
-        }
+        await updateRow('products', product.id, {
+          stock: Math.max(0, Number(product.stock || 0) - sd.delta),
+        });
       }
+
+      markPaymentReconciled({
+        ownerId,
+        saleId,
+        ledgerId: saleId,
+        mpOrderId: effectiveMpOrderId,
+        mpCompanionOrderId: mpOrder?.companionPointOrderId,
+        mpExternalReference: effectiveMpExtRef,
+      });
 
       const savedRecord: SaleRecord = {
         id: saleId,
@@ -1216,7 +1368,46 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         onCreated?.(savedRecord);
       }
     } catch (err) {
-      notify(sanitizeDbErrorMessage(err, 'No se pudo guardar la venta.'), 'error');
+      const safeErrMsg = sanitizeDbErrorMessage(err, 'No se pudo guardar la venta.');
+      const collectedNow = editSale
+        ? Math.max(0, roundCurrencyValue(cleanDeposit - prevDepositBase))
+        : cleanDeposit;
+
+      if (collectedNow > 0) {
+        recordRecoveredPayment({
+          id: effectiveMpOrderId || saleId,
+          ownerId,
+          source: 'venta',
+          method: paymentMethod,
+          ...(effectiveMpChannel ? { mpChannel: effectiveMpChannel } : {}),
+          amount: collectedNow,
+          totalAmount: cleanAmount,
+          clientName: cleanClientName,
+          title: summaryProductLabel,
+          subtitle: `${finalInvoice} · Error al guardar en la nube`,
+          invoice: finalInvoice,
+          ...(effectiveMpOrderId ? { mpOrderId: effectiveMpOrderId } : {}),
+          ...(mpOrder?.companionPointOrderId
+            ? { mpCompanionOrderId: mpOrder.companionPointOrderId }
+            : {}),
+          ...(effectiveMpExtRef ? { mpExternalReference: effectiveMpExtRef } : {}),
+          saveFailed: true,
+          saveError: safeErrMsg,
+          ...(draftClientPayload ? { draftClientPayload } : {}),
+          ...(!editSale
+            ? {
+                draftSalePayload: salePayload,
+                draftStockDeltas: stockDeltas,
+              }
+            : {}),
+        });
+        notify(
+          `${safeErrMsg} El cobro de ${formatCurrency(collectedNow, baseCurrency)} quedó resguardado en Caja Diaria para no perderlo.`,
+          'error'
+        );
+      } else {
+        notify(safeErrMsg, 'error');
+      }
     } finally {
       setSaving(false);
     }
@@ -1313,17 +1504,38 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       return;
     }
 
+    const token = mpConfig.accessToken.trim();
+    if (mpOrder && mpOrder.status === 'pending') {
+      void cancelMercadoPagoOrder({
+        accessToken: token,
+        orderId: mpOrder.orderId,
+        apiFamily: mpOrder.apiFamily,
+        terminalId: mpConfig.terminalId.trim(),
+        posExternalId: mpConfig.posExternalId.trim(),
+      }).catch(() => {});
+      if (mpOrder.companionPointOrderId) {
+        void cancelMercadoPagoOrder({
+          accessToken: token,
+          orderId: mpOrder.companionPointOrderId,
+          apiFamily: mpOrder.companionPointApiFamily || 'orders_v1',
+          terminalId: mpConfig.terminalId.trim(),
+        }).catch(() => {});
+      }
+    }
+
     const effectivePosId = mpConfig.posExternalId.trim() || 'CAJA01';
     const description =
       cartItems.length > 0
         ? summarizeSaleItemsLabel(cartItems)
         : `Venta ${invoice || effectiveBrandName}`;
     const extRef = `${(invoice || 'FV').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 20) || 'FV'}-${Date.now().toString().slice(-6)}`;
+    const alsoShowOnPoint =
+      mode === 'qr' && showQrOnPointSmart && Boolean(mpConfig.terminalId.trim());
 
     setMpBusy(true);
     try {
       const res = await createMercadoPagoOrder({
-        accessToken: mpConfig.accessToken.trim(),
+        accessToken: token,
         mode,
         amount: mpChargeAmount,
         description,
@@ -1331,6 +1543,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         posExternalId: effectivePosId,
         terminalId: mpConfig.terminalId.trim(),
         printOnTerminal: mpConfig.printOnTerminal,
+        alsoShowOnPoint,
       });
 
       if (!res.ok || !res.orderId) {
@@ -1360,6 +1573,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         }
       }
 
+      const shownOnPoint = Boolean(res.companionPointOrderId);
       setMpOrder({
         mode,
         apiFamily: res.apiFamily || 'orders_v1',
@@ -1370,21 +1584,37 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         status: res.isPaid ? 'paid' : 'pending',
         statusText:
           mode === 'qr'
-            ? tr(
-                'QR dinámico activo · Esperando que el cliente escanee y pague...',
-                'Dynamic QR active · Waiting for customer to scan and pay...',
-                'QR dinâmico ativo · Aguardando o cliente escanear e pagar...'
-              )
+            ? shownOnPoint
+              ? tr(
+                  'QR activo en pantalla y en el Point Smart · Esperando pago...',
+                  'QR active on screen and Point Smart · Waiting for payment...',
+                  'QR ativo na tela e no Point Smart · Aguardando pagamento...'
+                )
+              : tr(
+                  'QR dinámico activo · Esperando que el cliente escanee y pague...',
+                  'Dynamic QR active · Waiting for customer to scan and pay...',
+                  'QR dinâmico ativo · Aguardando o cliente escanear e pagar...'
+                )
             : tr(
                 `Orden enviada a ${mpConfig.terminalId} · Esperando tarjeta en el Point...`,
                 `Order sent to ${mpConfig.terminalId} · Waiting for card on Point...`,
                 `Pedido enviado para ${mpConfig.terminalId} · Aguardando cartão no Point...`
               ),
+        ...(res.companionPointOrderId ? { companionPointOrderId: res.companionPointOrderId } : {}),
+        ...(res.companionPointApiFamily
+          ? { companionPointApiFamily: res.companionPointApiFamily }
+          : {}),
+        ...(res.companionPointExternalReference
+          ? { companionPointExternalReference: res.companionPointExternalReference }
+          : {}),
+        ...(res.companionPointWarning ? { companionPointWarning: res.companionPointWarning } : {}),
       });
 
       notify(
         mode === 'qr'
-          ? 'QR dinámico de Mercado Pago generado.'
+          ? shownOnPoint
+            ? 'QR dinámico generado en pantalla y enviado al Point Smart.'
+            : 'QR dinámico de Mercado Pago generado.'
           : 'Orden enviada al dispositivo Point.'
       );
     } catch {
@@ -1396,19 +1626,80 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
 
   const handleCheckMpStatusOnce = async () => {
     if (!mpOrder || !mpConfig.accessToken.trim()) return;
+    const token = mpConfig.accessToken.trim();
     setMpBusy(true);
     try {
       const res = await checkMercadoPagoOrderStatus({
-        accessToken: mpConfig.accessToken.trim(),
+        accessToken: token,
         orderId: mpOrder.orderId,
         apiFamily: mpOrder.apiFamily,
         externalReference: mpOrder.externalReference,
       });
-      if (!res.ok) {
+
+      let companionPaid = false;
+      if ((!res.ok || !res.isPaid) && mpOrder.companionPointOrderId) {
+        const ptRes = await checkMercadoPagoOrderStatus({
+          accessToken: token,
+          orderId: mpOrder.companionPointOrderId,
+          apiFamily: mpOrder.companionPointApiFamily || 'orders_v1',
+          externalReference: mpOrder.companionPointExternalReference,
+        });
+        if (ptRes.ok && ptRes.isPaid) {
+          companionPaid = true;
+        }
+      }
+
+      if (!res.ok && !companionPaid) {
         notify(res.error || 'No se pudo consultar el estado.', 'error');
         return;
       }
-      if (res.isPaid) {
+
+      if ((res.ok && res.isPaid) || companionPaid) {
+        const mpChannel = mpOrder.mode === 'point' ? 'mp_point' : 'mp_qr';
+        const methodForOrder: PaymentMethod = mpOrder.mode === 'point' ? 'tarjeta' : 'transferencia';
+        const itemSummary =
+          cartItems.length > 0
+            ? summarizeSaleItemsLabel(cartItems)
+            : manualName.trim() || (mpOrder.mode === 'point' ? 'Cobro Point Smart' : 'Cobro QR Mercado Pago');
+
+        recordRecoveredPayment({
+          id: mpOrder.orderId,
+          ownerId,
+          source: 'venta',
+          method: methodForOrder,
+          mpChannel,
+          amount: mpOrder.amount,
+          totalAmount: mpOrder.amount,
+          clientName: clientName.trim() || 'Mostrador',
+          title: itemSummary,
+          subtitle: companionPaid
+            ? 'Aprobado vía QR en Point Smart (pendiente de guardar venta)'
+            : mpOrder.mode === 'point'
+              ? 'Aprobado en Point Smart (pendiente de guardar venta)'
+              : 'Aprobado vía QR Mercado Pago (pendiente de guardar venta)',
+          invoice: invoice.trim() || undefined,
+          mpOrderId: mpOrder.orderId,
+          mpCompanionOrderId: mpOrder.companionPointOrderId,
+          mpExternalReference: mpOrder.externalReference,
+          saveFailed: false,
+        });
+
+        if (companionPaid) {
+          void cancelMercadoPagoOrder({
+            accessToken: token,
+            orderId: mpOrder.orderId,
+            apiFamily: mpOrder.apiFamily,
+            posExternalId: mpConfig.posExternalId.trim(),
+          }).catch(() => {});
+        } else if (mpOrder.companionPointOrderId) {
+          void cancelMercadoPagoOrder({
+            accessToken: token,
+            orderId: mpOrder.companionPointOrderId,
+            apiFamily: mpOrder.companionPointApiFamily || 'orders_v1',
+            terminalId: mpConfig.terminalId.trim(),
+          }).catch(() => {});
+        }
+
         setMpOrder((prev) =>
           prev
             ? {
@@ -1466,15 +1757,24 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       setMpOrder(null);
       return;
     }
+    const token = mpConfig.accessToken.trim();
     setMpBusy(true);
     try {
       const res = await cancelMercadoPagoOrder({
-        accessToken: mpConfig.accessToken.trim(),
+        accessToken: token,
         orderId: mpOrder.orderId,
         apiFamily: mpOrder.apiFamily,
         terminalId: mpConfig.terminalId.trim(),
         posExternalId: mpConfig.posExternalId.trim(),
       });
+      if (mpOrder.companionPointOrderId) {
+        await cancelMercadoPagoOrder({
+          accessToken: token,
+          orderId: mpOrder.companionPointOrderId,
+          apiFamily: mpOrder.companionPointApiFamily || 'orders_v1',
+          terminalId: mpConfig.terminalId.trim(),
+        }).catch(() => {});
+      }
       if (!res.ok) {
         notify(res.error || 'No se pudo cancelar la orden en Mercado Pago.', 'error');
         return;
@@ -2314,6 +2614,25 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
               </div>
             </div>
 
+            {mpConfig.accessToken.trim() && mpConfig.terminalId.trim() && (
+              <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-sky-200/70 bg-white/60 px-3 py-2 text-[11px] font-medium text-slate-700 dark:border-sky-900/50 dark:bg-slate-900/50 dark:text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={showQrOnPointSmart}
+                  onChange={(e) => setShowQrOnPointSmart(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-[#0072BB] focus:ring-[#0072BB]"
+                />
+                <Smartphone className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
+                <span>
+                  {tr(
+                    `Mostrar este QR también en el Point Smart (${mpConfig.terminalId}) por si las dudas`,
+                    `Also show this QR on Point Smart (${mpConfig.terminalId})`,
+                    `Mostrar este QR também no Point Smart (${mpConfig.terminalId})`
+                  )}
+                </span>
+              </label>
+            )}
+
             {mpOrder && mpOrder.mode === 'qr' && (
               <div
                 className={`flex flex-wrap items-center gap-3 rounded-xl border p-3 text-xs ${
@@ -2343,6 +2662,17 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   <div className="font-mono-num text-[11px] opacity-75">
                     Ref: {mpOrder.externalReference} · {formatCurrency(mpOrder.amount, baseCurrency)}
                   </div>
+                  {mpOrder.companionPointOrderId && mpOrder.status === 'pending' && (
+                    <div className="inline-flex items-center gap-1.5 rounded-lg bg-sky-50 px-2 py-1 text-[11px] font-semibold text-[#0072BB] dark:bg-sky-950/50 dark:text-sky-300">
+                      <Smartphone className="h-3.5 w-3.5" />
+                      <span>QR también activo en Point Smart ({mpConfig.terminalId})</span>
+                    </div>
+                  )}
+                  {mpOrder.companionPointWarning && mpOrder.status === 'pending' && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+                      {mpOrder.companionPointWarning}
+                    </div>
+                  )}
                   {mpOrder.status === 'pending' && (
                     <div className="flex flex-wrap gap-2">
                       <button

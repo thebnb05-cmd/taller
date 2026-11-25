@@ -46,8 +46,11 @@ import {
 import { clearTransferConfigCache, hydrateTransferConfig } from '../utils/payment';
 import {
   clearMercadoPagoConfigCache,
+  fetchRecentMercadoPagoPayments,
   hydrateMercadoPagoConfig,
+  loadMercadoPagoConfig,
 } from '../utils/mercadoPago';
+import { mergeSyncedMpPayments } from '../utils/paymentLedger';
 import {
   fetchSubscriptionStatus,
   getPlanDisplayName,
@@ -312,6 +315,23 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
       if (!active) return;
       if (!hydrated.accessToken && !hydrated.terminalId && !hydrated.posExternalId) {
         syncMercadoPagoConfigFromProfile(userId, profile);
+      }
+      const effectiveMp = hydrated.accessToken
+        ? hydrated
+        : parseWorkshopMeta(profile).mercadoPago || loadMercadoPagoConfig(userId);
+      if (effectiveMp.accessToken) {
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        void fetchRecentMercadoPagoPayments({
+          accessToken: effectiveMp.accessToken,
+          sinceIso: todayStart.toISOString(),
+        })
+          .then((res) => {
+            if (active && res.ok && Array.isArray(res.payments) && res.payments.length > 0) {
+              mergeSyncedMpPayments(userId, res.payments);
+            }
+          })
+          .catch(() => {});
       }
     });
     const loadedSet = new Set<string>();
@@ -1219,6 +1239,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
             <Suspense fallback={<PageChunkSkeleton />}>
               {page === 'home' && (
                 <HomePage
+                  ownerId={userId}
                   repairs={repairs}
                   clients={clients}
                   products={products}
@@ -1302,6 +1323,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
 
               {page === 'sales' && (
                 <SalesPage
+                  ownerId={userId}
                   sales={sales}
                   products={products}
                   profile={profile}
@@ -1326,6 +1348,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                   sales={sales}
                   repairs={repairs}
                   purchases={purchases}
+                  products={products}
                   profile={profile}
                 />
               )}
@@ -1350,6 +1373,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
 
               {page === 'reports' && (
                 <ReportsPage
+                  ownerId={userId}
                   profile={profile}
                   repairs={repairs}
                   clients={clients}

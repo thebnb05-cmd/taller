@@ -52,6 +52,7 @@ import {
   serializeRepairPaymentStatus,
   type PaymentMethod,
 } from '../utils/payment';
+import { recordRecoveredPayment } from '../utils/paymentLedger';
 import {
   appendTimelineEntry,
   createRepairMetaId,
@@ -861,6 +862,7 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
     const cleanClientAddress = sanitizePlainLine(clientAddress, 240);
 
     setSaving(true);
+    const createdRepairs: RepairRecord[] = [];
     try {
       let resolvedClientId = clientId;
       if (!resolvedClientId) {
@@ -902,7 +904,6 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
         stockRemaining.set(p.id, Number(p.stock || 0));
       }
 
-      const createdRepairs: RepairRecord[] = [];
       const brandLabel =
         clampStr(profile?.brandName || 'TH3 BNB Servicio Técnico', 80) || 'TH3 BNB Servicio Técnico';
 
@@ -1087,7 +1088,30 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
         }
       }
     } catch (err) {
-      notify(sanitizeDbErrorMessage(err, 'No se pudo guardar la reparación.'), 'error');
+      const msg = sanitizeDbErrorMessage(err, 'No se pudo guardar la reparación.');
+      const unsavedWithDeposit = itemsToSave
+        .slice(createdRepairs.length)
+        .filter((item) => Number(item.deposit || 0) > 0);
+      if (unsavedWithDeposit.length > 0 && ownerId) {
+        unsavedWithDeposit.forEach((item, idx) => {
+          recordRecoveredPayment({
+            id: `rec-newrep-${Date.now()}-${idx}`,
+            ownerId,
+            source: 'reparacion',
+            method: item.depositMethod || 'efectivo',
+            amount: Number(item.deposit),
+            totalAmount: Number(item.budget || item.deposit),
+            clientName: cleanClientName,
+            title: `Seña · ${item.brand || ''} ${item.model || ''}`.trim() || 'Seña de ingreso',
+            subtitle: 'Seña inicial (error al guardar orden en nube)',
+            saveFailed: true,
+            saveError: msg,
+          });
+        });
+        notify(`${msg} La seña cobrada quedó resguardada en Caja diaria.`, 'error');
+      } else {
+        notify(msg, 'error');
+      }
     } finally {
       setSaving(false);
     }

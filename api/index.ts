@@ -1623,6 +1623,7 @@ export async function handleApiRequest(
     const posExternalId = resolvePosId(body.posExternalId);
     const terminalId = resolveTerminalId(body.terminalId);
     const printOnTerminal = Boolean(body.printOnTerminal);
+    const alsoShowOnPoint = body.alsoShowOnPoint !== false;
 
     if (!token) {
       sendJson(res, 400, {
@@ -1642,6 +1643,72 @@ export async function handleApiRequest(
 
     const formattedAmount = rawAmount.toFixed(2);
     const idempotencyKey = crypto.randomUUID();
+
+    const triggerCompanionPointQr = async (): Promise<{
+      companionPointOrderId?: string;
+      companionPointApiFamily?: 'orders_v1';
+      companionPointExternalReference?: string;
+      companionPointStatus?: string;
+      companionPointWarning?: string;
+    }> => {
+      if (!alsoShowOnPoint || !terminalId) return {};
+      const companionRef = `${externalReference.slice(0, 56)}-PT`;
+      const sendPointQr = (includePrintOption: boolean, includePaymentMethod: boolean) =>
+        mpFetch('/v1/orders', token, {
+          method: 'POST',
+          idempotencyKey: crypto.randomUUID(),
+          body: {
+            type: 'point',
+            external_reference: companionRef,
+            expiration_time: 'PT15M',
+            description,
+            config: {
+              point: {
+                terminal_id: terminalId,
+                ...(includePrintOption
+                  ? { print_on_terminal: printOnTerminal ? 'seller_ticket' : 'no_ticket' }
+                  : {}),
+              },
+              ...(includePaymentMethod
+                ? { payment_method: { default_type: 'qr' } }
+                : {}),
+            },
+            transactions: {
+              payments: [{ amount: formattedAmount }],
+            },
+          },
+        });
+
+      try {
+        let ptRes = await sendPointQr(true, true);
+        if (!ptRes.ok && ptRes.status === 400) {
+          ptRes = await sendPointQr(false, true);
+        }
+        if (!ptRes.ok && ptRes.status === 400) {
+          ptRes = await sendPointQr(false, false);
+        }
+        if (ptRes.ok && ptRes.data.id) {
+          return {
+            companionPointOrderId: String(ptRes.data.id),
+            companionPointApiFamily: 'orders_v1',
+            companionPointExternalReference: companionRef,
+            companionPointStatus: String(ptRes.data.status || 'created'),
+          };
+        }
+        return {
+          companionPointWarning: extractMpErrorMessage(
+            ptRes.data,
+            'El QR de pantalla está listo, pero el Point Smart no respondió (verificá que esté en modo PDV y conectado).',
+            'point'
+          ),
+        };
+      } catch {
+        return {
+          companionPointWarning:
+            'El QR de pantalla está listo, pero no se pudo enviar el espejo al Point Smart.',
+        };
+      }
+    };
 
     try {
       if (mode === 'qr') {
@@ -1786,7 +1853,8 @@ export async function handleApiRequest(
 
         let attempt = await tryGenerateQrForPos(requestedPosExternalId);
         if (attempt.ok) {
-          sendJson(res, 200, attempt.payload);
+          const companion = await triggerCompanionPointQr();
+          sendJson(res, 200, { ...attempt.payload, ...companion });
           return true;
         }
 
@@ -1798,7 +1866,8 @@ export async function handleApiRequest(
           if (ensured.ok) {
             const retry = await tryGenerateQrForPos(ensured.pos.externalId, ensured.sellerId);
             if (retry.ok) {
-              sendJson(res, 200, retry.payload);
+              const companion = await triggerCompanionPointQr();
+              sendJson(res, 200, { ...retry.payload, ...companion });
               return true;
             }
             attempt = retry;
@@ -2095,6 +2164,145 @@ export async function handleApiRequest(
           err instanceof Error
             ? err.message
             : 'Error de red al cancelar la orden en Mercado Pago.',
+      });
+      return true;
+    }
+  }
+
+  if (apiPath === '/api/mercadopago/payments-today') {
+    const user = await verifySupabaseSessionUser(req);
+    if (!user) {
+      sendJson(res, 401, { ok: false, error: 'Sesión inválida o expirada.' });
+      return true;
+    }
+    const token = resolveAccessToken(body.accessToken);
+    if (!token) {
+      sendJson(res, 400, {
+        ok: false,
+        error: 'Falta configurar el Access Token de Mercado Pago.',
+      });
+      return true;
+    }
+
+    const nowMs = Date.now();
+    const rawSince = typeof body.sinceIso === 'string' ? Date.parse(body.sinceIso) : NaN;
+    const beginMs =
+      Number.isFinite(rawSince) && rawSince > nowMs - 7 * 24 * 60 * 60 * 1000 && rawSince <= nowMs
+        ? rawSince
+        : nowMs - 36 * 60 * 60 * 1000;
+    const beginIso = new Date(beginMs).toISOString();
+    const endIso = new Date(nowMs + 60_000).toISOString();
+
+    try {
+      const searchUrl = `/v1/payments/search?sort=date_created&criteria=desc&status=approved&range=date_created&begin_date=${encodeURIComponent(beginIso)}&end_date=${encodeURIComponent(endIso)}&limit=50`;
+      const searchRes = await mpFetch(searchUrl, token);
+      if (!searchRes.ok) {
+        sendJson(res, searchRes.status >= 400 ? searchRes.status : 400, {
+          ok: false,
+          error: extractMpErrorMessage(
+            searchRes.data,
+            'No se pudieron consultar los cobros recientes en Mercado Pago.',
+            'auth'
+          ),
+        });
+        return true;
+      }
+
+      const rawResults = Array.isArray(searchRes.data.results) ? searchRes.data.results : [];
+      const payments: Array<{
+        paymentId: string;
+        orderId: string;
+        externalReference: string;
+        amount: number;
+        dateApproved: string;
+        description: string;
+        mpChannel: 'mp_point' | 'mp_qr';
+        appMethod: 'tarjeta' | 'transferencia';
+        paymentMethodId: string;
+        paymentTypeId: string;
+        posId: string;
+      }> = [];
+
+      for (const item of rawResults) {
+        if (!item || typeof item !== 'object') continue;
+        const p = item as Record<string, unknown>;
+        const status = String(p.status || '').toLowerCase();
+        if (status !== 'approved') continue;
+
+        const opType = String(p.operation_type || '').toLowerCase();
+        const extRef = String(p.external_reference || '').trim();
+        if (
+          opType === 'recurring_payment' ||
+          opType === 'money_transfer' ||
+          opType === 'account_fund' ||
+          extRef.startsWith('SUB-')
+        ) {
+          continue;
+        }
+
+        const amount = Math.round(Number(p.transaction_amount || 0) * 100) / 100;
+        if (!Number.isFinite(amount) || amount <= 0) continue;
+
+        const poi =
+          p.point_of_interaction && typeof p.point_of_interaction === 'object'
+            ? (p.point_of_interaction as Record<string, unknown>)
+            : {};
+        const poiType = String(poi.type || '').toUpperCase();
+        const poiSubType = String(poi.sub_type || '').toUpperCase();
+        const paymentTypeId = String(p.payment_type_id || '').toLowerCase();
+        const paymentMethodId = String(p.payment_method_id || '').toLowerCase();
+        const posId = String(p.pos_id || '').trim();
+        const orderObj =
+          p.order && typeof p.order === 'object' ? (p.order as Record<string, unknown>) : {};
+        const orderId = String(orderObj.id || '').trim();
+
+        const isQrPayment =
+          poiSubType.includes('QR') ||
+          poiType.includes('QR') ||
+          paymentTypeId === 'account_money' ||
+          paymentTypeId === 'bank_transfer' ||
+          paymentTypeId === 'digital_wallet';
+
+        const isPointPayment =
+          !isQrPayment &&
+          (poiType === 'POINT' ||
+            opType === 'pos_payment' ||
+            paymentTypeId === 'credit_card' ||
+            paymentTypeId === 'debit_card' ||
+            paymentTypeId === 'prepaid_card');
+
+        if (!isQrPayment && !isPointPayment && !posId && !orderId) {
+          continue;
+        }
+
+        const mpChannel: 'mp_point' | 'mp_qr' = isQrPayment ? 'mp_qr' : 'mp_point';
+        const appMethod: 'tarjeta' | 'transferencia' =
+          mpChannel === 'mp_qr' ? 'transferencia' : 'tarjeta';
+
+        payments.push({
+          paymentId: String(p.id || ''),
+          orderId,
+          externalReference: extRef,
+          amount,
+          dateApproved: String(p.date_approved || p.date_created || new Date().toISOString()),
+          description: String(p.description || '').trim(),
+          mpChannel,
+          appMethod,
+          paymentMethodId,
+          paymentTypeId,
+          posId,
+        });
+      }
+
+      sendJson(res, 200, { ok: true, payments });
+      return true;
+    } catch (err) {
+      sendJson(res, 502, {
+        ok: false,
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Error de red al consultar pagos en Mercado Pago.',
       });
       return true;
     }

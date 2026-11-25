@@ -66,6 +66,7 @@ import {
   type PaymentMethod,
   type TransferConfig,
 } from '../utils/payment';
+import { recordRecoveredPayment } from '../utils/paymentLedger';
 import {
   compressPhotoForTracking,
   createMediaId,
@@ -969,7 +970,25 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       setJustPaid(true);
       setTab('receipt');
     } catch (err) {
-      notify(sanitizeDbErrorMessage(err, 'No se pudo registrar el pago.'), 'error');
+      const msg = sanitizeDbErrorMessage(err, 'No se pudo registrar el pago.');
+      if (paidNow > 0 && repair.ownerId) {
+        recordRecoveredPayment({
+          id: `rec-rep-${repair.id}-${Date.now()}`,
+          ownerId: repair.ownerId,
+          source: 'reparacion',
+          method: paymentMethod,
+          amount: paidNow,
+          totalAmount: budget,
+          clientName: repair.clientName || 'Cliente',
+          title: `${repair.code} · ${repair.brand} ${repair.model}`,
+          subtitle: prevDeposit > 0 ? 'Cancelación de saldo (error al guardar en nube)' : 'Pago total (error al guardar en nube)',
+          saveFailed: true,
+          saveError: msg,
+        });
+        notify(`${msg} El cobro quedó resguardado en Caja diaria.`, 'error');
+      } else {
+        notify(msg, 'error');
+      }
     } finally {
       setPaying(false);
     }
@@ -1060,7 +1079,25 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
         setJustPaid(true);
       }
     } catch (err) {
-      notify(sanitizeDbErrorMessage(err, 'No se pudo registrar el abono.'), 'error');
+      const msg = sanitizeDbErrorMessage(err, 'No se pudo registrar el abono.');
+      if (amt > 0 && repair.ownerId) {
+        recordRecoveredPayment({
+          id: `rec-rep-part-${repair.id}-${Date.now()}`,
+          ownerId: repair.ownerId,
+          source: 'reparacion',
+          method: partialMethod,
+          amount: amt,
+          totalAmount: Number(repair.price || amt),
+          clientName: repair.clientName || 'Cliente',
+          title: `${repair.code} · ${repair.brand} ${repair.model}`,
+          subtitle: 'Seña / abono parcial (error al guardar en nube)',
+          saveFailed: true,
+          saveError: msg,
+        });
+        notify(`${msg} El abono quedó resguardado en Caja diaria.`, 'error');
+      } else {
+        notify(msg, 'error');
+      }
     } finally {
       setSavingPartial(false);
     }

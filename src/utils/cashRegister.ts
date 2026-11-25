@@ -2,8 +2,9 @@ import { upsertRow } from '../lib/db';
 import type { RepairRecord, SaleRecord, TaskRecord } from '../types/workshop';
 import type { PaymentMethod } from './payment';
 import { parsePaymentInfo } from './payment';
+import type { RecoveredPaymentEntry } from './paymentLedger';
 import { parseRepairPaymentLedger } from './repairMeta';
-import { parseSaleDetails, parseSalePaymentInfo } from './saleMeta';
+import { parseSaleDetails, parseSalePaymentInfo, type MpPaymentChannel } from './saleMeta';
 import { sanitizePlainLine, sanitizeText } from './validation';
 
 export const CASH_SHIFT_TASK_TYPE = '__cash_shift__';
@@ -38,16 +39,25 @@ export interface ShiftLedgerEntry {
   id: string;
   at: string;
   atMs: number;
-  source: 'venta' | 'reparacion' | 'manual';
+  source: 'venta' | 'reparacion' | 'manual' | 'recuperado';
   direction: 'in' | 'out';
   method: PaymentMethod;
+  mpChannel?: MpPaymentChannel;
   amount: number;
   title: string;
   subtitle?: string;
+  isRecovered?: boolean;
+  saveFailed?: boolean;
+  saveError?: string;
+  recoveredEntry?: RecoveredPaymentEntry;
 }
 
 export interface ShiftFinancialSummary {
   totalsByMethod: Record<PaymentMethod, number>;
+  mpPointTotal: number;
+  mpQrTotal: number;
+  recoveredTotal: number;
+  recoveredCount: number;
   salesTotal: number;
   repairsTotal: number;
   manualInTotal: number;
@@ -134,13 +144,26 @@ export function computeShiftFinancials(params: {
   movements: CashMovement[];
   sales: SaleRecord[];
   repairs: RepairRecord[];
+  recoveredPayments?: RecoveredPaymentEntry[];
 }): ShiftFinancialSummary {
-  const { startMs, endMs, openingCash, movements, sales, repairs } = params;
+  const {
+    startMs,
+    endMs,
+    openingCash,
+    movements,
+    sales,
+    repairs,
+    recoveredPayments = [],
+  } = params;
   const totalsByMethod: Record<PaymentMethod, number> = {
     efectivo: 0,
     transferencia: 0,
     tarjeta: 0,
   };
+  let mpPointTotal = 0;
+  let mpQrTotal = 0;
+  let recoveredTotal = 0;
+  let recoveredCount = 0;
   let salesTotal = 0;
   let repairsTotal = 0;
   let manualInTotal = 0;
@@ -153,12 +176,18 @@ export function computeShiftFinancials(params: {
   for (const s of sales) {
     const details = parseSaleDetails(s);
     const payInfo = parseSalePaymentInfo(s);
+    const mpChannel = details.mpChannel;
     if (details.payments.length > 0) {
       for (const p of details.payments) {
         const atMs = Date.parse(p.date);
         if (!Number.isNaN(atMs) && inWindow(atMs) && p.amount > 0) {
           totalsByMethod[p.method] += p.amount;
           salesTotal += p.amount;
+          const entryMpChannel =
+            mpChannel ||
+            undefined;
+          if (entryMpChannel === 'mp_point') mpPointTotal += p.amount;
+          else if (entryMpChannel === 'mp_qr') mpQrTotal += p.amount;
           entries.push({
             id: `sale-${s.id}-${p.id}`,
             at: p.date,
@@ -166,6 +195,7 @@ export function computeShiftFinancials(params: {
             source: 'venta',
             direction: 'in',
             method: p.method,
+            ...(entryMpChannel ? { mpChannel: entryMpChannel } : {}),
             amount: p.amount,
             title: s.clientName || 'Mostrador',
             subtitle: `${s.invoice || 'Venta'}${p.note ? ` · ${p.note}` : ''}`,
@@ -176,6 +206,8 @@ export function computeShiftFinancials(params: {
       const method: PaymentMethod = payInfo.method || 'efectivo';
       totalsByMethod[method] += payInfo.deposit;
       salesTotal += payInfo.deposit;
+      if (mpChannel === 'mp_point') mpPointTotal += payInfo.deposit;
+      else if (mpChannel === 'mp_qr') mpQrTotal += payInfo.deposit;
       entries.push({
         id: `sale-${s.id}`,
         at: new Date(s.createdAt).toISOString(),
@@ -183,6 +215,7 @@ export function computeShiftFinancials(params: {
         source: 'venta',
         direction: 'in',
         method,
+        ...(mpChannel ? { mpChannel } : {}),
         amount: payInfo.deposit,
         title: s.clientName || 'Mostrador',
         subtitle: s.productName || s.invoice || 'Venta',
@@ -234,7 +267,45 @@ export function computeShiftFinancials(params: {
     }
   }
 
-  // 3. Manual cash movements
+  // 3. Unreconciled / recovered payments (failed save or MP Point/QR paid directly)
+  for (const rec of recoveredPayments) {
+    if (rec.amount <= 0) continue;
+    const atMs = Number.isFinite(rec.createdAt) ? rec.createdAt : Date.parse(rec.at);
+    if (Number.isNaN(atMs) || !inWindow(atMs)) continue;
+
+    totalsByMethod[rec.method] += rec.amount;
+    if (rec.source === 'reparacion') {
+      repairsTotal += rec.amount;
+    } else {
+      salesTotal += rec.amount;
+    }
+    if (rec.mpChannel === 'mp_point') mpPointTotal += rec.amount;
+    else if (rec.mpChannel === 'mp_qr') mpQrTotal += rec.amount;
+
+    recoveredTotal += rec.amount;
+    recoveredCount += 1;
+
+    entries.push({
+      id: `rec-${rec.id}`,
+      at: rec.at,
+      atMs,
+      source: 'recuperado',
+      direction: 'in',
+      method: rec.method,
+      ...(rec.mpChannel ? { mpChannel: rec.mpChannel } : {}),
+      amount: rec.amount,
+      title: rec.clientName ? `${rec.clientName} · ${rec.title}` : rec.title,
+      subtitle: rec.saveFailed
+        ? rec.saveError || 'Cobrado · Error al guardar en la nube'
+        : rec.subtitle || 'Cobro acreditado en Mercado Pago',
+      isRecovered: true,
+      saveFailed: rec.saveFailed,
+      saveError: rec.saveError,
+      recoveredEntry: rec,
+    });
+  }
+
+  // 4. Manual cash movements
   let manualCashDelta = 0;
   for (const m of movements) {
     const atMs = Date.parse(m.at) || startMs;
@@ -271,6 +342,10 @@ export function computeShiftFinancials(params: {
 
   return {
     totalsByMethod,
+    mpPointTotal: Math.round(mpPointTotal * 100) / 100,
+    mpQrTotal: Math.round(mpQrTotal * 100) / 100,
+    recoveredTotal: Math.round(recoveredTotal * 100) / 100,
+    recoveredCount,
     salesTotal: Math.round(salesTotal * 100) / 100,
     repairsTotal: Math.round(repairsTotal * 100) / 100,
     manualInTotal: Math.round(manualInTotal * 100) / 100,

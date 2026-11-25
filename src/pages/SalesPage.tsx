@@ -1,12 +1,16 @@
 import React, { useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   CheckCircle2,
   Coins,
   Download,
   Edit3,
   Plus,
   Printer,
+  QrCode,
+  RotateCcw,
   Search,
+  Smartphone,
   Trash2,
   X,
 } from 'lucide-react';
@@ -23,6 +27,13 @@ import {
 } from '../utils/formatters';
 import { PAYMENT_METHOD_LABELS, type PaymentMethod } from '../utils/payment';
 import {
+  dismissRecoveredPayment,
+  getUnreconciledPayments,
+  retrySaveRecoveredSale,
+  useRecoveredPayments,
+  type RecoveredPaymentEntry,
+} from '../utils/paymentLedger';
+import {
   parseSaleDetails,
   parseSalePaymentInfo,
   serializeSaleStatus,
@@ -32,6 +43,7 @@ import { parseWorkshopMeta } from '../utils/workshopMeta';
 import { useI18n } from '../utils/i18n';
 
 interface SalesPageProps {
+  ownerId?: string;
   sales: SaleRecord[];
   products?: ProductRecord[];
   profile?: WorkshopProfile | null;
@@ -45,6 +57,7 @@ type MethodFilter = 'all' | PaymentMethod;
 type DatePreset = 'all' | 'today' | '7d' | 'month';
 
 export const SalesPage: React.FC<SalesPageProps> = ({
+  ownerId = '',
   sales,
   products = [],
   profile,
@@ -55,6 +68,15 @@ export const SalesPage: React.FC<SalesPageProps> = ({
   const { notify } = useToast();
   const { tr } = useI18n();
   const baseCurrency = useMemo(() => parseWorkshopMeta(profile).currency, [profile]);
+
+  const recoveredEntries = useRecoveredPayments(ownerId);
+  const unreconciledSales = useMemo(
+    () =>
+      getUnreconciledPayments(recoveredEntries, sales, []).filter(
+        (entry) => entry.source !== 'reparacion'
+      ),
+    [recoveredEntries, sales]
+  );
 
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -67,10 +89,27 @@ export const SalesPage: React.FC<SalesPageProps> = ({
   const [partialNote, setPartialNote] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [retryingRecoveredId, setRetryingRecoveredId] = useState<string | null>(null);
 
-  const total = sales.reduce((s, x) => s + Number(x.amount || 0), 0);
-  const collected = sales.reduce((s, x) => s + parseSalePaymentInfo(x).deposit, 0);
+  const recoveredTotal = unreconciledSales.reduce((s, x) => s + Number(x.amount || 0), 0);
+  const total = sales.reduce((s, x) => s + Number(x.amount || 0), 0) + recoveredTotal;
+  const collected =
+    sales.reduce((s, x) => s + parseSalePaymentInfo(x).deposit, 0) + recoveredTotal;
   const pending = Math.max(0, total - collected);
+
+  const handleRetryRecovered = async (entry: RecoveredPaymentEntry) => {
+    setRetryingRecoveredId(entry.id);
+    try {
+      const res = await retrySaveRecoveredSale(entry, products);
+      if (res.ok) {
+        notify('Venta guardada definitivamente en la nube.');
+      } else {
+        notify(res.error || 'No se pudo guardar en la nube todavía.', 'error');
+      }
+    } finally {
+      setRetryingRecoveredId(null);
+    }
+  };
 
   const filteredSales = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -167,9 +206,21 @@ export const SalesPage: React.FC<SalesPageProps> = ({
             surchargeAmount: details.surchargeAmount,
             payments,
             note: details.note,
+            ...(details.mpChannel ? { mpChannel: details.mpChannel } : {}),
+            ...(details.mpOrderId ? { mpOrderId: details.mpOrderId } : {}),
+            ...(details.mpExternalReference ? { mpExternalReference: details.mpExternalReference } : {}),
+            ...(details.mpPaymentId ? { mpPaymentId: details.mpPaymentId } : {}),
           }
-        : payments.length > 0
-          ? { items: details.items, subtotal: details.subtotal, payments }
+        : payments.length > 0 || details.mpChannel || details.mpOrderId
+          ? {
+              items: details.items,
+              subtotal: details.subtotal,
+              payments,
+              ...(details.mpChannel ? { mpChannel: details.mpChannel } : {}),
+              ...(details.mpOrderId ? { mpOrderId: details.mpOrderId } : {}),
+              ...(details.mpExternalReference ? { mpExternalReference: details.mpExternalReference } : {}),
+              ...(details.mpPaymentId ? { mpPaymentId: details.mpPaymentId } : {}),
+            }
           : undefined,
     });
   };
@@ -404,7 +455,14 @@ export const SalesPage: React.FC<SalesPageProps> = ({
           <div className="font-mono-num text-xl font-bold text-slate-900 sm:text-2xl dark:text-white">
             {formatCompactCurrency(total, baseCurrency)}
           </div>
-          <div className="text-xs text-slate-500">{tr('Total ventas', 'Total sales', 'Total de vendas')}</div>
+          <div className="text-xs text-slate-500">
+            {tr('Total ventas', 'Total sales', 'Total de vendas')}
+            {recoveredTotal > 0 && (
+              <span className="ml-1 font-semibold text-amber-600 dark:text-amber-400">
+                (+{formatCompactCurrency(recoveredTotal, baseCurrency)} recup.)
+              </span>
+            )}
+          </div>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="font-mono-num text-xl font-bold text-amber-600 sm:text-2xl dark:text-amber-400">
@@ -419,6 +477,85 @@ export const SalesPage: React.FC<SalesPageProps> = ({
           <div className="text-xs text-slate-500">{tr('Cobrado', 'Collected', 'Recebido')}</div>
         </div>
       </div>
+
+      {/* Recovered & MP Point/QR Pending Sales Panel */}
+      {unreconciledSales.length > 0 && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50/75 p-4 dark:border-amber-900/60 dark:bg-amber-950/25">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs font-bold text-amber-900 dark:text-amber-200">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <span>
+                {unreconciledSales.length}{' '}
+                {unreconciledSales.length === 1
+                  ? 'cobro pagado pendiente de guardar en Ventas'
+                  : 'cobros pagados pendientes de guardar en Ventas'}
+              </span>
+            </div>
+            <span className="font-mono-num text-xs font-extrabold text-amber-800 dark:text-amber-300">
+              {formatCurrency(recoveredTotal, baseCurrency)}
+            </span>
+          </div>
+          <div className="mt-2.5 space-y-2">
+            {unreconciledSales.slice(0, 6).map((rec) => (
+              <div
+                key={rec.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200/80 bg-white/95 px-3 py-2 text-xs dark:border-amber-900/50 dark:bg-slate-900/90"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-bold text-slate-900 dark:text-white">
+                      {rec.clientName} · {rec.title}
+                    </span>
+                    {rec.mpChannel === 'mp_point' && (
+                      <span className="inline-flex items-center gap-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
+                        <Smartphone className="h-2.5 w-2.5" /> Point MP
+                      </span>
+                    )}
+                    {rec.mpChannel === 'mp_qr' && (
+                      <span className="inline-flex items-center gap-1 rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300">
+                        <QrCode className="h-2.5 w-2.5" /> QR MP
+                      </span>
+                    )}
+                    {rec.saveFailed && (
+                      <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 dark:bg-rose-950/60 dark:text-rose-300">
+                        Error al guardar
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    {formatDateShort(rec.at.slice(0, 10))} · {PAYMENT_METHOD_LABELS[rec.method]}
+                    {rec.saveError ? ` · ${rec.saveError}` : rec.subtitle ? ` · ${rec.subtitle}` : ''}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono-num text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                    {formatCurrency(rec.amount, baseCurrency)}
+                  </span>
+                  {rec.draftSalePayload && (
+                    <button
+                      type="button"
+                      disabled={retryingRecoveredId === rec.id}
+                      onClick={() => void handleRetryRecovered(rec)}
+                      className="inline-flex h-8 items-center gap-1 rounded-lg bg-[#0072BB] px-2.5 text-[11px] font-semibold text-white hover:bg-[#005f9c] disabled:opacity-60"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      {retryingRecoveredId === rec.id ? 'Guardando...' : 'Guardar en Ventas'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => dismissRecoveredPayment(ownerId, rec.id)}
+                    aria-label="Descartar cobro recuperado"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-400 hover:border-rose-300 hover:text-rose-600 dark:border-slate-700"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Search & Filters */}
       <div className="flex flex-col gap-2.5 rounded-2xl border border-slate-200 bg-white p-3.5 dark:border-slate-800 dark:bg-slate-900">
@@ -548,6 +685,16 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                             {info.methodLabel}
                           </span>
                         </>
+                      )}
+                      {details.mpChannel === 'mp_point' && (
+                        <span className="inline-flex items-center gap-0.5 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
+                          <Smartphone className="h-2.5 w-2.5" /> Point MP
+                        </span>
+                      )}
+                      {details.mpChannel === 'mp_qr' && (
+                        <span className="inline-flex items-center gap-0.5 rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold text-[#0072BB] dark:bg-sky-950/60 dark:text-sky-300">
+                          <QrCode className="h-2.5 w-2.5" /> QR MP
+                        </span>
                       )}
                       {hasForeignCurrency && info.currency && (
                         <>

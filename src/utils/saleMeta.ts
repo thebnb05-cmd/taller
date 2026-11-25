@@ -26,6 +26,8 @@ export interface SalePaymentEntry {
   note?: string;
 }
 
+export type MpPaymentChannel = 'mp_point' | 'mp_qr';
+
 export interface SaleExtraMeta {
   items?: SaleCartItem[];
   subtotal?: number;
@@ -37,6 +39,10 @@ export interface SaleExtraMeta {
   surchargeAmount?: number;
   payments?: SalePaymentEntry[];
   note?: string;
+  mpChannel?: MpPaymentChannel;
+  mpOrderId?: string;
+  mpExternalReference?: string;
+  mpPaymentId?: string;
 }
 
 export interface ParsedSaleDetails {
@@ -50,6 +56,10 @@ export interface ParsedSaleDetails {
   surchargeAmount: number;
   payments: SalePaymentEntry[];
   note: string;
+  mpChannel?: MpPaymentChannel;
+  mpOrderId?: string;
+  mpExternalReference?: string;
+  mpPaymentId?: string;
   hasStructuredMeta: boolean;
 }
 
@@ -221,6 +231,11 @@ export function parseSaleDetails(
           }))
       : [];
 
+    const mpChannel: MpPaymentChannel | undefined =
+      parsed.mpChannel === 'mp_point' || parsed.mpChannel === 'mp_qr'
+        ? parsed.mpChannel
+        : undefined;
+
     return {
       items: resolvedItems,
       subtotal,
@@ -232,6 +247,12 @@ export function parseSaleDetails(
       surchargeAmount: safeRoundMoney(parsed.surchargeAmount),
       payments,
       note: parsed.note ? sanitizeText(String(parsed.note), 400) : '',
+      ...(mpChannel ? { mpChannel } : {}),
+      ...(parsed.mpOrderId ? { mpOrderId: sanitizePlainLine(String(parsed.mpOrderId), 80) } : {}),
+      ...(parsed.mpExternalReference
+        ? { mpExternalReference: sanitizePlainLine(String(parsed.mpExternalReference), 80) }
+        : {}),
+      ...(parsed.mpPaymentId ? { mpPaymentId: sanitizePlainLine(String(parsed.mpPaymentId), 80) } : {}),
       hasStructuredMeta: true,
     };
   } catch {
@@ -326,6 +347,18 @@ export function serializeSaleStatus(params: {
   const cleanNote = meta.note ? sanitizeText(meta.note, 400).replace(/-->/g, '').trim() : '';
   if (cleanNote) {
     cleanMeta.note = cleanNote;
+  }
+  if (meta.mpChannel === 'mp_point' || meta.mpChannel === 'mp_qr') {
+    cleanMeta.mpChannel = meta.mpChannel;
+  }
+  if (meta.mpOrderId) {
+    cleanMeta.mpOrderId = sanitizePlainLine(meta.mpOrderId, 80).replace(/-->/g, '');
+  }
+  if (meta.mpExternalReference) {
+    cleanMeta.mpExternalReference = sanitizePlainLine(meta.mpExternalReference, 80).replace(/-->/g, '');
+  }
+  if (meta.mpPaymentId) {
+    cleanMeta.mpPaymentId = sanitizePlainLine(meta.mpPaymentId, 80).replace(/-->/g, '');
   }
 
   if (Object.keys(cleanMeta).length === 0) {

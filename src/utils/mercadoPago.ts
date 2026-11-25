@@ -55,6 +55,11 @@ export interface MpOrderResponse {
   isPaid?: boolean;
   isCanceled?: boolean;
   isFailed?: boolean;
+  companionPointOrderId?: string;
+  companionPointApiFamily?: 'orders_v1';
+  companionPointExternalReference?: string;
+  companionPointStatus?: string;
+  companionPointWarning?: string;
 }
 
 export interface MpOrderStatusResponse {
@@ -66,6 +71,26 @@ export interface MpOrderStatusResponse {
   isPaid?: boolean;
   isCanceled?: boolean;
   isFailed?: boolean;
+}
+
+export interface MpRecentPayment {
+  paymentId: string;
+  orderId: string;
+  externalReference: string;
+  amount: number;
+  dateApproved: string;
+  description: string;
+  mpChannel: 'mp_point' | 'mp_qr';
+  appMethod: 'tarjeta' | 'transferencia';
+  paymentMethodId: string;
+  paymentTypeId: string;
+  posId: string;
+}
+
+export interface MpRecentPaymentsResponse {
+  ok: boolean;
+  error?: string;
+  payments?: MpRecentPayment[];
 }
 
 export interface MpPlatformTokenVerificationResult {
@@ -219,8 +244,16 @@ export async function createMercadoPagoOrder(params: {
   posExternalId?: string;
   terminalId?: string;
   printOnTerminal?: boolean;
+  alsoShowOnPoint?: boolean;
 }): Promise<MpOrderResponse> {
   return postJson<MpOrderResponse>('/api/mercadopago/orders', params);
+}
+
+export async function fetchRecentMercadoPagoPayments(params: {
+  accessToken: string;
+  sinceIso?: string;
+}): Promise<MpRecentPaymentsResponse> {
+  return postJson<MpRecentPaymentsResponse>('/api/mercadopago/payments-today', params);
 }
 
 export async function checkMercadoPagoOrderStatus(params: {
