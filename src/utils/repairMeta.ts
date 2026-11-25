@@ -44,6 +44,9 @@ export interface RepairPaymentEntry {
   method: PaymentMethod;
   date: string;
   note?: string;
+  mpChannel?: 'mp_point' | 'mp_qr';
+  mpOrderId?: string;
+  mpExternalReference?: string;
 }
 
 export function createRepairMetaId(prefix = 'rm'): string {
@@ -255,6 +258,11 @@ export function parseRepairPaymentLedger(checkoutState?: string | null): RepairP
             : 'efectivo',
         date: sanitizePlainLine(String(p.date || ''), 40) || new Date().toISOString(),
         ...(p.note ? { note: sanitizePlainLine(String(p.note), 120) } : {}),
+        ...(p.mpChannel === 'mp_point' || p.mpChannel === 'mp_qr' ? { mpChannel: p.mpChannel } : {}),
+        ...(p.mpOrderId ? { mpOrderId: sanitizePlainLine(String(p.mpOrderId), 80) } : {}),
+        ...(p.mpExternalReference
+          ? { mpExternalReference: sanitizePlainLine(String(p.mpExternalReference), 80) }
+          : {}),
       }));
   } catch {
     return [];
@@ -275,6 +283,11 @@ export function mergeCheckoutPaymentLedger(
       method: e.method,
       date: sanitizePlainLine(e.date, 40) || new Date().toISOString(),
       ...(e.note ? { note: sanitizePlainLine(e.note, 120).replace(/-->/g, '') } : {}),
+      ...(e.mpChannel === 'mp_point' || e.mpChannel === 'mp_qr' ? { mpChannel: e.mpChannel } : {}),
+      ...(e.mpOrderId ? { mpOrderId: sanitizePlainLine(e.mpOrderId, 80).replace(/-->/g, '') } : {}),
+      ...(e.mpExternalReference
+        ? { mpExternalReference: sanitizePlainLine(e.mpExternalReference, 80).replace(/-->/g, '') }
+        : {}),
     }));
 
   if (cleanEntries.length === 0) return baseWithoutRpay;

@@ -230,8 +230,18 @@ export function computeShiftFinancials(params: {
       for (const p of ledger) {
         const atMs = Date.parse(p.date);
         if (!Number.isNaN(atMs) && inWindow(atMs) && p.amount > 0) {
+          const entryMpChannel =
+            p.mpChannel === 'mp_point' || p.mpChannel === 'mp_qr'
+              ? p.mpChannel
+              : p.note?.includes('Point Smart') || p.note?.includes('[Point MP]')
+                ? 'mp_point'
+                : p.note?.includes('QR MP')
+                  ? 'mp_qr'
+                  : undefined;
           totalsByMethod[p.method] += p.amount;
           repairsTotal += p.amount;
+          if (entryMpChannel === 'mp_point') mpPointTotal += p.amount;
+          else if (entryMpChannel === 'mp_qr') mpQrTotal += p.amount;
           entries.push({
             id: `rep-${r.id}-${p.id}`,
             at: p.date,
@@ -239,6 +249,7 @@ export function computeShiftFinancials(params: {
             source: 'reparacion',
             direction: 'in',
             method: p.method,
+            ...(entryMpChannel ? { mpChannel: entryMpChannel } : {}),
             amount: p.amount,
             title: `${r.code} · ${r.clientName}`,
             subtitle: `${r.brand} ${r.model}${p.note ? ` · ${p.note}` : ''}`,

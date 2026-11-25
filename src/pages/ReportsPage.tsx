@@ -345,6 +345,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
       tarjeta: 0,
       sin_metodo: 0,
     };
+    let mpPointTotal = 0;
+    let mpQrTotal = 0;
     rFiltered.forEach((r) => {
       const collected = Math.min(Number(r.price || 0) || Number(r.deposit || 0), Number(r.deposit || 0));
       if (collected <= 0) return;
@@ -356,6 +358,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           const take = Math.min(collected - allocated, Math.max(0, Number(entry.amount || 0)));
           if (take > 0) {
             payTotals[entry.method] += take;
+            if (entry.mpChannel === 'mp_point') mpPointTotal += take;
+            else if (entry.mpChannel === 'mp_qr') mpQrTotal += take;
             allocated += take;
           }
         }
@@ -371,8 +375,6 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
         else payTotals.sin_metodo += collected;
       }
     });
-    let mpPointTotal = 0;
-    let mpQrTotal = 0;
     recRepFiltered.forEach((rec) => {
       payTotals[rec.method] += rec.amount;
       if (rec.mpChannel === 'mp_point') mpPointTotal += rec.amount;

@@ -9,6 +9,7 @@ import {
   serializeSaleStatus,
   type MpPaymentChannel,
 } from './saleMeta';
+import { parseRepairPaymentLedger } from './repairMeta';
 import { isSafeId, sanitizePlainLine, sanitizeText } from './validation';
 
 const LEDGER_EVENT = 'th3bnb-payment-ledger-changed';
@@ -404,6 +405,28 @@ export function getUnreconciledPayments(
         method: info.method,
         used: false,
       });
+    }
+  }
+
+  for (const r of repairs) {
+    const ledger = parseRepairPaymentLedger(r.checkoutState);
+    for (const entry of ledger) {
+      if (entry.mpOrderId) savedOrderIds.add(entry.mpOrderId);
+      if (entry.mpExternalReference) {
+        savedExtRefs.add(normalizeExtRef(entry.mpExternalReference));
+      }
+      if (!entry.mpOrderId && entry.amount > 0) {
+        const atMs = Date.parse(entry.date);
+        if (!Number.isNaN(atMs)) {
+          unmatchedSalesForFuzzy.push({
+            id: `rep-${r.id}-${entry.id}`,
+            createdAt: atMs,
+            amount: safeMoney(entry.amount),
+            method: entry.method,
+            used: false,
+          });
+        }
+      }
     }
   }
 

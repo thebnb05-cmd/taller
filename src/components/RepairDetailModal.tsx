@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
   AlertTriangle,
@@ -14,16 +14,19 @@ import {
   ExternalLink,
   Image as ImageIcon,
   Link2,
+  Loader2,
   MessageCircle,
   Package,
   PenTool,
   Printer,
   QrCode,
+  RefreshCw,
   RotateCcw,
   Search,
   Send,
   Settings2,
   ShieldCheck,
+  Smartphone,
   ThumbsDown,
   ThumbsUp,
   Trash2,
@@ -66,7 +69,16 @@ import {
   type PaymentMethod,
   type TransferConfig,
 } from '../utils/payment';
-import { recordRecoveredPayment } from '../utils/paymentLedger';
+import { markPaymentReconciled, recordRecoveredPayment } from '../utils/paymentLedger';
+import {
+  cancelMercadoPagoOrder,
+  checkMercadoPagoOrderStatus,
+  createMercadoPagoOrder,
+  hydrateMercadoPagoConfig,
+  loadMercadoPagoConfig,
+  saveMercadoPagoConfig,
+  type MercadoPagoConfig,
+} from '../utils/mercadoPago';
 import {
   compressPhotoForTracking,
   createMediaId,
@@ -110,7 +122,11 @@ import {
   WHATSAPP_TEMPLATE_OPTIONS,
   type WhatsAppTemplateId,
 } from '../utils/whatsappTemplates';
-import { parseWorkshopMeta } from '../utils/workshopMeta';
+import {
+  parseWorkshopMeta,
+  saveMercadoPagoConfigToProfile,
+  syncMercadoPagoConfigFromProfile,
+} from '../utils/workshopMeta';
 import {
   isValidEmail,
   parseSafePositiveNumber,
@@ -131,7 +147,23 @@ import { ModalShell } from './ModalShell';
 import { PatternLock } from './PatternLock';
 import { RepairPrintDocuments } from './RepairPrintDocuments';
 import { RepairStatusTimeline } from './RepairStatusTimeline';
+import { PaymentSettingsModal } from './PaymentSettingsPanel';
 import { useToast } from './ToastProvider';
+
+interface ActiveRepairMpOrder {
+  mode: 'qr' | 'point';
+  apiFamily?: 'orders_v1' | 'legacy_qr' | 'legacy_intent';
+  orderId: string;
+  externalReference: string;
+  amount: number;
+  qrImageDataUrl?: string;
+  status: 'pending' | 'paid' | 'canceled' | 'failed';
+  statusText: string;
+  companionPointOrderId?: string;
+  companionPointApiFamily?: 'orders_v1' | 'legacy_qr' | 'legacy_intent';
+  companionPointExternalReference?: string;
+  companionPointWarning?: string;
+}
 
 interface RepairDetailModalProps {
   repair: RepairRecord | null;
@@ -211,6 +243,15 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
   );
   const [editingTransferConfig, setEditingTransferConfig] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState('');
+  const [mpConfig, setMpConfig] = useState<MercadoPagoConfig>(() =>
+    loadMercadoPagoConfig(repair?.ownerId || '')
+  );
+  const [showMpSettings, setShowMpSettings] = useState(false);
+  const [mpOrder, setMpOrder] = useState<ActiveRepairMpOrder | null>(null);
+  const [mpBusy, setMpBusy] = useState(false);
+  const [showQrOnPointSmart, setShowQrOnPointSmart] = useState(true);
+  const [mpChargeTarget, setMpChargeTarget] = useState<'full' | 'partial'>('full');
+  const handledMpOrdersRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!repair?.id) return;
@@ -223,12 +264,48 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     setPartialNote('');
     setWaTemplate('auto');
     setEditingTransferConfig(false);
+    setMpOrder(null);
+    setMpBusy(false);
+    setMpChargeTarget('full');
+    setShowMpSettings(false);
     setShowLinkInput(false);
     setMediaLinkUrl('');
     setLightboxImage(null);
     setPartSearch('');
     setSyncPartPrice(true);
   }, [repair?.id, initialTab]);
+
+  useEffect(() => {
+    const targetOwnerId = repair?.ownerId || '';
+    if (!targetOwnerId) return;
+    let cancelled = false;
+    const localMp = loadMercadoPagoConfig(targetOwnerId);
+    const syncedMp = syncMercadoPagoConfigFromProfile(targetOwnerId, profile);
+    setMpConfig(
+      syncedMp && (syncedMp.accessToken || syncedMp.terminalId || syncedMp.posExternalId)
+        ? syncedMp
+        : localMp
+    );
+    void hydrateMercadoPagoConfig(targetOwnerId).then((cfg) => {
+      if (cancelled) return;
+      if (cfg.accessToken || cfg.terminalId || cfg.posExternalId) {
+        setMpConfig(cfg);
+        return;
+      }
+      const fromProfile = syncMercadoPagoConfigFromProfile(targetOwnerId, profile);
+      if (
+        fromProfile &&
+        (fromProfile.accessToken || fromProfile.terminalId || fromProfile.posExternalId)
+      ) {
+        setMpConfig(fromProfile);
+      } else {
+        setMpConfig(cfg);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [repair?.ownerId, profile]);
 
   useEffect(() => {
     if (!repair) return;
@@ -327,6 +404,297 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       cancelled = true;
     };
   }, [repair, paymentMethod, transferConfig, profile?.brandName, currentPendingBalance]);
+
+  const commitApprovedMpPayment = useCallback(
+    async (orderSnapshot: ActiveRepairMpOrder, paidViaCompanionPoint: boolean) => {
+      if (!repair) return;
+      if (handledMpOrdersRef.current.has(orderSnapshot.orderId)) return;
+      handledMpOrdersRef.current.add(orderSnapshot.orderId);
+
+      const mpChannel: 'mp_point' | 'mp_qr' =
+        orderSnapshot.mode === 'point' || paidViaCompanionPoint ? 'mp_point' : 'mp_qr';
+      const methodForOrder: PaymentMethod =
+        orderSnapshot.mode === 'point' ? 'tarjeta' : 'transferencia';
+      const paidAmt = Math.max(0, Math.round(Number(orderSnapshot.amount || 0) * 100) / 100);
+      const budget = Math.max(0, Number(repair.price || 0));
+      const prevDeposit = Math.max(0, Number(repair.deposit || 0));
+      const rawNextDeposit = Math.round((prevDeposit + paidAmt) * 100) / 100;
+      const isFullNow = budget > 0 ? rawNextDeposit >= budget - 0.01 : true;
+      const nextDeposit = budget > 0 && isFullNow ? budget : rawNextDeposit;
+      const nextBaseStatus: 'pendiente' | 'parcial' | 'pagado' = isFullNow ? 'pagado' : 'parcial';
+      const nowIso = new Date().toISOString();
+
+      const channelNote = paidViaCompanionPoint
+        ? 'Cobro aprobado QR en Point Smart [Point MP]'
+        : orderSnapshot.mode === 'point'
+          ? 'Cobro aprobado Point Smart [Point MP]'
+          : 'Cobro aprobado QR MP [QR MP]';
+
+      if (paidAmt > 0 && repair.ownerId) {
+        recordRecoveredPayment({
+          id: orderSnapshot.orderId,
+          ownerId: repair.ownerId,
+          source: 'reparacion',
+          method: methodForOrder,
+          mpChannel,
+          amount: paidAmt,
+          totalAmount: budget || paidAmt,
+          clientName: repair.clientName || 'Cliente',
+          title: `${repair.code} · ${repair.brand} ${repair.model}`,
+          subtitle: paidViaCompanionPoint
+            ? 'Aprobado vía QR en Point Smart (pendiente de guardar orden)'
+            : orderSnapshot.mode === 'point'
+              ? 'Aprobado en Point Smart (pendiente de guardar orden)'
+              : 'Aprobado vía QR Mercado Pago (pendiente de guardar orden)',
+          mpOrderId: orderSnapshot.orderId,
+          mpCompanionOrderId: orderSnapshot.companionPointOrderId,
+          mpExternalReference: orderSnapshot.externalReference,
+          saveFailed: false,
+        });
+      }
+
+      const token = mpConfig.accessToken.trim();
+      if (token) {
+        if (paidViaCompanionPoint) {
+          void cancelMercadoPagoOrder({
+            accessToken: token,
+            orderId: orderSnapshot.orderId,
+            apiFamily: orderSnapshot.apiFamily,
+            posExternalId: mpConfig.posExternalId.trim(),
+          }).catch(() => {});
+        } else if (orderSnapshot.companionPointOrderId) {
+          void cancelMercadoPagoOrder({
+            accessToken: token,
+            orderId: orderSnapshot.companionPointOrderId,
+            apiFamily: orderSnapshot.companionPointApiFamily || 'orders_v1',
+            terminalId: mpConfig.terminalId.trim(),
+          }).catch(() => {});
+        }
+      }
+
+      const parsedCurr = parsePaymentInfo(repair);
+      const prevLedger = parseRepairPaymentLedger(repair.checkoutState);
+      const nextCheckoutState = mergeCheckoutPaymentLedger(repair.checkoutState, [
+        ...prevLedger,
+        {
+          id: createRepairMetaId('pay'),
+          amount: paidAmt,
+          method: methodForOrder,
+          date: nowIso,
+          mpChannel,
+          mpOrderId: orderSnapshot.orderId,
+          mpExternalReference: orderSnapshot.externalReference,
+          note: isFullNow
+            ? prevDeposit > 0
+              ? `Cancelación de saldo · ${channelNote}`
+              : `Pago total · ${channelNote}`
+            : `Seña / Abono · ${channelNote}`,
+        },
+      ]);
+
+      const nextPaymentStatus = serializeRepairPaymentStatus({
+        base: nextBaseStatus,
+        method: nextBaseStatus === 'pagado' ? methodForOrder : parsedCurr.method,
+        currency:
+          parsedCurr.currency && parsedCurr.currency !== baseCurrency
+            ? parsedCurr.currency
+            : undefined,
+        rate:
+          parsedCurr.currency && parsedCurr.currency !== baseCurrency
+            ? parsedCurr.rate
+            : undefined,
+        technician: parsedCurr.technician || undefined,
+      });
+
+      setMpOrder((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: 'paid',
+              statusText: paidViaCompanionPoint
+                ? tr(
+                    '¡Pago QR aprobado desde el Point Smart!',
+                    'QR payment approved on Point Smart!',
+                    'Pagamento QR aprovado no Point Smart!'
+                  )
+                : orderSnapshot.mode === 'point'
+                  ? tr(
+                      '¡Pago aprobado en el Point!',
+                      'Payment approved on Point!',
+                      'Pagamento aprovado no Point!'
+                    )
+                  : tr(
+                      '¡Pago QR aprobado y acreditado!',
+                      'QR payment approved and credited!',
+                      'Pagamento QR aprovado e creditado!'
+                    ),
+            }
+          : prev
+      );
+
+      try {
+        await updateRow('repairs', repair.id, {
+          deposit: nextDeposit,
+          paidAmount: nextDeposit,
+          paymentStatus: nextPaymentStatus,
+          checkoutState: nextCheckoutState,
+          updatedAt: nowIso,
+        });
+
+        if (repair.trackingCode) {
+          const ticket = await fetchSingleById<{ id: string }>('public_tickets', repair.trackingCode);
+          if (ticket) {
+            await updateRow('public_tickets', repair.trackingCode, {
+              deposit: nextDeposit,
+              updatedAt: nowIso,
+            });
+          }
+        }
+
+        if (repair.ownerId) {
+          markPaymentReconciled({
+            ownerId: repair.ownerId,
+            mpOrderId: orderSnapshot.orderId,
+            mpCompanionOrderId: orderSnapshot.companionPointOrderId,
+            mpExternalReference: orderSnapshot.externalReference,
+            repairId: repair.id,
+          });
+        }
+
+        const localRate =
+          parsedCurr.currency && parsedCurr.currency !== baseCurrency && parsedCurr.rate
+            ? parsedCurr.rate
+            : 1;
+        setDeposit(
+          String(
+            localRate !== 1
+              ? Math.round(convertFromBaseCurrency(nextDeposit, localRate) * 100) / 100
+              : nextDeposit
+          )
+        );
+        if (!isFullNow) {
+          setPartialAmount('');
+          setPartialNote('');
+          setMpChargeTarget('full');
+        }
+
+        notify(
+          paidViaCompanionPoint
+            ? '¡Pago QR aprobado en el Point Smart y registrado en la orden!'
+            : orderSnapshot.mode === 'point'
+              ? '¡Pago aprobado en el Point Smart y registrado en la orden!'
+              : '¡Pago QR de Mercado Pago aprobado y registrado en la orden!'
+        );
+        if (isFullNow) {
+          setJustPaid(true);
+          setTab('receipt');
+        }
+      } catch (err) {
+        const msg = sanitizeDbErrorMessage(err, 'No se pudo guardar el cobro en la orden.');
+        if (paidAmt > 0 && repair.ownerId) {
+          recordRecoveredPayment({
+            id: orderSnapshot.orderId,
+            ownerId: repair.ownerId,
+            source: 'reparacion',
+            method: methodForOrder,
+            mpChannel,
+            amount: paidAmt,
+            totalAmount: budget || paidAmt,
+            clientName: repair.clientName || 'Cliente',
+            title: `${repair.code} · ${repair.brand} ${repair.model}`,
+            subtitle: `${channelNote} (error al guardar en nube)`,
+            mpOrderId: orderSnapshot.orderId,
+            mpCompanionOrderId: orderSnapshot.companionPointOrderId,
+            mpExternalReference: orderSnapshot.externalReference,
+            saveFailed: true,
+            saveError: msg,
+          });
+          notify(`${msg} El cobro aprobado quedó resguardado en Caja diaria.`, 'error');
+        } else {
+          notify(msg, 'error');
+        }
+      }
+    },
+    [repair, mpConfig.accessToken, mpConfig.posExternalId, mpConfig.terminalId, baseCurrency, notify, tr]
+  );
+
+  useEffect(() => {
+    if (!repair || !mpOrder || mpOrder.status !== 'pending' || !mpConfig.accessToken.trim()) {
+      return;
+    }
+    let cancelled = false;
+    const token = mpConfig.accessToken.trim();
+    const orderSnapshot = mpOrder;
+
+    const poll = async () => {
+      const res = await checkMercadoPagoOrderStatus({
+        accessToken: token,
+        orderId: orderSnapshot.orderId,
+        apiFamily: orderSnapshot.apiFamily,
+        externalReference: orderSnapshot.externalReference,
+      });
+      if (cancelled) return;
+
+      if (res.ok && res.isPaid) {
+        await commitApprovedMpPayment(orderSnapshot, false);
+        return;
+      }
+
+      if (orderSnapshot.companionPointOrderId) {
+        const ptRes = await checkMercadoPagoOrderStatus({
+          accessToken: token,
+          orderId: orderSnapshot.companionPointOrderId,
+          apiFamily: orderSnapshot.companionPointApiFamily || 'orders_v1',
+          externalReference: orderSnapshot.companionPointExternalReference,
+        });
+        if (cancelled) return;
+        if (ptRes.ok && ptRes.isPaid) {
+          await commitApprovedMpPayment(orderSnapshot, true);
+          return;
+        }
+      }
+
+      if (!res.ok) return;
+      if (res.isCanceled) {
+        setMpOrder((prev) =>
+          prev && prev.orderId === orderSnapshot.orderId
+            ? {
+                ...prev,
+                status: 'canceled',
+                statusText: tr(
+                  'La orden fue cancelada o venció.',
+                  'Order was canceled or expired.',
+                  'O pedido foi cancelado ou expirou.'
+                ),
+              }
+            : prev
+        );
+      } else if (res.isFailed) {
+        setMpOrder((prev) =>
+          prev && prev.orderId === orderSnapshot.orderId
+            ? {
+                ...prev,
+                status: 'failed',
+                statusText: tr(
+                  'El pago fue rechazado o falló en Mercado Pago.',
+                  'Payment was declined or failed on Mercado Pago.',
+                  'O pagamento foi recusado ou falhou no Mercado Pago.'
+                ),
+              }
+            : prev
+        );
+      }
+    };
+
+    const timer = window.setInterval(() => {
+      void poll();
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [repair, mpOrder, mpConfig.accessToken, commitApprovedMpPayment, tr]);
 
   if (!repair) return null;
 
@@ -1103,6 +1471,255 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     }
   };
 
+  const hasValidPartialForMp =
+    partialBaseEquivalent > 0 && partialBaseEquivalent < pendingBalance;
+  const effectiveMpTarget = hasValidPartialForMp ? mpChargeTarget : 'full';
+  const mpChargeAmount = Math.max(
+    0,
+    Math.round(
+      (effectiveMpTarget === 'partial' ? partialBaseEquivalent : pendingBalance) * 100
+    ) / 100
+  );
+
+  const handleCreateMercadoPagoOrder = async (mode: 'qr' | 'point') => {
+    if (!mpConfig.accessToken.trim()) {
+      notify('Configurá tu Access Token de Mercado Pago primero.', 'error');
+      setShowMpSettings(true);
+      return;
+    }
+    if (mode === 'point' && !mpConfig.terminalId.trim()) {
+      notify('Ingresá el ID del dispositivo Point para cobrar con tarjeta.', 'error');
+      setShowMpSettings(true);
+      return;
+    }
+    if (mpChargeAmount <= 0) {
+      notify('El monto a cobrar debe ser mayor a 0.', 'error');
+      return;
+    }
+
+    const token = mpConfig.accessToken.trim();
+    if (mpOrder && mpOrder.status === 'pending') {
+      void cancelMercadoPagoOrder({
+        accessToken: token,
+        orderId: mpOrder.orderId,
+        apiFamily: mpOrder.apiFamily,
+        terminalId: mpConfig.terminalId.trim(),
+        posExternalId: mpConfig.posExternalId.trim(),
+      }).catch(() => {});
+      if (mpOrder.companionPointOrderId) {
+        void cancelMercadoPagoOrder({
+          accessToken: token,
+          orderId: mpOrder.companionPointOrderId,
+          apiFamily: mpOrder.companionPointApiFamily || 'orders_v1',
+          terminalId: mpConfig.terminalId.trim(),
+        }).catch(() => {});
+      }
+    }
+
+    setMpBusy(true);
+    try {
+      const extRef = `REP-${(repair.code || repair.id.slice(0, 6)).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 20)}-${Date.now().toString(36).toUpperCase()}`;
+      const res = await createMercadoPagoOrder({
+        mode,
+        accessToken: token,
+        amount: mpChargeAmount,
+        description: `${repair.code} · ${repair.brand} ${repair.model}`,
+        externalReference: extRef,
+        terminalId: mpConfig.terminalId.trim(),
+        posExternalId: mpConfig.posExternalId.trim() || 'CAJA01',
+        printOnTerminal: Boolean(mpConfig.printOnTerminal),
+        alsoShowOnPoint:
+          mode === 'qr' && showQrOnPointSmart && Boolean(mpConfig.terminalId.trim()),
+      });
+
+      if (!res.ok || !res.orderId) {
+        notify(res.error || 'No se pudo generar el cobro en Mercado Pago.', 'error');
+        return;
+      }
+
+      if (mode === 'qr' && res.posExternalId && res.posExternalId !== mpConfig.posExternalId.trim()) {
+        const nextCfg = saveMercadoPagoConfig(repair.ownerId, {
+          ...mpConfig,
+          posExternalId: res.posExternalId,
+        });
+        setMpConfig(nextCfg);
+        if (profile) {
+          void saveMercadoPagoConfigToProfile(profile, nextCfg).catch(() => {});
+        }
+      }
+
+      let qrImageDataUrl: string | undefined;
+      if (mode === 'qr' && res.qrData) {
+        try {
+          qrImageDataUrl = await QRCode.toDataURL(res.qrData, {
+            width: 260,
+            margin: 1,
+            color: { dark: '#0f172a', light: '#ffffff' },
+          });
+        } catch {
+          qrImageDataUrl = undefined;
+        }
+      }
+
+      const shownOnPoint = Boolean(res.companionPointOrderId);
+      const nextOrder: ActiveRepairMpOrder = {
+        mode,
+        apiFamily: res.apiFamily || 'orders_v1',
+        orderId: res.orderId,
+        externalReference: res.externalReference || extRef,
+        amount: mpChargeAmount,
+        qrImageDataUrl,
+        status: res.isPaid ? 'paid' : 'pending',
+        statusText:
+          mode === 'qr'
+            ? shownOnPoint
+              ? tr(
+                  'QR activo en pantalla y en el Point Smart · Esperando pago...',
+                  'QR active on screen and Point Smart · Waiting for payment...',
+                  'QR ativo na tela e no Point Smart · Aguardando pagamento...'
+                )
+              : tr(
+                  'QR dinámico activo · Esperando que el cliente escanee y pague...',
+                  'Dynamic QR active · Waiting for customer to scan and pay...',
+                  'QR dinâmico ativo · Aguardando o cliente escanear e pagar...'
+                )
+            : tr(
+                `Orden enviada a ${mpConfig.terminalId} · Esperando tarjeta en el Point...`,
+                `Order sent to ${mpConfig.terminalId} · Waiting for card on Point...`,
+                `Pedido enviado para ${mpConfig.terminalId} · Aguardando cartão no Point...`
+              ),
+        ...(res.companionPointOrderId ? { companionPointOrderId: res.companionPointOrderId } : {}),
+        ...(res.companionPointApiFamily
+          ? { companionPointApiFamily: res.companionPointApiFamily }
+          : {}),
+        ...(res.companionPointExternalReference
+          ? { companionPointExternalReference: res.companionPointExternalReference }
+          : {}),
+        ...(res.companionPointWarning ? { companionPointWarning: res.companionPointWarning } : {}),
+      };
+
+      setMpOrder(nextOrder);
+      if (res.isPaid) {
+        await commitApprovedMpPayment(nextOrder, false);
+      } else {
+        notify(
+          mode === 'qr'
+            ? shownOnPoint
+              ? 'QR dinámico generado en pantalla y enviado al Point Smart.'
+              : 'QR dinámico de Mercado Pago generado.'
+            : 'Orden enviada al dispositivo Point.'
+        );
+      }
+    } catch {
+      notify('Error de conexión con el servidor de Mercado Pago.', 'error');
+    } finally {
+      setMpBusy(false);
+    }
+  };
+
+  const handleCheckMpStatusOnce = async () => {
+    if (!mpOrder || !mpConfig.accessToken.trim()) return;
+    const token = mpConfig.accessToken.trim();
+    const orderSnapshot = mpOrder;
+    setMpBusy(true);
+    try {
+      const res = await checkMercadoPagoOrderStatus({
+        accessToken: token,
+        orderId: orderSnapshot.orderId,
+        apiFamily: orderSnapshot.apiFamily,
+        externalReference: orderSnapshot.externalReference,
+      });
+
+      let companionPaid = false;
+      if ((!res.ok || !res.isPaid) && orderSnapshot.companionPointOrderId) {
+        const ptRes = await checkMercadoPagoOrderStatus({
+          accessToken: token,
+          orderId: orderSnapshot.companionPointOrderId,
+          apiFamily: orderSnapshot.companionPointApiFamily || 'orders_v1',
+          externalReference: orderSnapshot.companionPointExternalReference,
+        });
+        if (ptRes.ok && ptRes.isPaid) {
+          companionPaid = true;
+        }
+      }
+
+      if (!res.ok && !companionPaid) {
+        notify(res.error || 'No se pudo consultar el estado.', 'error');
+        return;
+      }
+
+      if ((res.ok && res.isPaid) || companionPaid) {
+        await commitApprovedMpPayment(orderSnapshot, companionPaid);
+      } else if (res.isCanceled) {
+        setMpOrder((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: 'canceled',
+                statusText: tr(
+                  'Orden cancelada o vencida.',
+                  'Order canceled or expired.',
+                  'Pedido cancelado ou expirado.'
+                ),
+              }
+            : prev
+        );
+      } else if (res.isFailed) {
+        setMpOrder((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: 'failed',
+                statusText: tr(
+                  'Pago rechazado o con error.',
+                  'Payment declined or failed.',
+                  'Pagamento recusado ou com erro.'
+                ),
+              }
+            : prev
+        );
+      } else {
+        notify('El pago todavía está pendiente en Mercado Pago.');
+      }
+    } finally {
+      setMpBusy(false);
+    }
+  };
+
+  const handleCancelMpOrder = async () => {
+    if (!mpOrder || !mpConfig.accessToken.trim()) {
+      setMpOrder(null);
+      return;
+    }
+    const token = mpConfig.accessToken.trim();
+    setMpBusy(true);
+    try {
+      const res = await cancelMercadoPagoOrder({
+        accessToken: token,
+        orderId: mpOrder.orderId,
+        apiFamily: mpOrder.apiFamily,
+        terminalId: mpConfig.terminalId.trim(),
+        posExternalId: mpConfig.posExternalId.trim(),
+      });
+      if (mpOrder.companionPointOrderId) {
+        await cancelMercadoPagoOrder({
+          accessToken: token,
+          orderId: mpOrder.companionPointOrderId,
+          apiFamily: mpOrder.companionPointApiFamily || 'orders_v1',
+          terminalId: mpConfig.terminalId.trim(),
+        }).catch(() => {});
+      }
+      if (!res.ok) {
+        notify(res.error || 'No se pudo cancelar en Mercado Pago.', 'error');
+        return;
+      }
+      setMpOrder(null);
+      notify('Orden de Mercado Pago cancelada.');
+    } finally {
+      setMpBusy(false);
+    }
+  };
+
   const handleSendOnlineQuote = async () => {
     const budget = parseSafePositiveNumber(repair.price, 0);
     if (budget <= 0) {
@@ -1450,7 +2067,12 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                           <button
                             key={id}
                             type="button"
-                            onClick={() => setPaymentMethod(id)}
+                            onClick={() => {
+                              setPaymentMethod(id);
+                              if (mpOrder && mpOrder.status !== 'paid') {
+                                setMpOrder(null);
+                              }
+                            }}
                             className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold transition ${
                               active
                                 ? 'bg-[#0072BB] text-white'
@@ -1464,6 +2086,152 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                       })}
                     </div>
                   </div>
+
+                  {paymentMethod === 'tarjeta' && (
+                    <div className="space-y-3 rounded-2xl border border-sky-200 bg-sky-50/70 p-3.5 dark:border-sky-900/60 dark:bg-sky-950/30">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <Smartphone className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
+                          <span className="text-xs font-bold text-slate-900 dark:text-white">
+                            Mercado Pago Point · {formatCurrency(mpChargeAmount, baseCurrency)}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowMpSettings(true)}
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
+                        >
+                          <Settings2 className="h-3 w-3" />
+                          {tr('Configurar Point / Token', 'Configure Point / Token', 'Configurar Point / Token')}
+                        </button>
+                      </div>
+
+                      {hasValidPartialForMp && (
+                        <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-sky-200/80 bg-white/80 p-1.5 text-[11px] dark:border-sky-900/50 dark:bg-slate-900/70">
+                          <span className="px-1.5 font-semibold text-slate-600 dark:text-slate-300">
+                            {tr('Monto a enviar:', 'Amount to charge:', 'Valor a cobrar:')}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setMpChargeTarget('full')}
+                            className={`rounded-lg px-2.5 py-1 font-semibold transition ${
+                              effectiveMpTarget === 'full'
+                                ? 'bg-[#0072BB] text-white'
+                                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                            }`}
+                          >
+                            {tr('Saldo', 'Balance', 'Saldo')} ({formatCurrency(pendingBalance, baseCurrency)})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setMpChargeTarget('partial')}
+                            className={`rounded-lg px-2.5 py-1 font-semibold transition ${
+                              effectiveMpTarget === 'partial'
+                                ? 'bg-[#0072BB] text-white'
+                                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                            }`}
+                          >
+                            {tr('Seña / abono', 'Deposit', 'Sinal')} ({formatCurrency(partialBaseEquivalent, baseCurrency)})
+                          </button>
+                        </div>
+                      )}
+
+                      {!mpConfig.accessToken.trim() || !mpConfig.terminalId.trim() ? (
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-dashed border-sky-300 bg-white/80 p-3 text-xs text-slate-600 dark:border-sky-800 dark:bg-slate-900/70 dark:text-slate-300">
+                          <span>
+                            {tr(
+                              'Ingresá tu Access Token y el ID de tu dispositivo Point para enviar cobros directo a la terminal.',
+                              'Enter your Access Token and Point device ID to send charges directly to the terminal.',
+                              'Informe seu Access Token e o ID do dispositivo Point para enviar cobranças direto para a maquininha.'
+                            )}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setShowMpSettings(true)}
+                            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#0072BB] px-3 text-[11px] font-semibold text-white hover:bg-[#005f9c]"
+                          >
+                            <Settings2 className="h-3.5 w-3.5" />
+                            {tr('Configurar pagos', 'Payment settings', 'Configurar pagamentos')}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="space-y-2.5">
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+                            <span>
+                              {tr('Terminal conectada:', 'Connected terminal:', 'Terminal conectado:')}{' '}
+                              <strong className="font-mono-num text-slate-900 dark:text-white">
+                                {mpConfig.terminalId}
+                              </strong>
+                            </span>
+                            {(!mpOrder || mpOrder.mode !== 'point' || mpOrder.status !== 'pending') && (
+                              <button
+                                type="button"
+                                disabled={mpBusy || mpChargeAmount <= 0}
+                                onClick={() => void handleCreateMercadoPagoOrder('point')}
+                                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0072BB] px-3.5 text-xs font-semibold text-white transition hover:bg-[#005f9c] disabled:opacity-50"
+                              >
+                                {mpBusy ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Smartphone className="h-3.5 w-3.5" />
+                                )}
+                                {tr('Enviar orden al Point', 'Send order to Point', 'Enviar pedido ao Point')}
+                              </button>
+                            )}
+                          </div>
+
+                          {mpOrder && mpOrder.mode === 'point' && (
+                            <div
+                              className={`space-y-2 rounded-xl border p-3 text-xs ${
+                                mpOrder.status === 'paid'
+                                  ? 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
+                                  : mpOrder.status === 'canceled' || mpOrder.status === 'failed'
+                                    ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200'
+                                    : 'border-sky-200 bg-white text-slate-800 dark:border-sky-800 dark:bg-slate-900 dark:text-slate-200'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 font-semibold">
+                                  {mpOrder.status === 'paid' ? (
+                                    <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                                  ) : mpOrder.status === 'pending' ? (
+                                    <Loader2 className="h-4 w-4 animate-spin text-[#0072BB] dark:text-sky-400" />
+                                  ) : null}
+                                  <span>{mpOrder.statusText}</span>
+                                </div>
+                                <span className="font-mono-num text-[10px] opacity-70">
+                                  #{mpOrder.orderId.slice(-8)}
+                                </span>
+                              </div>
+
+                              {mpOrder.status === 'pending' && (
+                                <div className="flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={mpBusy}
+                                    onClick={() => void handleCheckMpStatusOnce()}
+                                    className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                                  >
+                                    <RefreshCw className="h-3 w-3" />
+                                    {tr('Verificar estado', 'Check status', 'Verificar status')}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={mpBusy}
+                                    onClick={() => void handleCancelMpOrder()}
+                                    className="inline-flex h-8 items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 text-[11px] font-semibold text-red-600 hover:bg-red-50 dark:border-red-900/60 dark:bg-slate-900 dark:text-red-400"
+                                  >
+                                    <X className="h-3 w-3" />
+                                    {tr('Cancelar en el Point', 'Cancel on Point', 'Cancelar no Point')}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {paymentMethod === 'transferencia' && (() => {
                     const hasOfficialQr = Boolean(transferConfig.qrImageDataUrl);
@@ -1486,8 +2254,172 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                       : `https://wa.me/?text=${encodeURIComponent(transferWaText)}`;
 
                     return (
-                      <div className="rounded-xl border border-sky-200 bg-white p-3.5 dark:border-sky-900/60 dark:bg-slate-900">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                      <div className="space-y-3 rounded-2xl border border-sky-200 bg-sky-50/70 p-3.5 dark:border-sky-900/60 dark:bg-sky-950/30">
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-200/80 bg-white/85 px-3 py-2.5 dark:border-sky-900/60 dark:bg-slate-900/75">
+                          <div className="flex items-center gap-2 text-xs">
+                            <QrCode className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
+                            <div>
+                              <div className="font-bold text-slate-900 dark:text-white">
+                                {tr('QR Dinámico Mercado Pago', 'Dynamic Mercado Pago QR', 'QR Dinâmico Mercado Pago')} · {formatCurrency(mpChargeAmount, baseCurrency)}
+                              </div>
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                {mpConfig.accessToken.trim()
+                                  ? `${tr('Caja POS:', 'POS Box:', 'Caixa POS:')} ${mpConfig.posExternalId.trim() || 'CAJA01 (automática)'}`
+                                  : tr(
+                                      'Generá un QR oficial con el monto exacto automático',
+                                      'Generate an official QR with the exact automatic amount',
+                                      'Gere um QR oficial com o valor exato automático'
+                                    )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setShowMpSettings(true)}
+                              className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                            >
+                              <Settings2 className="h-3 w-3" />
+                              {tr('Configurar MP', 'Configure MP', 'Configurar MP')}
+                            </button>
+                            {mpConfig.accessToken.trim() && (
+                              <button
+                                type="button"
+                                disabled={mpBusy || mpChargeAmount <= 0}
+                                onClick={() => void handleCreateMercadoPagoOrder('qr')}
+                                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#0072BB] px-3 text-[11px] font-semibold text-white hover:bg-[#005f9c] disabled:opacity-50"
+                              >
+                                {mpBusy ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <QrCode className="h-3.5 w-3.5" />
+                                )}
+                                {mpOrder?.mode === 'qr'
+                                  ? tr('Regenerar QR MP', 'Regenerate MP QR', 'Gerar novo QR MP')
+                                  : tr('Generar QR MP', 'Generate MP QR', 'Gerar QR MP')}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {hasValidPartialForMp && (
+                          <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-sky-200/80 bg-white/80 p-1.5 text-[11px] dark:border-sky-900/50 dark:bg-slate-900/70">
+                            <span className="px-1.5 font-semibold text-slate-600 dark:text-slate-300">
+                              {tr('Monto del QR:', 'QR amount:', 'Valor do QR:')}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setMpChargeTarget('full')}
+                              className={`rounded-lg px-2.5 py-1 font-semibold transition ${
+                                effectiveMpTarget === 'full'
+                                  ? 'bg-[#0072BB] text-white'
+                                  : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                              }`}
+                            >
+                              {tr('Saldo', 'Balance', 'Saldo')} ({formatCurrency(pendingBalance, baseCurrency)})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setMpChargeTarget('partial')}
+                              className={`rounded-lg px-2.5 py-1 font-semibold transition ${
+                                effectiveMpTarget === 'partial'
+                                  ? 'bg-[#0072BB] text-white'
+                                  : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                              }`}
+                            >
+                              {tr('Seña / abono', 'Deposit', 'Sinal')} ({formatCurrency(partialBaseEquivalent, baseCurrency)})
+                            </button>
+                          </div>
+                        )}
+
+                        {mpConfig.accessToken.trim() && mpConfig.terminalId.trim() && (
+                          <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-sky-200/70 bg-white/60 px-3 py-2 text-[11px] font-medium text-slate-700 dark:border-sky-900/50 dark:bg-slate-900/50 dark:text-slate-200">
+                            <input
+                              type="checkbox"
+                              checked={showQrOnPointSmart}
+                              onChange={(e) => setShowQrOnPointSmart(e.target.checked)}
+                              className="h-3.5 w-3.5 rounded border-slate-300 text-[#0072BB] focus:ring-[#0072BB]"
+                            />
+                            <Smartphone className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
+                            <span>
+                              {tr(
+                                `Mostrar este QR también en el Point Smart (${mpConfig.terminalId}) por si las dudas`,
+                                `Also show this QR on Point Smart (${mpConfig.terminalId})`,
+                                `Mostrar este QR também no Point Smart (${mpConfig.terminalId})`
+                              )}
+                            </span>
+                          </label>
+                        )}
+
+                        {mpOrder && mpOrder.mode === 'qr' && (
+                          <div
+                            className={`flex flex-wrap items-center gap-3 rounded-xl border p-3 text-xs ${
+                              mpOrder.status === 'paid'
+                                ? 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
+                                : mpOrder.status === 'canceled' || mpOrder.status === 'failed'
+                                  ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200'
+                                  : 'border-sky-200 bg-white text-slate-800 dark:border-sky-800 dark:bg-slate-900 dark:text-slate-200'
+                            }`}
+                          >
+                            {mpOrder.qrImageDataUrl && (
+                              <img
+                                src={mpOrder.qrImageDataUrl}
+                                alt={tr('QR dinámico Mercado Pago', 'Dynamic Mercado Pago QR', 'QR dinâmico Mercado Pago')}
+                                className="h-28 w-28 shrink-0 rounded-xl border border-slate-200 bg-white p-1.5"
+                              />
+                            )}
+                            <div className="min-w-0 flex-1 space-y-2">
+                              <div className="flex items-center gap-2 font-semibold">
+                                {mpOrder.status === 'paid' ? (
+                                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                                ) : mpOrder.status === 'pending' ? (
+                                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#0072BB] dark:text-sky-400" />
+                                ) : null}
+                                <span>{mpOrder.statusText}</span>
+                              </div>
+                              <div className="font-mono-num text-[11px] opacity-75">
+                                Ref: {mpOrder.externalReference} · {formatCurrency(mpOrder.amount, baseCurrency)}
+                              </div>
+                              {mpOrder.companionPointOrderId && mpOrder.status === 'pending' && (
+                                <div className="inline-flex items-center gap-1.5 rounded-lg bg-sky-50 px-2 py-1 text-[11px] font-semibold text-[#0072BB] dark:bg-sky-950/50 dark:text-sky-300">
+                                  <Smartphone className="h-3.5 w-3.5" />
+                                  <span>QR también activo en Point Smart ({mpConfig.terminalId})</span>
+                                </div>
+                              )}
+                              {mpOrder.companionPointWarning && mpOrder.status === 'pending' && (
+                                <div className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+                                  {mpOrder.companionPointWarning}
+                                </div>
+                              )}
+                              {mpOrder.status === 'pending' && (
+                                <div className="flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={mpBusy}
+                                    onClick={() => void handleCheckMpStatusOnce()}
+                                    className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                                  >
+                                    <RefreshCw className="h-3 w-3" />
+                                    {tr('Verificar pago', 'Verify payment', 'Verificar pagamento')}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={mpBusy}
+                                    onClick={() => void handleCancelMpOrder()}
+                                    className="inline-flex h-8 items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 text-[11px] font-semibold text-red-600 hover:bg-red-50 dark:border-red-900/60 dark:bg-slate-900 dark:text-red-400"
+                                  >
+                                    <X className="h-3 w-3" />
+                                    {tr('Cancelar QR', 'Cancel QR', 'Cancelar QR')}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="rounded-xl border border-sky-200 bg-white p-3.5 dark:border-sky-900/60 dark:bg-slate-900">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
                           {(hasOfficialQr || hasLinkQr) && (
                             <div className="flex shrink-0 flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-2">
                               <img
@@ -1709,6 +2641,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
                             </div>
                           </div>
                         )}
+                      </div>
                       </div>
                     );
                   })()}
@@ -3212,6 +4145,14 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
           />
         )}
       </ModalShell>
+
+      <PaymentSettingsModal
+        open={showMpSettings}
+        onClose={() => setShowMpSettings(false)}
+        ownerId={repair.ownerId}
+        profile={profile}
+        onSaved={(nextCfg) => setMpConfig(nextCfg)}
+      />
 
       {lightboxImage && (
         <div
