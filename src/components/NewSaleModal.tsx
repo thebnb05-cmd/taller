@@ -52,6 +52,7 @@ import {
   createMercadoPagoOrder,
   hydrateMercadoPagoConfig,
   loadMercadoPagoConfig,
+  saveMercadoPagoConfig,
   type MercadoPagoConfig,
 } from '../utils/mercadoPago';
 import {
@@ -71,7 +72,11 @@ import {
   type SaleCartItem,
   type SalePaymentEntry,
 } from '../utils/saleMeta';
-import { parseWorkshopMeta, syncMercadoPagoConfigFromProfile } from '../utils/workshopMeta';
+import {
+  parseWorkshopMeta,
+  saveMercadoPagoConfigToProfile,
+  syncMercadoPagoConfigFromProfile,
+} from '../utils/workshopMeta';
 import {
   parseSafePositiveNumber,
   sanitizeAlias,
@@ -1302,17 +1307,13 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       setShowMpSettings(true);
       return;
     }
-    if (mode === 'qr' && !mpConfig.posExternalId.trim()) {
-      notify('Ingresá el ID de punto de venta / Caja para generar el QR dinámico.', 'error');
-      setShowMpSettings(true);
-      return;
-    }
     if (mode === 'point' && !mpConfig.terminalId.trim()) {
       notify('Ingresá el ID del dispositivo Point para enviar el cobro.', 'error');
       setShowMpSettings(true);
       return;
     }
 
+    const effectivePosId = mpConfig.posExternalId.trim() || 'CAJA01';
     const description =
       cartItems.length > 0
         ? summarizeSaleItemsLabel(cartItems)
@@ -1327,7 +1328,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         amount: mpChargeAmount,
         description,
         externalReference: extRef,
-        posExternalId: mpConfig.posExternalId.trim(),
+        posExternalId: effectivePosId,
         terminalId: mpConfig.terminalId.trim(),
         printOnTerminal: mpConfig.printOnTerminal,
       });
@@ -1335,6 +1336,15 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       if (!res.ok || !res.orderId) {
         notify(res.error || 'No se pudo iniciar la orden en Mercado Pago.', 'error');
         return;
+      }
+
+      if (mode === 'qr' && res.posExternalId && res.posExternalId !== mpConfig.posExternalId) {
+        const updatedMp = { ...mpConfig, posExternalId: res.posExternalId };
+        setMpConfig(updatedMp);
+        saveMercadoPagoConfig(ownerId, updatedMp);
+        if (profile) {
+          void saveMercadoPagoConfigToProfile(profile, updatedMp).catch(() => {});
+        }
       }
 
       let qrImageDataUrl: string | undefined;
@@ -2264,8 +2274,8 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                     {tr('QR Dinámico Mercado Pago', 'Dynamic Mercado Pago QR', 'QR Dinâmico Mercado Pago')} · {formatCurrency(mpChargeAmount, baseCurrency)}
                   </div>
                   <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {mpConfig.accessToken.trim() && mpConfig.posExternalId.trim()
-                      ? `${tr('Caja POS:', 'POS Box:', 'Caixa POS:')} ${mpConfig.posExternalId}`
+                    {mpConfig.accessToken.trim()
+                      ? `${tr('Caja POS:', 'POS Box:', 'Caixa POS:')} ${mpConfig.posExternalId.trim() || 'CAJA01 (automática)'}`
                       : tr(
                           'Generá un QR oficial con el monto exacto automático',
                           'Generate an official QR with the exact automatic amount',
@@ -2284,7 +2294,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   <Settings2 className="h-3 w-3" />
                   {tr('Configurar MP', 'Configure MP', 'Configurar MP')}
                 </button>
-                {mpConfig.accessToken.trim() && mpConfig.posExternalId.trim() && (
+                {mpConfig.accessToken.trim() && (
                   <button
                     type="button"
                     disabled={mpBusy || mpChargeAmount <= 0}

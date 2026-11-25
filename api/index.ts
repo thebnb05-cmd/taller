@@ -1294,6 +1294,200 @@ export async function handleApiRequest(
     }
   }
 
+  async function ensureMercadoPagoPos(
+    token: string,
+    options: {
+      desiredExternalId?: string;
+      storeName?: string;
+      posName?: string;
+      allowAnyExisting?: boolean;
+    } = {}
+  ): Promise<
+    | {
+        ok: true;
+        created: boolean;
+        sellerId: string;
+        pos: { id: string; externalId: string; name: string; storeId: string };
+      }
+    | { ok: false; status: number; error: string }
+  > {
+    const rawExternalId = String(options.desiredExternalId || '')
+      .trim()
+      .replace(/[^a-zA-Z0-9]/g, '')
+      .slice(0, 40);
+    const posExternalId = rawExternalId || 'CAJA01';
+    const rawStoreName = String(options.storeName || 'Taller Principal')
+      .replace(/[^a-zA-Z0-9 _-]/g, ' ')
+      .trim()
+      .slice(0, 45);
+    const storeName = rawStoreName || 'Taller Principal';
+    const rawPosName = String(options.posName || `Caja ${posExternalId}`)
+      .replace(/[^a-zA-Z0-9 _-]/g, ' ')
+      .trim()
+      .slice(0, 45);
+    const posName = rawPosName || posExternalId;
+
+    const meRes = await mpFetch('/users/me', token);
+    if (!meRes.ok) {
+      return {
+        ok: false,
+        status: meRes.status >= 400 ? meRes.status : 401,
+        error: extractMpErrorMessage(
+          meRes.data,
+          'Access Token inválido o sin permisos en Mercado Pago.',
+          'auth'
+        ),
+      };
+    }
+
+    const sellerId = String(meRes.data.id || '').trim();
+    if (!sellerId) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'No se pudo resolver el ID de cuenta en Mercado Pago.',
+      };
+    }
+
+    const existingPosRes = await mpFetch('/pos?limit=50', token);
+    if (existingPosRes.ok && Array.isArray(existingPosRes.data.results)) {
+      const results = existingPosRes.data.results.filter(
+        (item): item is Record<string, unknown> => Boolean(item && typeof item === 'object')
+      );
+      const exactMatch = results.find((row) => {
+        const ext = String(row.external_id || '').trim();
+        if (!ext) return false;
+        return (
+          ext.toUpperCase() === posExternalId.toUpperCase() ||
+          String(row.id || '').trim() === posExternalId
+        );
+      });
+      const fallbackExisting =
+        !exactMatch && options.allowAnyExisting
+          ? results.find((row) => String(row.external_id || '').trim().length > 0)
+          : undefined;
+      const chosen = exactMatch || fallbackExisting;
+      if (chosen) {
+        const chosenExt = String(chosen.external_id || '').trim();
+        return {
+          ok: true,
+          created: false,
+          sellerId,
+          pos: {
+            id: String(chosen.id || ''),
+            externalId: chosenExt || posExternalId,
+            name: String(chosen.name || posName),
+            storeId: String(chosen.store_id || ''),
+          },
+        };
+      }
+    }
+
+    let storeId = '';
+    const storesRes = await mpFetch(`/users/${encodeURIComponent(sellerId)}/stores/search?limit=10`, token);
+    if (storesRes.ok && Array.isArray(storesRes.data.results) && storesRes.data.results.length > 0) {
+      const firstStore = storesRes.data.results[0] as Record<string, unknown>;
+      storeId = String(firstStore.id || '').trim();
+    }
+
+    if (!storeId) {
+      const createStoreRes = await mpFetch(`/users/${encodeURIComponent(sellerId)}/stores`, token, {
+        method: 'POST',
+        body: {
+          name: storeName,
+          external_id: 'SUC01',
+          location: {
+            street_number: '100',
+            street_name: 'Av Principal',
+            city_name: 'Buenos Aires',
+            state_name: 'Buenos Aires',
+            latitude: -34.603722,
+            longitude: -58.381592,
+            reference: storeName,
+          },
+        },
+      });
+      if (createStoreRes.ok && createStoreRes.data.id) {
+        storeId = String(createStoreRes.data.id).trim();
+      } else {
+        return {
+          ok: false,
+          status: createStoreRes.status >= 400 ? createStoreRes.status : 400,
+          error: extractMpErrorMessage(
+            createStoreRes.data,
+            'No tenés ninguna sucursal creada en Mercado Pago y no se pudo crear automáticamente. Creá un Local en Mercado Pago → Tu negocio → Locales y cajas.',
+            'qr'
+          ),
+        };
+      }
+    }
+
+    const v2PosRes = await mpFetch('/v2/pos', token, {
+      method: 'POST',
+      idempotencyKey: crypto.randomUUID(),
+      body: {
+        name: posName,
+        store_id: storeId,
+        external_id: posExternalId,
+        config: {
+          qr: {
+            operating_mode: 'pdv',
+          },
+        },
+      },
+    });
+
+    if (v2PosRes.ok) {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      return {
+        ok: true,
+        created: true,
+        sellerId,
+        pos: {
+          id: String(v2PosRes.data.id || ''),
+          externalId: String(v2PosRes.data.external_id || posExternalId),
+          name: String(v2PosRes.data.name || posName),
+          storeId: String(v2PosRes.data.store_id || storeId),
+        },
+      };
+    }
+
+    const legacyPosRes = await mpFetch('/pos', token, {
+      method: 'POST',
+      body: {
+        name: posName,
+        fixed_amount: true,
+        store_id: Number.isFinite(Number(storeId)) ? Number(storeId) : storeId,
+        external_id: posExternalId,
+      },
+    });
+
+    if (legacyPosRes.ok) {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      return {
+        ok: true,
+        created: true,
+        sellerId,
+        pos: {
+          id: String(legacyPosRes.data.id || ''),
+          externalId: String(legacyPosRes.data.external_id || posExternalId),
+          name: String(legacyPosRes.data.name || posName),
+          storeId: String(legacyPosRes.data.store_id || storeId),
+        },
+      };
+    }
+
+    return {
+      ok: false,
+      status: v2PosRes.status >= 400 ? v2PosRes.status : 400,
+      error: extractMpErrorMessage(
+        v2PosRes.data,
+        extractMpErrorMessage(legacyPosRes.data, 'No se pudo crear la Caja POS en Mercado Pago.', 'qr'),
+        'qr'
+      ),
+    };
+  }
+
   if (apiPath === '/api/mercadopago/setup-pos') {
     const user = await verifySupabaseSessionUser(req);
     if (!user) {
@@ -1306,161 +1500,21 @@ export async function handleApiRequest(
       return true;
     }
 
-    const rawExternalId = resolvePosId(body.posExternalId).replace(/[^a-zA-Z0-9]/g, '').slice(0, 40);
-    const posExternalId = rawExternalId || 'CAJA01';
-    const rawStoreName = String(body.storeName || 'Taller Principal')
-      .replace(/[^a-zA-Z0-9 _-]/g, ' ')
-      .trim()
-      .slice(0, 45);
-    const storeName = rawStoreName || 'Taller Principal';
-    const rawPosName = String(body.posName || `Caja ${posExternalId}`)
-      .replace(/[^a-zA-Z0-9 _-]/g, ' ')
-      .trim()
-      .slice(0, 45);
-    const posName = rawPosName || posExternalId;
-
     try {
-      const meRes = await mpFetch('/users/me', token);
-      if (!meRes.ok) {
-        sendJson(res, meRes.status >= 400 ? meRes.status : 401, {
-          ok: false,
-          error: extractMpErrorMessage(
-            meRes.data,
-            'Access Token inválido o sin permisos en Mercado Pago.',
-            'auth'
-          ),
-        });
-        return true;
-      }
-
-      const sellerId = String(meRes.data.id || '').trim();
-      if (!sellerId) {
-        sendJson(res, 400, { ok: false, error: 'No se pudo resolver el ID de cuenta en Mercado Pago.' });
-        return true;
-      }
-
-      const existingPosRes = await mpFetch('/pos?limit=50', token);
-      if (existingPosRes.ok && Array.isArray(existingPosRes.data.results)) {
-        const match = existingPosRes.data.results.find((item) => {
-          if (!item || typeof item !== 'object') return false;
-          const row = item as Record<string, unknown>;
-          return String(row.external_id || '').trim().toUpperCase() === posExternalId.toUpperCase();
-        }) as Record<string, unknown> | undefined;
-
-        if (match) {
-          sendJson(res, 200, {
-            ok: true,
-            created: false,
-            pos: {
-              id: String(match.id || ''),
-              externalId: String(match.external_id || posExternalId),
-              name: String(match.name || posName),
-              storeId: String(match.store_id || ''),
-            },
-          });
-          return true;
-        }
-      }
-
-      let storeId = '';
-      const storesRes = await mpFetch(`/users/${encodeURIComponent(sellerId)}/stores/search?limit=10`, token);
-      if (storesRes.ok && Array.isArray(storesRes.data.results) && storesRes.data.results.length > 0) {
-        const firstStore = storesRes.data.results[0] as Record<string, unknown>;
-        storeId = String(firstStore.id || '').trim();
-      }
-
-      if (!storeId) {
-        const createStoreRes = await mpFetch(`/users/${encodeURIComponent(sellerId)}/stores`, token, {
-          method: 'POST',
-          body: {
-            name: storeName,
-            external_id: 'SUC01',
-            location: {
-              street_number: '100',
-              street_name: 'Av Principal',
-              city_name: 'Buenos Aires',
-              state_name: 'Buenos Aires',
-              latitude: -34.603722,
-              longitude: -58.381592,
-              reference: storeName,
-            },
-          },
-        });
-        if (createStoreRes.ok && createStoreRes.data.id) {
-          storeId = String(createStoreRes.data.id).trim();
-        } else {
-          sendJson(res, createStoreRes.status >= 400 ? createStoreRes.status : 400, {
-            ok: false,
-            error: extractMpErrorMessage(
-              createStoreRes.data,
-              'No tenés ninguna sucursal creada en Mercado Pago y no se pudo crear automáticamente. Creá un Local en Mercado Pago → Tu negocio → Locales y cajas.',
-              'qr'
-            ),
-          });
-          return true;
-        }
-      }
-
-      const v2PosRes = await mpFetch('/v2/pos', token, {
-        method: 'POST',
-        idempotencyKey: crypto.randomUUID(),
-        body: {
-          name: posName,
-          store_id: storeId,
-          external_id: posExternalId,
-          config: {
-            qr: {
-              operating_mode: 'pdv',
-            },
-          },
-        },
+      const result = await ensureMercadoPagoPos(token, {
+        desiredExternalId: resolvePosId(body.posExternalId),
+        storeName: typeof body.storeName === 'string' ? body.storeName : undefined,
+        posName: typeof body.posName === 'string' ? body.posName : undefined,
+        allowAnyExisting: false,
       });
-
-      if (v2PosRes.ok) {
-        sendJson(res, 200, {
-          ok: true,
-          created: true,
-          pos: {
-            id: String(v2PosRes.data.id || ''),
-            externalId: String(v2PosRes.data.external_id || posExternalId),
-            name: String(v2PosRes.data.name || posName),
-            storeId: String(v2PosRes.data.store_id || storeId),
-          },
-        });
+      if (!result.ok) {
+        sendJson(res, result.status, { ok: false, error: result.error });
         return true;
       }
-
-      const legacyPosRes = await mpFetch('/pos', token, {
-        method: 'POST',
-        body: {
-          name: posName,
-          fixed_amount: true,
-          store_id: Number.isFinite(Number(storeId)) ? Number(storeId) : storeId,
-          external_id: posExternalId,
-        },
-      });
-
-      if (legacyPosRes.ok) {
-        sendJson(res, 200, {
-          ok: true,
-          created: true,
-          pos: {
-            id: String(legacyPosRes.data.id || ''),
-            externalId: String(legacyPosRes.data.external_id || posExternalId),
-            name: String(legacyPosRes.data.name || posName),
-            storeId: String(legacyPosRes.data.store_id || storeId),
-          },
-        });
-        return true;
-      }
-
-      sendJson(res, v2PosRes.status >= 400 ? v2PosRes.status : 400, {
-        ok: false,
-        error: extractMpErrorMessage(
-          v2PosRes.data,
-          extractMpErrorMessage(legacyPosRes.data, 'No se pudo crear la Caja POS en Mercado Pago.', 'qr'),
-          'qr'
-        ),
+      sendJson(res, 200, {
+        ok: true,
+        created: result.created,
+        pos: result.pos,
       });
       return true;
     } catch (err) {
@@ -1591,13 +1645,7 @@ export async function handleApiRequest(
 
     try {
       if (mode === 'qr') {
-        if (!posExternalId) {
-          sendJson(res, 400, {
-            ok: false,
-            error: 'Falta configurar el ID de punto de venta / Caja para generar el QR.',
-          });
-          return true;
-        }
+        const requestedPosExternalId = posExternalId || 'CAJA01';
 
         const createQrOrder = (targetExternalPosId: string) =>
           mpFetch('/v1/orders', token, {
@@ -1629,52 +1677,9 @@ export async function handleApiRequest(
             },
           });
 
-        let resolvedPosExternalId = posExternalId;
-        let orderRes = await createQrOrder(resolvedPosExternalId);
-
-        if (!orderRes.ok) {
-          const posLookup = await mpFetch('/pos?limit=50', token);
-          if (posLookup.ok && Array.isArray(posLookup.data.results)) {
-            const matchedByIdOrName = posLookup.data.results.find((item) => {
-              if (!item || typeof item !== 'object') return false;
-              const row = item as Record<string, unknown>;
-              const ext = String(row.external_id || '').trim();
-              if (!ext) return false;
-              return (
-                String(row.id || '').trim() === posExternalId ||
-                ext.toUpperCase() === posExternalId.toUpperCase()
-              );
-            }) as Record<string, unknown> | undefined;
-            const betterExtId = String(matchedByIdOrName?.external_id || '').trim();
-            if (betterExtId && betterExtId !== resolvedPosExternalId) {
-              resolvedPosExternalId = betterExtId;
-              orderRes = await createQrOrder(resolvedPosExternalId);
-            }
-          }
-        }
-
-        const typeResp = orderRes.data.type_response as { qr_data?: string } | undefined;
-        const qrData = String(typeResp?.qr_data || orderRes.data.qr_data || '').trim();
-
-        if (orderRes.ok && qrData) {
-          const normalized = normalizeOrderStatus(orderRes.data.status, orderRes.data.status_detail);
-          sendJson(res, 200, {
-            ok: true,
-            mode: 'qr',
-            apiFamily: 'orders_v1',
-            orderId: String(orderRes.data.id || ''),
-            externalReference,
-            qrData,
-            ...normalized,
-          });
-          return true;
-        }
-
-        const meRes = await mpFetch('/users/me', token);
-        const sellerId = String(meRes.data.id || '').trim();
-        if (sellerId) {
-          const legacyQrRes = await mpFetch(
-            `/instore/orders/qr/seller/collectors/${encodeURIComponent(sellerId)}/pos/${encodeURIComponent(resolvedPosExternalId)}/qrs`,
+        const createLegacyQrOrder = (sellerId: string, targetExternalPosId: string) =>
+          mpFetch(
+            `/instore/orders/qr/seller/collectors/${encodeURIComponent(sellerId)}/pos/${encodeURIComponent(targetExternalPosId)}/qrs`,
             token,
             {
               method: 'POST',
@@ -1696,47 +1701,116 @@ export async function handleApiRequest(
             }
           );
 
-          const legacyQrData = String(legacyQrRes.data.qr_data || '').trim();
-          if (legacyQrRes.ok && legacyQrData) {
-            sendJson(res, 200, {
-              ok: true,
-              mode: 'qr',
-              apiFamily: 'legacy_qr',
-              orderId: String(legacyQrRes.data.in_store_order_id || externalReference),
-              externalReference,
-              sellerId,
-              qrData: legacyQrData,
-              status: 'created',
-              statusDetail: 'created',
-              isPaid: false,
-              isCanceled: false,
-              isFailed: false,
-            });
-            return true;
+        const tryGenerateQrForPos = async (targetPosExtId: string, knownSellerId?: string) => {
+          const orderRes = await createQrOrder(targetPosExtId);
+          const typeResp = orderRes.data.type_response as { qr_data?: string } | undefined;
+          const qrData = String(typeResp?.qr_data || orderRes.data.qr_data || '').trim();
+
+          if (orderRes.ok && qrData) {
+            const normalized = normalizeOrderStatus(orderRes.data.status, orderRes.data.status_detail);
+            return {
+              ok: true as const,
+              payload: {
+                ok: true,
+                mode: 'qr' as const,
+                apiFamily: 'orders_v1' as const,
+                orderId: String(orderRes.data.id || ''),
+                externalReference,
+                posExternalId: targetPosExtId,
+                qrData,
+                ...normalized,
+              },
+            };
           }
 
-          sendJson(res, legacyQrRes.status >= 400 ? legacyQrRes.status : 400, {
-            ok: false,
-            error: extractMpErrorMessage(
-              legacyQrRes.data,
-              extractMpErrorMessage(
-                orderRes.data,
-                'No se pudo generar el QR dinámico en Mercado Pago.',
+          let sellerId = knownSellerId || '';
+          if (!sellerId) {
+            const meRes = await mpFetch('/users/me', token);
+            sellerId = String(meRes.data.id || '').trim();
+          }
+
+          if (sellerId) {
+            const legacyQrRes = await createLegacyQrOrder(sellerId, targetPosExtId);
+            const legacyQrData = String(legacyQrRes.data.qr_data || '').trim();
+            if (legacyQrRes.ok && legacyQrData) {
+              return {
+                ok: true as const,
+                payload: {
+                  ok: true,
+                  mode: 'qr' as const,
+                  apiFamily: 'legacy_qr' as const,
+                  orderId: String(legacyQrRes.data.in_store_order_id || externalReference),
+                  externalReference,
+                  posExternalId: targetPosExtId,
+                  sellerId,
+                  qrData: legacyQrData,
+                  status: 'created',
+                  statusDetail: 'created',
+                  isPaid: false,
+                  isCanceled: false,
+                  isFailed: false,
+                },
+              };
+            }
+            return {
+              ok: false as const,
+              status: legacyQrRes.status >= 400 ? legacyQrRes.status : orderRes.status || 400,
+              unauthorized:
+                orderRes.status === 401 ||
+                orderRes.status === 403 ||
+                legacyQrRes.status === 401 ||
+                legacyQrRes.status === 403,
+              error: extractMpErrorMessage(
+                legacyQrRes.data,
+                extractMpErrorMessage(
+                  orderRes.data,
+                  'No se pudo generar el QR dinámico en Mercado Pago.',
+                  'qr'
+                ),
                 'qr'
               ),
+            };
+          }
+
+          return {
+            ok: false as const,
+            status: orderRes.status >= 400 ? orderRes.status : 400,
+            unauthorized: orderRes.status === 401 || orderRes.status === 403,
+            error: extractMpErrorMessage(
+              orderRes.data,
+              'No se pudo generar el QR dinámico en Mercado Pago.',
               'qr'
             ),
-          });
+          };
+        };
+
+        let attempt = await tryGenerateQrForPos(requestedPosExternalId);
+        if (attempt.ok) {
+          sendJson(res, 200, attempt.payload);
           return true;
         }
 
-        sendJson(res, orderRes.status >= 400 ? orderRes.status : 400, {
+        if (!attempt.unauthorized) {
+          const ensured = await ensureMercadoPagoPos(token, {
+            desiredExternalId: requestedPosExternalId,
+            allowAnyExisting: true,
+          });
+          if (ensured.ok) {
+            const retry = await tryGenerateQrForPos(ensured.pos.externalId, ensured.sellerId);
+            if (retry.ok) {
+              sendJson(res, 200, retry.payload);
+              return true;
+            }
+            attempt = retry;
+          } else {
+            sendJson(res, ensured.status, { ok: false, error: ensured.error });
+            return true;
+          }
+        }
+
+        sendJson(res, attempt.status, {
           ok: false,
-          error: extractMpErrorMessage(
-            orderRes.data,
-            'No se pudo generar el QR dinámico en Mercado Pago.',
-            'qr'
-          ),
+          error: attempt.error,
         });
         return true;
       }

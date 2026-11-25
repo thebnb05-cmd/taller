@@ -48,6 +48,7 @@ export interface MpOrderResponse {
   apiFamily?: 'orders_v1' | 'legacy_qr' | 'legacy_intent';
   orderId?: string;
   externalReference?: string;
+  posExternalId?: string;
   qrData?: string;
   status?: string;
   statusDetail?: string;
