@@ -2,7 +2,6 @@ import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Banknote,
   BarChart3,
-  Bell,
   Boxes,
   CalendarDays,
   Factory,
@@ -680,10 +679,14 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
     });
   };
 
-  const lowStockCount = useMemo(
-    () => products.filter((p) => p.trackStock && p.stock <= p.minStock).length,
+  const lowStockProducts = useMemo(
+    () =>
+      products
+        .filter((p) => p.trackStock && p.stock <= p.minStock)
+        .sort((a, b) => a.stock - b.stock),
     [products]
   );
+  const lowStockCount = lowStockProducts.length;
 
   const selectedRepair = useMemo(
     () =>
@@ -1072,7 +1075,6 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
 
           <div data-tour="header-actions" className="flex shrink-0 items-center gap-1 sm:gap-1.5">
             <CurrencyConverter />
-            <PushNotificationControl />
             {subscriptionRecord && (() => {
               const shortPlanLabel = subscriptionRemaining.isExpired
                 ? 'Vencida'
@@ -1140,25 +1142,16 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               <Keyboard className="h-4 w-4" />
             </button>
 
-            <button
-              type="button"
-              onClick={() => {
+            <PushNotificationControl
+              lowStockProducts={lowStockProducts}
+              onOpenLowStock={() => {
                 setInventoryInitialFilter('bajo_stock');
                 setInventoryFilterNonce((n) => n + 1);
                 setPage('inventory');
                 setMoreMenuOpen(false);
               }}
-              aria-label={tr('Alertas de stock bajo', 'Low stock alerts', 'Alertas de estoque baixo')}
-              title={tr('Stock bajo', 'Low stock', 'Estoque baixo')}
-              className="relative flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-            >
-              <Bell className="h-4 w-4" />
-              {lowStockCount > 0 && (
-                <span className="absolute right-1 top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 font-mono-num text-[10px] font-bold text-white">
-                  {lowStockCount}
-                </span>
-              )}
-            </button>
+              onSelectProduct={(p) => setSelectedProductId(p.id)}
+            />
 
             <button
               type="button"
