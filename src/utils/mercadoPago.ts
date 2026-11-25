@@ -29,6 +29,7 @@ export interface MpPosSummary {
 export interface MpTestConnectionResult {
   ok: boolean;
   error?: string;
+  warning?: string;
   account?: {
     sellerId: string;
     nickname: string;
@@ -237,6 +238,29 @@ export async function cancelMercadoPagoOrder(params: {
   posExternalId?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   return postJson<{ ok: boolean; error?: string }>('/api/mercadopago/orders/cancel', params);
+}
+
+export async function setupMercadoPagoPos(params: {
+  accessToken: string;
+  posExternalId?: string;
+  storeName?: string;
+  posName?: string;
+}): Promise<{ ok: boolean; created?: boolean; pos?: MpPosSummary; error?: string }> {
+  return postJson<{ ok: boolean; created?: boolean; pos?: MpPosSummary; error?: string }>(
+    '/api/mercadopago/setup-pos',
+    params
+  );
+}
+
+export async function setMercadoPagoTerminalMode(params: {
+  accessToken: string;
+  terminalId: string;
+  operatingMode?: 'PDV' | 'STANDALONE';
+}): Promise<{ ok: boolean; terminalId?: string; operatingMode?: string; error?: string }> {
+  return postJson<{ ok: boolean; terminalId?: string; operatingMode?: string; error?: string }>(
+    '/api/mercadopago/terminal-mode',
+    params
+  );
 }
 
 async function getAuthHeaders(forceRefresh = false): Promise<Record<string, string>> {

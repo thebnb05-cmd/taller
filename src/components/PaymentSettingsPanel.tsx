@@ -15,6 +15,8 @@ import {
   hydrateMercadoPagoConfig,
   loadMercadoPagoConfig,
   saveMercadoPagoConfig,
+  setMercadoPagoTerminalMode,
+  setupMercadoPagoPos,
   testMercadoPagoConnection,
   type MercadoPagoConfig,
   type MpPosSummary,
@@ -48,6 +50,8 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
   const [showToken, setShowToken] = useState(false);
   const [testing, setTesting] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
+  const [creatingPos, setCreatingPos] = useState(false);
+  const [switchingPdv, setSwitchingPdv] = useState(false);
   const [terminals, setTerminals] = useState<MpTerminalSummary[]>([]);
   const [posList, setPosList] = useState<MpPosSummary[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'ok' | 'error'>('idle');
@@ -167,13 +171,19 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
         onSaved?.(nextConfig);
       }
 
-      setConnectionStatus('ok');
-      const accountLabel =
-        result.account?.nickname || result.account?.email || result.account?.sellerId || 'Cuenta verificada';
-      setConnectionMessage(
-        `Conectado: ${accountLabel} · ${foundTerminals.length} terminal(es) Point y ${foundPos.length} caja(s) QR detectadas.`
-      );
-      notify('Conexión con Mercado Pago verificada.');
+      if (result.warning) {
+        setConnectionStatus('error');
+        setConnectionMessage(result.warning);
+        notify(result.warning, 'error');
+      } else {
+        setConnectionStatus('ok');
+        const accountLabel =
+          result.account?.nickname || result.account?.email || result.account?.sellerId || 'Cuenta verificada';
+        setConnectionMessage(
+          `Conectado: ${accountLabel} · ${foundTerminals.length} terminal(es) Point y ${foundPos.length} caja(s) QR detectadas.`
+        );
+        notify('Conexión con Mercado Pago verificada.');
+      }
     } catch {
       setConnectionStatus('error');
       setConnectionMessage('Error de red al comunicarse con el servidor.');
@@ -183,8 +193,81 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
     }
   };
 
+  const handleAutoCreatePos = async () => {
+    const trimmedToken = config.accessToken.trim();
+    if (!trimmedToken) {
+      notify('Ingresá tu Access Token de Mercado Pago primero.', 'error');
+      return;
+    }
+    const desiredId =
+      config.posExternalId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 40) || 'CAJA01';
+    setCreatingPos(true);
+    try {
+      const res = await setupMercadoPagoPos({
+        accessToken: trimmedToken,
+        posExternalId: desiredId,
+        storeName: profile?.brandName || 'Taller Principal',
+        posName: `Caja ${desiredId}`,
+      });
+      if (!res.ok || !res.pos) {
+        notify(res.error || 'No se pudo crear la Caja POS automáticamente.', 'error');
+        return;
+      }
+      const createdPos = res.pos;
+      setPosList((prev) => {
+        const exists = prev.some((p) => p.externalId === createdPos.externalId);
+        return exists ? prev : [...prev, createdPos];
+      });
+      const nextConfig: MercadoPagoConfig = {
+        ...config,
+        posExternalId: createdPos.externalId,
+      };
+      await persistMpConfig(
+        nextConfig,
+        res.created
+          ? `Caja ${createdPos.externalId} creada en Mercado Pago y guardada.`
+          : `Caja ${createdPos.externalId} detectada y guardada.`
+      );
+    } catch {
+      notify('Error de red al crear la Caja en Mercado Pago.', 'error');
+    } finally {
+      setCreatingPos(false);
+    }
+  };
+
+  const handleEnablePdvMode = async (targetTerminalId: string) => {
+    const trimmedToken = config.accessToken.trim();
+    if (!trimmedToken || !targetTerminalId) return;
+    setSwitchingPdv(true);
+    try {
+      const res = await setMercadoPagoTerminalMode({
+        accessToken: trimmedToken,
+        terminalId: targetTerminalId,
+        operatingMode: 'PDV',
+      });
+      if (!res.ok) {
+        notify(res.error || 'No se pudo pasar la terminal a modo PDV.', 'error');
+        return;
+      }
+      setTerminals((prev) =>
+        prev.map((t) => (t.id === targetTerminalId ? { ...t, operatingMode: 'PDV' } : t))
+      );
+      notify(`Terminal ${targetTerminalId} pasada a modo PDV.`);
+    } catch {
+      notify('Error de red al cambiar el modo de la terminal.', 'error');
+    } finally {
+      setSwitchingPdv(false);
+    }
+  };
+
   const isConfigured = Boolean(
     config.accessToken.trim() && (config.terminalId.trim() || config.posExternalId.trim())
+  );
+  const selectedTerminal = terminals.find((t) => t.id === config.terminalId) || terminals[0];
+  const needsPdvSwitch = Boolean(
+    selectedTerminal &&
+      selectedTerminal.operatingMode &&
+      selectedTerminal.operatingMode.toUpperCase() !== 'PDV'
   );
 
   return (
@@ -337,9 +420,10 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
           <div className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
             Dispositivos Point detectados (tocá para seleccionar):
           </div>
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             {terminals.map((term) => {
               const active = config.terminalId === term.id;
+              const isPdv = term.operatingMode?.toUpperCase() === 'PDV';
               return (
                 <button
                   key={term.id}
@@ -358,15 +442,36 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
                   }`}
                 >
                   {term.id}
-                  {term.operatingMode ? ` · ${term.operatingMode}` : ''}
+                  {term.operatingMode ? (
+                    <span
+                      className={`ml-1.5 rounded px-1 py-0.5 text-[10px] font-bold ${
+                        isPdv
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300'
+                          : 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
+                      }`}
+                    >
+                      {term.operatingMode}
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
+            {needsPdvSwitch && selectedTerminal && (
+              <button
+                type="button"
+                onClick={() => void handleEnablePdvMode(selectedTerminal.id)}
+                disabled={switchingPdv}
+                className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 transition hover:bg-amber-100 disabled:opacity-60 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-200"
+              >
+                {switchingPdv && <Loader2 className="h-3 w-3 animate-spin" />}
+                Pasar Point a modo PDV
+              </button>
+            )}
           </div>
         </div>
       )}
 
-      {posList.length > 0 && (
+      {posList.length > 0 ? (
         <div className="space-y-1.5">
           <div className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
             Cajas / Puntos de venta QR detectados (tocá para seleccionar):
@@ -393,7 +498,20 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
             })}
           </div>
         </div>
-      )}
+      ) : connectionStatus === 'ok' ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+          <span>No tenés ninguna Caja QR creada todavía en tu cuenta.</span>
+          <button
+            type="button"
+            onClick={() => void handleAutoCreatePos()}
+            disabled={creatingPos}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-[#0072BB]/10 px-2.5 py-1 font-semibold text-[#0072BB] transition hover:bg-[#0072BB]/20 disabled:opacity-60 dark:bg-sky-900/40 dark:text-sky-300"
+          >
+            {creatingPos && <Loader2 className="h-3 w-3 animate-spin" />}
+            Crear Caja QR automática ({config.posExternalId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 40) || 'CAJA01'})
+          </button>
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
         <button

@@ -389,7 +389,18 @@ function resolveUserSubscriptionState(
 }
 
 function resolveAccessToken(bodyToken: unknown): string {
-  return typeof bodyToken === 'string' ? bodyToken.trim() : '';
+  if (typeof bodyToken !== 'string') return '';
+  let clean = bodyToken.trim();
+  if (
+    (clean.startsWith('"') && clean.endsWith('"')) ||
+    (clean.startsWith("'") && clean.endsWith("'"))
+  ) {
+    clean = clean.slice(1, -1).trim();
+  }
+  if (/^bearer\s+/i.test(clean)) {
+    clean = clean.replace(/^bearer\s+/i, '').trim();
+  }
+  return clean;
 }
 
 function resolvePosId(bodyPosId: unknown): string {
@@ -400,22 +411,58 @@ function resolveTerminalId(bodyTerminalId: unknown): string {
   return typeof bodyTerminalId === 'string' ? bodyTerminalId.trim() : '';
 }
 
-function extractMpErrorMessage(payload: unknown, fallback: string): string {
+type MpErrorContext = 'auth' | 'point' | 'qr' | 'subscriptions' | 'generic';
+
+function formatMpUnauthorizedMessage(context: MpErrorContext): string {
+  if (context === 'point') {
+    return 'Mercado Pago rechazó la operación (UNAUTHORIZED). Verificá: 1) Que hayas pegado el Access Token privado y NO la Public Key (ambos empiezan con APP_USR- o TEST-); 2) Que tu aplicación en Mercado Pago Developers sea de tipo "Pagos presenciales" (Point / QR) y no solo "Pagos online"; 3) Que la terminal Point Smart pertenezca a la misma cuenta del Access Token y no estés mezclando un token TEST- con una terminal real.';
+  }
+  if (context === 'qr') {
+    return 'Mercado Pago rechazó la operación QR (UNAUTHORIZED). Verificá que hayas pegado el Access Token privado (no la Public Key), que tu app en Mercado Pago Developers sea de tipo "Pagos presenciales" (QR / Point) y que la Caja pertenezca a esa misma cuenta.';
+  }
+  if (context === 'subscriptions') {
+    return 'Mercado Pago devolvió UNAUTHORIZED. Verificá que el token configurado sea el Access Token privado (no la Public Key) y que la aplicación en Mercado Pago Developers tenga habilitado Pagos online / Suscripciones.';
+  }
+  if (context === 'auth') {
+    return 'Mercado Pago rechazó la credencial (UNAUTHORIZED). Lo más común es haber pegado la Public Key en lugar del Access Token (ambos empiezan con APP_USR- o TEST-), o que el token haya sido revocado en Mercado Pago Developers.';
+  }
+  return 'Mercado Pago rechazó la credencial o los permisos (UNAUTHORIZED). Verificá que sea el Access Token correcto (no la Public Key) y que la app tenga permisos para esta operación.';
+}
+
+function isMpPolicyUnauthorizedMessage(msg: string): boolean {
+  const lower = msg.toLowerCase();
+  return (
+    lower.includes('at least one policy returned unauthorized') ||
+    lower === 'unauthorized' ||
+    lower.includes('policy returned unauthorized')
+  );
+}
+
+function extractMpErrorMessage(
+  payload: unknown,
+  fallback: string,
+  context: MpErrorContext = 'generic'
+): string {
   if (!payload || typeof payload !== 'object') return fallback;
   const err = payload as MpErrorPayload;
+  let raw = '';
   if (Array.isArray(err.errors) && err.errors.length > 0) {
     const first = err.errors[0];
     if (first?.message || first?.description) {
-      return String(first.message || first.description);
+      raw = String(first.message || first.description);
     }
   }
-  if (Array.isArray(err.causes) && err.causes.length > 0) {
+  if (!raw && Array.isArray(err.causes) && err.causes.length > 0) {
     const first = err.causes[0];
-    if (first?.description) return String(first.description);
+    if (first?.description) raw = String(first.description);
   }
-  if (err.message) return String(err.message);
-  if (err.error) return String(err.error);
-  return fallback;
+  if (!raw && err.message) raw = String(err.message);
+  if (!raw && err.error) raw = String(err.error);
+  if (!raw) return fallback;
+  if (isMpPolicyUnauthorizedMessage(raw)) {
+    return formatMpUnauthorizedMessage(context);
+  }
+  return raw;
 }
 
 async function mpFetch(
@@ -1114,7 +1161,8 @@ export async function handleApiRequest(
           ok: false,
           error: extractMpErrorMessage(
             meRes.data,
-            'Access Token inválido o sin permisos en Mercado Pago.'
+            'Access Token inválido o sin permisos en Mercado Pago.',
+            'auth'
           ),
         });
         return true;
@@ -1192,6 +1240,19 @@ export async function handleApiRequest(
         }
       }
 
+      const pointUnauthorized =
+        !v1Terminals.ok &&
+        (v1Terminals.status === 401 || v1Terminals.status === 403) &&
+        !legacyDevices.ok &&
+        (legacyDevices.status === 401 || legacyDevices.status === 403);
+      const posUnauthorized = !posRes.ok && (posRes.status === 401 || posRes.status === 403);
+
+      let warning: string | undefined;
+      if (pointUnauthorized || posUnauthorized) {
+        warning =
+          'La cuenta se autenticó, pero Mercado Pago denegó el acceso a Point/Cajas (UNAUTHORIZED). Verificá en Mercado Pago Developers que tu aplicación sea de tipo "Pagos presenciales" (Point / QR) y no solo "Pagos online".';
+      }
+
       sendJson(res, 200, {
         ok: true,
         account: {
@@ -1202,6 +1263,7 @@ export async function handleApiRequest(
         },
         terminals: Array.from(terminalsMap.values()),
         posList,
+        ...(warning ? { warning } : {}),
       });
       return true;
     } catch (err) {
@@ -1211,6 +1273,264 @@ export async function handleApiRequest(
           err instanceof Error
             ? err.message
             : 'No se pudo conectar con los servidores de Mercado Pago.',
+      });
+      return true;
+    }
+  }
+
+  if (apiPath === '/api/mercadopago/setup-pos') {
+    const user = await verifySupabaseSessionUser(req);
+    if (!user) {
+      sendJson(res, 401, { ok: false, error: 'Iniciá sesión para configurar la caja en Mercado Pago.' });
+      return true;
+    }
+    const token = resolveAccessToken(body.accessToken);
+    if (!token) {
+      sendJson(res, 400, { ok: false, error: 'Ingresá tu Access Token de Mercado Pago primero.' });
+      return true;
+    }
+
+    const rawExternalId = resolvePosId(body.posExternalId).replace(/[^a-zA-Z0-9]/g, '').slice(0, 40);
+    const posExternalId = rawExternalId || 'CAJA01';
+    const rawStoreName = String(body.storeName || 'Taller Principal')
+      .replace(/[^a-zA-Z0-9 _-]/g, ' ')
+      .trim()
+      .slice(0, 45);
+    const storeName = rawStoreName || 'Taller Principal';
+    const rawPosName = String(body.posName || `Caja ${posExternalId}`)
+      .replace(/[^a-zA-Z0-9 _-]/g, ' ')
+      .trim()
+      .slice(0, 45);
+    const posName = rawPosName || posExternalId;
+
+    try {
+      const meRes = await mpFetch('/users/me', token);
+      if (!meRes.ok) {
+        sendJson(res, meRes.status >= 400 ? meRes.status : 401, {
+          ok: false,
+          error: extractMpErrorMessage(
+            meRes.data,
+            'Access Token inválido o sin permisos en Mercado Pago.',
+            'auth'
+          ),
+        });
+        return true;
+      }
+
+      const sellerId = String(meRes.data.id || '').trim();
+      if (!sellerId) {
+        sendJson(res, 400, { ok: false, error: 'No se pudo resolver el ID de cuenta en Mercado Pago.' });
+        return true;
+      }
+
+      const existingPosRes = await mpFetch('/pos?limit=50', token);
+      if (existingPosRes.ok && Array.isArray(existingPosRes.data.results)) {
+        const match = existingPosRes.data.results.find((item) => {
+          if (!item || typeof item !== 'object') return false;
+          const row = item as Record<string, unknown>;
+          return String(row.external_id || '').trim().toUpperCase() === posExternalId.toUpperCase();
+        }) as Record<string, unknown> | undefined;
+
+        if (match) {
+          sendJson(res, 200, {
+            ok: true,
+            created: false,
+            pos: {
+              id: String(match.id || ''),
+              externalId: String(match.external_id || posExternalId),
+              name: String(match.name || posName),
+              storeId: String(match.store_id || ''),
+            },
+          });
+          return true;
+        }
+      }
+
+      let storeId = '';
+      const storesRes = await mpFetch(`/users/${encodeURIComponent(sellerId)}/stores/search?limit=10`, token);
+      if (storesRes.ok && Array.isArray(storesRes.data.results) && storesRes.data.results.length > 0) {
+        const firstStore = storesRes.data.results[0] as Record<string, unknown>;
+        storeId = String(firstStore.id || '').trim();
+      }
+
+      if (!storeId) {
+        const createStoreRes = await mpFetch(`/users/${encodeURIComponent(sellerId)}/stores`, token, {
+          method: 'POST',
+          body: {
+            name: storeName,
+            external_id: 'SUC01',
+            location: {
+              street_number: '100',
+              street_name: 'Av Principal',
+              city_name: 'Buenos Aires',
+              state_name: 'Buenos Aires',
+              latitude: -34.603722,
+              longitude: -58.381592,
+              reference: storeName,
+            },
+          },
+        });
+        if (createStoreRes.ok && createStoreRes.data.id) {
+          storeId = String(createStoreRes.data.id).trim();
+        } else {
+          sendJson(res, createStoreRes.status >= 400 ? createStoreRes.status : 400, {
+            ok: false,
+            error: extractMpErrorMessage(
+              createStoreRes.data,
+              'No tenés ninguna sucursal creada en Mercado Pago y no se pudo crear automáticamente. Creá un Local en Mercado Pago → Tu negocio → Locales y cajas.',
+              'qr'
+            ),
+          });
+          return true;
+        }
+      }
+
+      const v2PosRes = await mpFetch('/v2/pos', token, {
+        method: 'POST',
+        idempotencyKey: crypto.randomUUID(),
+        body: {
+          name: posName,
+          store_id: storeId,
+          external_id: posExternalId,
+          config: {
+            qr: {
+              operating_mode: 'pdv',
+            },
+          },
+        },
+      });
+
+      if (v2PosRes.ok) {
+        sendJson(res, 200, {
+          ok: true,
+          created: true,
+          pos: {
+            id: String(v2PosRes.data.id || ''),
+            externalId: String(v2PosRes.data.external_id || posExternalId),
+            name: String(v2PosRes.data.name || posName),
+            storeId: String(v2PosRes.data.store_id || storeId),
+          },
+        });
+        return true;
+      }
+
+      const legacyPosRes = await mpFetch('/pos', token, {
+        method: 'POST',
+        body: {
+          name: posName,
+          fixed_amount: true,
+          store_id: Number.isFinite(Number(storeId)) ? Number(storeId) : storeId,
+          external_id: posExternalId,
+        },
+      });
+
+      if (legacyPosRes.ok) {
+        sendJson(res, 200, {
+          ok: true,
+          created: true,
+          pos: {
+            id: String(legacyPosRes.data.id || ''),
+            externalId: String(legacyPosRes.data.external_id || posExternalId),
+            name: String(legacyPosRes.data.name || posName),
+            storeId: String(legacyPosRes.data.store_id || storeId),
+          },
+        });
+        return true;
+      }
+
+      sendJson(res, v2PosRes.status >= 400 ? v2PosRes.status : 400, {
+        ok: false,
+        error: extractMpErrorMessage(
+          v2PosRes.data,
+          extractMpErrorMessage(legacyPosRes.data, 'No se pudo crear la Caja POS en Mercado Pago.', 'qr'),
+          'qr'
+        ),
+      });
+      return true;
+    } catch (err) {
+      sendJson(res, 502, {
+        ok: false,
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Error de red al crear la Caja POS en Mercado Pago.',
+      });
+      return true;
+    }
+  }
+
+  if (apiPath === '/api/mercadopago/terminal-mode') {
+    const user = await verifySupabaseSessionUser(req);
+    if (!user) {
+      sendJson(res, 401, { ok: false, error: 'Iniciá sesión para configurar la terminal Point.' });
+      return true;
+    }
+    const token = resolveAccessToken(body.accessToken);
+    const terminalId = resolveTerminalId(body.terminalId);
+    const operatingMode = body.operatingMode === 'STANDALONE' ? 'STANDALONE' : 'PDV';
+
+    if (!token || !terminalId) {
+      sendJson(res, 400, {
+        ok: false,
+        error: 'Faltan el Access Token o el ID de dispositivo Point.',
+      });
+      return true;
+    }
+
+    try {
+      const setupRes = await mpFetch('/terminals/v1/setup', token, {
+        method: 'PATCH',
+        body: {
+          terminals: [
+            {
+              id: terminalId,
+              operating_mode: operatingMode,
+            },
+          ],
+        },
+      });
+
+      if (setupRes.ok) {
+        sendJson(res, 200, { ok: true, terminalId, operatingMode });
+        return true;
+      }
+
+      const legacyRes = await mpFetch(
+        `/point/integration-api/devices/${encodeURIComponent(terminalId)}`,
+        token,
+        {
+          method: 'PATCH',
+          body: {
+            operating_mode: operatingMode,
+          },
+        }
+      );
+
+      if (legacyRes.ok) {
+        sendJson(res, 200, { ok: true, terminalId, operatingMode });
+        return true;
+      }
+
+      sendJson(res, setupRes.status >= 400 ? setupRes.status : 400, {
+        ok: false,
+        error: extractMpErrorMessage(
+          setupRes.data,
+          extractMpErrorMessage(
+            legacyRes.data,
+            'No se pudo cambiar el modo del Point. Verificá que la terminal esté vinculada a un Local y Caja en Mercado Pago.',
+            'point'
+          ),
+          'point'
+        ),
+      });
+      return true;
+    } catch (err) {
+      sendJson(res, 502, {
+        ok: false,
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Error de red al cambiar el modo de la terminal Point.',
       });
       return true;
     }
@@ -1358,7 +1678,12 @@ export async function handleApiRequest(
             ok: false,
             error: extractMpErrorMessage(
               legacyQrRes.data,
-              extractMpErrorMessage(orderRes.data, 'No se pudo generar el QR dinámico en Mercado Pago.')
+              extractMpErrorMessage(
+                orderRes.data,
+                'No se pudo generar el QR dinámico en Mercado Pago.',
+                'qr'
+              ),
+              'qr'
             ),
           });
           return true;
@@ -1368,7 +1693,8 @@ export async function handleApiRequest(
           ok: false,
           error: extractMpErrorMessage(
             orderRes.data,
-            'No se pudo generar el QR dinámico en Mercado Pago.'
+            'No se pudo generar el QR dinámico en Mercado Pago.',
+            'qr'
           ),
         });
         return true;
@@ -1460,15 +1786,20 @@ export async function handleApiRequest(
         return true;
       }
 
+      const legacyMsg = extractMpErrorMessage(legacyIntentRes.data, '', 'point');
+      const v1Msg = extractMpErrorMessage(
+        pointOrderRes.data,
+        'No se pudo enviar la orden al dispositivo Point.',
+        'point'
+      );
+      const finalPointError =
+        legacyIntentRes.status !== 401 && legacyIntentRes.status !== 403 && legacyMsg
+          ? legacyMsg
+          : v1Msg;
+
       sendJson(res, pointOrderRes.status >= 400 ? pointOrderRes.status : 400, {
         ok: false,
-        error: extractMpErrorMessage(
-          pointOrderRes.data,
-          extractMpErrorMessage(
-            legacyIntentRes.data,
-            'No se pudo enviar la orden al dispositivo Point.'
-          )
-        ),
+        error: finalPointError,
       });
       return true;
     } catch (err) {
@@ -1776,7 +2107,8 @@ export async function handleApiRequest(
           ok: false,
           error: extractMpErrorMessage(
             preapprovalRes.data || prefRes.data,
-            'Mercado Pago no permitió generar el link de suscripción.'
+            'Mercado Pago no permitió generar el link de suscripción.',
+            'subscriptions'
           ),
         });
         return true;
@@ -2001,7 +2333,8 @@ export async function handleApiRequest(
           valid: false,
           error: extractMpErrorMessage(
             meRes.data,
-            'Mercado Pago rechazó las credenciales de PLATFORM_MERCADOPAGO_ACCESS_TOKEN.'
+            'Mercado Pago rechazó las credenciales de PLATFORM_MERCADOPAGO_ACCESS_TOKEN.',
+            'subscriptions'
           ),
         });
         return true;
@@ -2395,7 +2728,8 @@ export async function handleApiRequest(
             preRes.data,
             isPermError
               ? `Faltan permisos/scopes de Suscripciones (HTTP ${preRes.status}).`
-              : `Respuesta inesperada al consultar Suscripciones (HTTP ${preRes.status}).`
+              : `Respuesta inesperada al consultar Suscripciones (HTTP ${preRes.status}).`,
+            'subscriptions'
           ),
         });
         if (isPermError) {
