@@ -553,6 +553,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
 
   const [showNewSale, setShowNewSale] = useState(false);
   const [saleProduct, setSaleProduct] = useState<ProductRecord | null>(null);
+  const [saleCartItems, setSaleCartItems] = useState<Array<{ product: ProductRecord; quantity: number }>>([]);
   const [editingSale, setEditingSale] = useState<SaleRecord | null>(null);
   const [selectedPrintSale, setSelectedPrintSale] = useState<SaleRecord | null>(null);
   const [showNewPurchase, setShowNewPurchase] = useState(false);
@@ -826,6 +827,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         break;
       case 'new_sale':
         setSaleProduct(null);
+        setSaleCartItems([]);
         setEditingSale(null);
         setShowNewSale(true);
         break;
@@ -1287,6 +1289,8 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               {page === 'inventory' && (
                 <InventoryPage
                   products={products}
+                  ownerId={userId}
+                  profile={profile}
                   initialFilter={inventoryInitialFilter}
                   filterNonce={inventoryFilterNonce}
                   onNewProduct={() => {
@@ -1295,6 +1299,12 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                   }}
                   onImportProducts={() => setShowProductImport(true)}
                   onSelectProduct={(p) => setSelectedProductId(p.id)}
+                  onCheckoutCart={(items) => {
+                    setSaleProduct(null);
+                    setEditingSale(null);
+                    setSaleCartItems(items);
+                    setShowNewSale(true);
+                  }}
                 />
               )}
 
@@ -1329,11 +1339,13 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                   profile={profile}
                   onNewSale={() => {
                     setSaleProduct(null);
+                    setSaleCartItems([]);
                     setEditingSale(null);
                     setShowNewSale(true);
                   }}
                   onEditSale={(s) => {
                     setSaleProduct(null);
+                    setSaleCartItems([]);
                     setEditingSale(s);
                     setShowNewSale(true);
                   }}
@@ -1690,6 +1702,7 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
               setShowProductModal(true);
             }}
             onSell={(p) => {
+              setSaleCartItems([]);
               setSaleProduct(p);
               setShowNewSale(true);
             }}
@@ -1731,12 +1744,14 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
             onClose={() => {
               setShowNewSale(false);
               setSaleProduct(null);
+              setSaleCartItems([]);
               setEditingSale(null);
             }}
             ownerId={userId}
             clients={clients}
             products={products}
             preselectedProduct={saleProduct}
+            preselectedCartItems={saleCartItems}
             editSale={editingSale}
             profile={profile}
             brandName={profile.brandName}

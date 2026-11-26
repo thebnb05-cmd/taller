@@ -37,6 +37,8 @@ export interface SaleExtraMeta {
   surchargeType?: SaleAdjustmentType;
   surchargeValue?: number;
   surchargeAmount?: number;
+  transferQrIvaPct?: number;
+  transferQrIvaAmount?: number;
   payments?: SalePaymentEntry[];
   note?: string;
   mpChannel?: MpPaymentChannel;
@@ -54,6 +56,8 @@ export interface ParsedSaleDetails {
   surchargeType: SaleAdjustmentType;
   surchargeValue: number;
   surchargeAmount: number;
+  transferQrIvaPct: number;
+  transferQrIvaAmount: number;
   payments: SalePaymentEntry[];
   note: string;
   mpChannel?: MpPaymentChannel;
@@ -185,6 +189,8 @@ export function parseSaleDetails(
       surchargeType: 'percent',
       surchargeValue: 0,
       surchargeAmount: 0,
+      transferQrIvaPct: 0,
+      transferQrIvaAmount: 0,
       payments: [],
       note: '',
       hasStructuredMeta: false,
@@ -245,6 +251,8 @@ export function parseSaleDetails(
       surchargeType: parsed.surchargeType === 'fixed' ? 'fixed' : 'percent',
       surchargeValue: safeRoundMoney(parsed.surchargeValue),
       surchargeAmount: safeRoundMoney(parsed.surchargeAmount),
+      transferQrIvaPct: safeRoundMoney(parsed.transferQrIvaPct),
+      transferQrIvaAmount: safeRoundMoney(parsed.transferQrIvaAmount),
       payments,
       note: parsed.note ? sanitizeText(String(parsed.note), 400) : '',
       ...(mpChannel ? { mpChannel } : {}),
@@ -265,6 +273,8 @@ export function parseSaleDetails(
       surchargeType: 'percent',
       surchargeValue: 0,
       surchargeAmount: 0,
+      transferQrIvaPct: 0,
+      transferQrIvaAmount: 0,
       payments: [],
       note: '',
       hasStructuredMeta: false,
@@ -329,6 +339,10 @@ export function serializeSaleStatus(params: {
     cleanMeta.surchargeType = meta.surchargeType === 'fixed' ? 'fixed' : 'percent';
     cleanMeta.surchargeValue = safeRoundMoney(meta.surchargeValue);
     cleanMeta.surchargeAmount = safeRoundMoney(meta.surchargeAmount);
+  }
+  if (meta.transferQrIvaAmount && meta.transferQrIvaAmount > 0) {
+    cleanMeta.transferQrIvaPct = safeRoundMoney(meta.transferQrIvaPct);
+    cleanMeta.transferQrIvaAmount = safeRoundMoney(meta.transferQrIvaAmount);
   }
   if (meta.payments && meta.payments.length > 0) {
     cleanMeta.payments = meta.payments

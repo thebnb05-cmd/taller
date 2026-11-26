@@ -201,6 +201,7 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
   const displaySubtotal = toDisplayMoney(saleDetails.subtotal);
   const displayDiscount = toDisplayMoney(saleDetails.discountAmount);
   const displaySurcharge = toDisplayMoney(saleDetails.surchargeAmount);
+  const displayTransferIva = toDisplayMoney(saleDetails.transferQrIvaAmount);
   const displayDeposit = toDisplayMoney(paymentInfo.deposit);
   const displayPending = Math.max(0, roundDisplay(displayAmount - displayDeposit));
   const statusLabel = paymentInfo.isPaid
@@ -356,9 +357,9 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
         </table>
       </div>
 
-      {(displayDiscount > 0 || displaySurcharge > 0 || saleDetails.note) && (
+      {(displayDiscount > 0 || displaySurcharge > 0 || displayTransferIva > 0 || saleDetails.note) && (
         <div className="mt-3 space-y-1 rounded-xl border border-slate-200/80 bg-slate-50/70 px-3 py-2.5 text-xs text-slate-700">
-          {(displayDiscount > 0 || displaySurcharge > 0) && (
+          {(displayDiscount > 0 || displaySurcharge > 0 || displayTransferIva > 0) && (
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span>
                 Subtotal:{' '}
@@ -379,6 +380,14 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
                   Recargo: +
                   <strong className="font-mono-num">
                     {formatCurrency(displaySurcharge, selectedCurrency)}
+                  </strong>
+                </span>
+              )}
+              {displayTransferIva > 0 && (
+                <span className="text-[#0072BB]">
+                  IVA Transf./QR{saleDetails.transferQrIvaPct > 0 ? ` (${saleDetails.transferQrIvaPct}%)` : ''}: +
+                  <strong className="font-mono-num">
+                    {formatCurrency(displayTransferIva, selectedCurrency)}
                   </strong>
                 </span>
               )}
@@ -674,6 +683,14 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
           <div className="mt-0.5 flex justify-between text-[10px]">
             <span>Recargo:</span>
             <span>+{formatCurrency(displaySurcharge, selectedCurrency)}</span>
+          </div>
+        )}
+        {displayTransferIva > 0 && (
+          <div className="mt-0.5 flex justify-between text-[10px]">
+            <span>
+              IVA Transf./QR{saleDetails.transferQrIvaPct > 0 ? ` (${saleDetails.transferQrIvaPct}%)` : ''}:
+            </span>
+            <span>+{formatCurrency(displayTransferIva, selectedCurrency)}</span>
           </div>
         )}
         {saleDetails.note && (

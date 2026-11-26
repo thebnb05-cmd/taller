@@ -79,6 +79,11 @@ import {
   recordRecoveredPayment,
 } from '../utils/paymentLedger';
 import {
+  loadSavedTransferQrIvaPct,
+  saveTransferQrIvaPct,
+  TRANSFER_QR_IVA_PRESETS,
+} from '../utils/repairMeta';
+import {
   parseWorkshopMeta,
   saveMercadoPagoConfigToProfile,
   syncMercadoPagoConfigFromProfile,
@@ -105,6 +110,7 @@ interface NewSaleModalProps {
   clients: ClientRecord[];
   products?: ProductRecord[];
   preselectedProduct?: ProductRecord | null;
+  preselectedCartItems?: Array<{ product: ProductRecord; quantity: number }>;
   editSale?: SaleRecord | null;
   profile?: WorkshopProfile | null;
   brandName?: string;
@@ -143,6 +149,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   clients,
   products = [],
   preselectedProduct,
+  preselectedCartItems,
   editSale,
   profile,
   brandName,
@@ -204,6 +211,11 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const [discountValue, setDiscountValue] = useState('');
   const [surchargeType, setSurchargeType] = useState<SaleAdjustmentType>('percent');
   const [surchargeValue, setSurchargeValue] = useState('');
+  const [applyTransferQrIva, setApplyTransferQrIva] = useState(false);
+  const [transferQrIvaPct, setTransferQrIvaPct] = useState(() =>
+    String(loadSavedTransferQrIvaPct())
+  );
+  const [ivaTouchedManually, setIvaTouchedManually] = useState(false);
   const [saleNote, setSaleNote] = useState('');
 
   const [deposit, setDeposit] = useState('');
@@ -265,7 +277,11 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       return;
     }
 
-    const sessionKey = `${ownerId}|${editSale?.id || ''}|${preselectedProduct?.id || ''}`;
+    const preselectedCartKey =
+      preselectedCartItems && preselectedCartItems.length > 0
+        ? preselectedCartItems.map((it) => `${it.product.id}:${it.quantity}`).join(',')
+        : '';
+    const sessionKey = `${ownerId}|${editSale?.id || ''}|${preselectedProduct?.id || ''}|${preselectedCartKey}`;
     if (initSessionKeyRef.current === sessionKey) {
       return;
     }
@@ -333,6 +349,15 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
             )
           : ''
       );
+      if (details.transferQrIvaPct > 0 && details.transferQrIvaAmount > 0) {
+        setApplyTransferQrIva(true);
+        setTransferQrIvaPct(String(details.transferQrIvaPct));
+        setIvaTouchedManually(true);
+      } else {
+        setApplyTransferQrIva(false);
+        setTransferQrIvaPct(String(loadSavedTransferQrIvaPct()));
+        setIvaTouchedManually(false);
+      }
       setCartItems(
         details.items.map((it) => {
           const unitDisplay = toDisplay(it.unitPrice);
@@ -344,6 +369,42 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         })
       );
       setDeposit(String(toDisplay(payInfo.deposit)));
+      setShowManualForm(false);
+    } else if (preselectedCartItems && preselectedCartItems.length > 0) {
+      setSelectedCurrency(baseCurrency);
+      setSecondaryPreviewCode(secondaryCurrencies[0]?.code ?? null);
+      setClientName('');
+      setInvoice(`FV-${Math.floor(1000 + Math.random() * 9000)}`);
+      setDueDate(todayISO());
+      setPaymentMethod('efectivo');
+      setStatus('cobrado');
+      setExistingPayments([]);
+      setSaleNote('');
+      setDiscountType('percent');
+      setDiscountValue('');
+      setSurchargeType('percent');
+      setSurchargeValue('');
+      setApplyTransferQrIva(false);
+      setTransferQrIvaPct(String(loadSavedTransferQrIvaPct()));
+      setIvaTouchedManually(false);
+      const initialCart: SaleCartItem[] = preselectedCartItems.map((entry, idx) => {
+        const qty = Math.max(1, Math.round(Number(entry.quantity || 1)));
+        const unitPrice = roundCurrencyValue(Number(entry.product.price || 0));
+        return {
+          id: `${makeCartItemId()}-${idx}`,
+          productId: entry.product.id,
+          name: entry.product.name,
+          sku: entry.product.sku || entry.product.barcode || undefined,
+          quantity: qty,
+          unitPrice,
+          subtotal: roundCurrencyValue(qty * unitPrice),
+        };
+      });
+      const initialTotal = roundCurrencyValue(
+        initialCart.reduce((sum, it) => sum + it.subtotal, 0)
+      );
+      setCartItems(initialCart);
+      setDeposit(String(initialTotal));
       setShowManualForm(false);
     } else if (preselectedProduct) {
       setSelectedCurrency(baseCurrency);
@@ -359,6 +420,9 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       setDiscountValue('');
       setSurchargeType('percent');
       setSurchargeValue('');
+      setApplyTransferQrIva(false);
+      setTransferQrIvaPct(String(loadSavedTransferQrIvaPct()));
+      setIvaTouchedManually(false);
       const unitPrice = roundCurrencyValue(Number(preselectedProduct.price || 0));
       setCartItems([
         {
@@ -387,6 +451,9 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       setDiscountValue('');
       setSurchargeType('percent');
       setSurchargeValue('');
+      setApplyTransferQrIva(false);
+      setTransferQrIvaPct(String(loadSavedTransferQrIvaPct()));
+      setIvaTouchedManually(false);
       setCartItems([]);
       setDeposit('');
       setShowManualForm(products.length === 0);
@@ -416,7 +483,17 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
       cancelled = true;
       stopScanner();
     };
-  }, [open, ownerId, preselectedProduct, editSale, baseCurrency, secondaryCurrencies, profile, products.length]);
+  }, [
+    open,
+    ownerId,
+    preselectedProduct,
+    preselectedCartItems,
+    editSale,
+    baseCurrency,
+    secondaryCurrencies,
+    profile,
+    products.length,
+  ]);
 
   const subtotalDisplay = useMemo(
     () =>
@@ -448,7 +525,17 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     return roundCurrencyValue(raw);
   }, [afterDiscount, surchargeType, rawSurchargeVal]);
 
-  const totalDisplay = roundCurrencyValue(afterDiscount + surchargeAmountDisplay);
+  const afterAdjustmentsDisplay = roundCurrencyValue(afterDiscount + surchargeAmountDisplay);
+  const parsedTransferQrIvaPct = Math.max(
+    0,
+    Math.min(100, parseSafePositiveNumber(transferQrIvaPct, 0))
+  );
+  const transferQrIvaAmountDisplay =
+    applyTransferQrIva && afterAdjustmentsDisplay > 0 && parsedTransferQrIvaPct > 0
+      ? roundCurrencyValue(afterAdjustmentsDisplay * (parsedTransferQrIvaPct / 100))
+      : 0;
+
+  const totalDisplay = roundCurrencyValue(afterAdjustmentsDisplay + transferQrIvaAmountDisplay);
 
   useEffect(() => {
     if (status === 'cobrado') {
@@ -1131,7 +1218,12 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
               : rawSurchargeVal
           )
         : 0;
-    const cleanTxAmount = roundCurrencyValue(afterDisc + surAmt);
+    const afterAdjust = roundCurrencyValue(afterDisc + surAmt);
+    const ivaAmt =
+      applyTransferQrIva && afterAdjust > 0 && parsedTransferQrIvaPct > 0
+        ? roundCurrencyValue(afterAdjust * (parsedTransferQrIvaPct / 100))
+        : 0;
+    const cleanTxAmount = roundCurrencyValue(afterAdjust + ivaAmt);
 
     if (cleanTxAmount <= 0) {
       notify('El monto total debe ser mayor a 0.', 'error');
@@ -1197,6 +1289,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     const baseDiscountValue = discountType === 'fixed' ? toBase(rawDiscountVal) : rawDiscountVal;
     const baseSurchargeAmount = toBase(surAmt);
     const baseSurchargeValue = surchargeType === 'fixed' ? toBase(rawSurchargeVal) : rawSurchargeVal;
+    const baseTransferQrIvaAmount = toBase(ivaAmt);
     const cleanAmount = toBase(cleanTxAmount);
 
     const cleanTxDeposit =
@@ -1297,6 +1390,12 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
               surchargeType,
               surchargeValue: baseSurchargeValue,
               surchargeAmount: baseSurchargeAmount,
+            }
+          : {}),
+        ...(baseTransferQrIvaAmount > 0
+          ? {
+              transferQrIvaPct: parsedTransferQrIvaPct,
+              transferQrIvaAmount: baseTransferQrIvaAmount,
             }
           : {}),
         payments: nextPayments,
@@ -2389,6 +2488,20 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   </span>
                 </div>
               )}
+              {transferQrIvaAmountDisplay > 0 && (
+                <div className="flex justify-between text-[#0072BB] dark:text-sky-400">
+                  <span>
+                    {tr(
+                      `IVA Transf./QR (${parsedTransferQrIvaPct}%)`,
+                      `Transfer/QR VAT (${parsedTransferQrIvaPct}%)`,
+                      `IVA Transf./QR (${parsedTransferQrIvaPct}%)`
+                    )}
+                  </span>
+                  <span className="font-mono-num">
+                    +{formatCurrency(transferQrIvaAmountDisplay, selectedCurrency)}
+                  </span>
+                </div>
+              )}
               <div className="pt-1">
                 <div className="flex items-baseline justify-between gap-2 text-sm font-extrabold text-slate-900 dark:text-white">
                   <span>{tr('Total final', 'Final total', 'Total final')}</span>
@@ -2514,6 +2627,94 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           </div>
         </div>
 
+        {/* IVA Transferencia / QR */}
+        <div
+          className={`space-y-2 rounded-2xl border p-3 transition ${
+            applyTransferQrIva
+              ? 'border-sky-300 bg-sky-50/80 dark:border-sky-800 dark:bg-sky-950/35'
+              : 'border-slate-200 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-900/50'
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-100">
+              <input
+                type="checkbox"
+                checked={applyTransferQrIva}
+                onChange={(e) => {
+                  setIvaTouchedManually(true);
+                  setApplyTransferQrIva(e.target.checked);
+                }}
+                className="h-4 w-4 rounded border-slate-300 text-[#0072BB] focus:ring-[#0072BB]"
+              />
+              <QrCode className="h-3.5 w-3.5 text-[#0072BB] dark:text-sky-400" />
+              <span>
+                {tr(
+                  'Agregar IVA Transferencia / QR',
+                  'Add Transfer / QR VAT',
+                  'Adicionar IVA Transferência / QR'
+                )}
+              </span>
+              <span className="rounded-md bg-white/90 px-1.5 py-0.5 text-[10px] font-bold text-[#0072BB] dark:bg-slate-800 dark:text-sky-300">
+                {tr('Solo Transf. / QR', 'Transfer / QR only', 'Só Transf. / QR')}
+              </span>
+            </label>
+
+            {applyTransferQrIva && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {TRANSFER_QR_IVA_PRESETS.map((presetPct) => {
+                  const isPresetActive = Math.abs(parsedTransferQrIvaPct - presetPct) < 0.01;
+                  return (
+                    <button
+                      key={presetPct}
+                      type="button"
+                      onClick={() => {
+                        const saved = saveTransferQrIvaPct(presetPct);
+                        setTransferQrIvaPct(String(saved));
+                      }}
+                      className={`h-7 rounded-lg border px-2 font-mono-num text-[11px] font-semibold transition ${
+                        isPresetActive
+                          ? 'border-[#0072BB] bg-[#0072BB] text-white'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                      }`}
+                    >
+                      {presetPct === 6.5 ? '6.5% MP' : `${presetPct}%`}
+                    </button>
+                  );
+                })}
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.1"
+                    value={transferQrIvaPct}
+                    onChange={(e) => {
+                      setTransferQrIvaPct(e.target.value);
+                      const num = Number(e.target.value);
+                      if (Number.isFinite(num) && num > 0 && num <= 100) {
+                        saveTransferQrIvaPct(num);
+                      }
+                    }}
+                    aria-label={tr('Porcentaje IVA Transferencia / QR', 'Transfer / QR VAT percentage', 'Porcentagem IVA Transferência / QR')}
+                    className="h-7 w-16 rounded-lg border border-slate-200 bg-white px-2 text-center font-mono-num text-xs font-semibold text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400">%</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {applyTransferQrIva && (
+            <p className="text-[11px] text-slate-600 dark:text-slate-300">
+              {tr(
+                `Solo aplica por Transferencia o QR (${parsedTransferQrIvaPct}% semejante a Mercado Pago${transferQrIvaAmountDisplay > 0 ? ` · +${formatCurrency(transferQrIvaAmountDisplay, selectedCurrency)}` : ''}). En Efectivo queda sin IVA.`,
+                `Only applies to Transfer or QR (${parsedTransferQrIvaPct}% Mercado Pago equivalent). Cash payments have no VAT surcharge.`,
+                `Aplica-se somente para Transferência ou QR (${parsedTransferQrIvaPct}% equivalente ao Mercado Pago). Em dinheiro fica sem IVA.`
+              )}
+            </p>
+          )}
+        </div>
+
         {/* Payment Method */}
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
@@ -2534,6 +2735,9 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   type="button"
                   onClick={() => {
                     setPaymentMethod(id);
+                    if (!ivaTouchedManually) {
+                      setApplyTransferQrIva(id === 'transferencia');
+                    }
                     if (mpOrder && mpOrder.status !== 'paid') {
                       setMpOrder(null);
                     }

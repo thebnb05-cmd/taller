@@ -204,6 +204,12 @@ export const SalesPage: React.FC<SalesPageProps> = ({
             surchargeType: details.surchargeType,
             surchargeValue: details.surchargeValue,
             surchargeAmount: details.surchargeAmount,
+            ...(details.transferQrIvaAmount > 0
+              ? {
+                  transferQrIvaPct: details.transferQrIvaPct,
+                  transferQrIvaAmount: details.transferQrIvaAmount,
+                }
+              : {}),
             payments,
             note: details.note,
             ...(details.mpChannel ? { mpChannel: details.mpChannel } : {}),
