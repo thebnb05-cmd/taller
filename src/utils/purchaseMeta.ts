@@ -1,17 +1,26 @@
 import type { PurchaseRecord } from '../types/workshop';
 import { isValidCurrencyCode, type CurrencyCode } from './currency';
+import type { PaymentMethod } from './payment';
 import { sanitizePlainLine, sanitizeText } from './validation';
 
 const PUR_META_MARKER = '<!--TH3BNB_PUR:';
 const PUR_META_END = '-->';
 
 export type PurchaseCategory = 'repuestos' | 'gasto_fijo' | 'herramientas' | 'otro';
+export type PurchaseOriginType = 'manual' | 'venta' | 'reparacion' | 'mp_sync';
 
 export const PURCHASE_CATEGORY_LABELS: Record<PurchaseCategory, string> = {
   repuestos: 'Repuestos / Stock',
   gasto_fijo: 'Gasto fijo / Servicios',
   herramientas: 'Herramientas / Taller',
   otro: 'Otro gasto',
+};
+
+export const PURCHASE_ORIGIN_LABELS: Record<PurchaseOriginType, string> = {
+  manual: 'Compra / Gasto',
+  venta: 'Venta / Mostrador',
+  reparacion: 'Reparación',
+  mp_sync: 'Mercado Pago',
 };
 
 export interface PurchaseStockLine {
@@ -25,6 +34,14 @@ export interface PurchaseExtraMeta {
   category?: PurchaseCategory;
   note?: string;
   stockItems?: PurchaseStockLine[];
+  paymentMethod?: PaymentMethod;
+  mpChannel?: 'mp_point' | 'mp_qr';
+  mpPointName?: string;
+  mpOrderId?: string;
+  mpPaymentId?: string;
+  mpExternalReference?: string;
+  originType?: PurchaseOriginType;
+  originRecordId?: string;
 }
 
 export interface ParsedPurchaseInfo {
@@ -35,6 +52,24 @@ export interface ParsedPurchaseInfo {
   category: PurchaseCategory;
   note: string;
   stockItems: PurchaseStockLine[];
+  paymentMethod?: PaymentMethod;
+  mpChannel?: 'mp_point' | 'mp_qr';
+  mpPointName?: string;
+  mpOrderId?: string;
+  mpPaymentId?: string;
+  mpExternalReference?: string;
+  originType: PurchaseOriginType;
+  originRecordId?: string;
+}
+
+export function isMirroredIncomePurchase(
+  info: Pick<ParsedPurchaseInfo, 'originType'>
+): boolean {
+  return (
+    info.originType === 'venta' ||
+    info.originType === 'reparacion' ||
+    info.originType === 'mp_sync'
+  );
 }
 
 function splitPurchaseStatusAndMeta(rawStatus?: string | null): {
@@ -63,6 +98,20 @@ function sanitizeCategory(raw: unknown): PurchaseCategory {
   return 'repuestos';
 }
 
+function sanitizeOriginType(raw: unknown): PurchaseOriginType {
+  if (raw === 'venta' || raw === 'reparacion' || raw === 'mp_sync' || raw === 'manual') {
+    return raw;
+  }
+  return 'manual';
+}
+
+function sanitizePurchaseMethod(raw: unknown): PaymentMethod | undefined {
+  if (raw === 'efectivo' || raw === 'transferencia' || raw === 'tarjeta') {
+    return raw;
+  }
+  return undefined;
+}
+
 export function parsePurchaseInfo(purchase: Pick<PurchaseRecord, 'status'>): ParsedPurchaseInfo {
   const { head, metaJson } = splitPurchaseStatusAndMeta(purchase.status);
   const raw = head.toLowerCase().trim();
@@ -89,12 +138,40 @@ export function parsePurchaseInfo(purchase: Pick<PurchaseRecord, 'status'>): Par
   let category: PurchaseCategory = 'repuestos';
   let note = '';
   let stockItems: PurchaseStockLine[] = [];
+  let paymentMethod: PaymentMethod | undefined;
+  let mpChannel: 'mp_point' | 'mp_qr' | undefined;
+  let mpPointName: string | undefined;
+  let mpOrderId: string | undefined;
+  let mpPaymentId: string | undefined;
+  let mpExternalReference: string | undefined;
+  let originType: PurchaseOriginType = 'manual';
+  let originRecordId: string | undefined;
 
   if (metaJson) {
     try {
       const parsed = JSON.parse(metaJson) as PurchaseExtraMeta;
       category = sanitizeCategory(parsed.category);
       note = parsed.note ? sanitizeText(String(parsed.note), 400) : '';
+      paymentMethod = sanitizePurchaseMethod(parsed.paymentMethod);
+      if (parsed.mpChannel === 'mp_point' || parsed.mpChannel === 'mp_qr') {
+        mpChannel = parsed.mpChannel;
+      }
+      if (parsed.mpPointName) {
+        mpPointName = sanitizePlainLine(String(parsed.mpPointName), 120) || undefined;
+      }
+      if (parsed.mpOrderId) {
+        mpOrderId = sanitizePlainLine(String(parsed.mpOrderId), 80) || undefined;
+      }
+      if (parsed.mpPaymentId) {
+        mpPaymentId = sanitizePlainLine(String(parsed.mpPaymentId), 80) || undefined;
+      }
+      if (parsed.mpExternalReference) {
+        mpExternalReference = sanitizePlainLine(String(parsed.mpExternalReference), 80) || undefined;
+      }
+      originType = sanitizeOriginType(parsed.originType);
+      if (parsed.originRecordId) {
+        originRecordId = sanitizePlainLine(String(parsed.originRecordId), 120) || undefined;
+      }
       if (Array.isArray(parsed.stockItems)) {
         stockItems = parsed.stockItems
           .slice(0, 40)
@@ -119,6 +196,14 @@ export function parsePurchaseInfo(purchase: Pick<PurchaseRecord, 'status'>): Par
     category,
     note,
     stockItems,
+    ...(paymentMethod ? { paymentMethod } : {}),
+    ...(mpChannel ? { mpChannel } : {}),
+    ...(mpPointName ? { mpPointName } : {}),
+    ...(mpOrderId ? { mpOrderId } : {}),
+    ...(mpPaymentId ? { mpPaymentId } : {}),
+    ...(mpExternalReference ? { mpExternalReference } : {}),
+    originType,
+    ...(originRecordId ? { originRecordId } : {}),
   };
 }
 
@@ -129,6 +214,14 @@ export function serializePurchaseStatus(params: {
   category?: PurchaseCategory;
   note?: string;
   stockItems?: PurchaseStockLine[];
+  paymentMethod?: PaymentMethod;
+  mpChannel?: 'mp_point' | 'mp_qr';
+  mpPointName?: string;
+  mpOrderId?: string;
+  mpPaymentId?: string;
+  mpExternalReference?: string;
+  originType?: PurchaseOriginType;
+  originRecordId?: string;
 }): string {
   const extras: string[] = [];
   if (params.currency && isValidCurrencyCode(params.currency)) {
@@ -151,7 +244,41 @@ export function serializePurchaseStatus(params: {
       unitCost: Math.max(0, Math.round(Number(s.unitCost || 0) * 100) / 100),
     }));
 
-  if (cleanCategory === 'repuestos' && !cleanNote && cleanStockItems.length === 0) {
+  const cleanMethod = sanitizePurchaseMethod(params.paymentMethod);
+  const cleanChannel =
+    params.mpChannel === 'mp_point' || params.mpChannel === 'mp_qr'
+      ? params.mpChannel
+      : undefined;
+  const cleanPointName = params.mpPointName
+    ? sanitizePlainLine(params.mpPointName, 120).replace(/-->/g, '')
+    : '';
+  const cleanOrderId = params.mpOrderId
+    ? sanitizePlainLine(params.mpOrderId, 80).replace(/-->/g, '')
+    : '';
+  const cleanPaymentId = params.mpPaymentId
+    ? sanitizePlainLine(params.mpPaymentId, 80).replace(/-->/g, '')
+    : '';
+  const cleanExtRef = params.mpExternalReference
+    ? sanitizePlainLine(params.mpExternalReference, 80).replace(/-->/g, '')
+    : '';
+  const cleanOrigin = sanitizeOriginType(params.originType);
+  const cleanOriginRecordId = params.originRecordId
+    ? sanitizePlainLine(params.originRecordId, 120).replace(/-->/g, '')
+    : '';
+
+  if (
+    cleanCategory === 'repuestos' &&
+    !cleanNote &&
+    cleanStockItems.length === 0 &&
+    !cleanMethod &&
+    !cleanChannel &&
+    !cleanPointName &&
+    !cleanOrderId &&
+    !cleanPaymentId &&
+    !cleanExtRef &&
+    cleanOrigin === 'manual' &&
+    !cleanOriginRecordId
+  ) {
     return head;
   }
 
@@ -159,6 +286,14 @@ export function serializePurchaseStatus(params: {
     category: cleanCategory,
     ...(cleanNote ? { note: cleanNote } : {}),
     ...(cleanStockItems.length > 0 ? { stockItems: cleanStockItems } : {}),
+    ...(cleanMethod ? { paymentMethod: cleanMethod } : {}),
+    ...(cleanChannel ? { mpChannel: cleanChannel } : {}),
+    ...(cleanPointName ? { mpPointName: cleanPointName } : {}),
+    ...(cleanOrderId ? { mpOrderId: cleanOrderId } : {}),
+    ...(cleanPaymentId ? { mpPaymentId: cleanPaymentId } : {}),
+    ...(cleanExtRef ? { mpExternalReference: cleanExtRef } : {}),
+    ...(cleanOrigin !== 'manual' ? { originType: cleanOrigin } : {}),
+    ...(cleanOriginRecordId ? { originRecordId: cleanOriginRecordId } : {}),
   };
 
   return `${head}\n${PUR_META_MARKER}${JSON.stringify(meta)}${PUR_META_END}`;

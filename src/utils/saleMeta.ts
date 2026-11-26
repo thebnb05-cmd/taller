@@ -45,6 +45,7 @@ export interface SaleExtraMeta {
   mpOrderId?: string;
   mpExternalReference?: string;
   mpPaymentId?: string;
+  mpPointName?: string;
 }
 
 export interface ParsedSaleDetails {
@@ -64,6 +65,7 @@ export interface ParsedSaleDetails {
   mpOrderId?: string;
   mpExternalReference?: string;
   mpPaymentId?: string;
+  mpPointName?: string;
   hasStructuredMeta: boolean;
 }
 
@@ -261,6 +263,7 @@ export function parseSaleDetails(
         ? { mpExternalReference: sanitizePlainLine(String(parsed.mpExternalReference), 80) }
         : {}),
       ...(parsed.mpPaymentId ? { mpPaymentId: sanitizePlainLine(String(parsed.mpPaymentId), 80) } : {}),
+      ...(parsed.mpPointName ? { mpPointName: sanitizePlainLine(String(parsed.mpPointName), 120) } : {}),
       hasStructuredMeta: true,
     };
   } catch {
@@ -373,6 +376,9 @@ export function serializeSaleStatus(params: {
   }
   if (meta.mpPaymentId) {
     cleanMeta.mpPaymentId = sanitizePlainLine(meta.mpPaymentId, 80).replace(/-->/g, '');
+  }
+  if (meta.mpPointName) {
+    cleanMeta.mpPointName = sanitizePlainLine(meta.mpPointName, 120).replace(/-->/g, '');
   }
 
   if (Object.keys(cleanMeta).length === 0) {

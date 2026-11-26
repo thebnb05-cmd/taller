@@ -46,6 +46,7 @@ export interface RecoveredPaymentEntry {
   mpExternalReference?: string;
   mpPaymentId?: string;
   mpApiFamily?: string;
+  mpPointName?: string;
   attemptStatus?: PaymentAttemptStatus;
   forceReconciled?: boolean;
   forceReconciledAt?: string;
@@ -134,6 +135,7 @@ function sanitizeEntry(raw: Partial<RecoveredPaymentEntry>, ownerId: string): Re
       : {}),
     ...(raw.mpPaymentId ? { mpPaymentId: sanitizePlainLine(String(raw.mpPaymentId), 80) } : {}),
     ...(raw.mpApiFamily ? { mpApiFamily: sanitizePlainLine(String(raw.mpApiFamily), 40) } : {}),
+    ...(raw.mpPointName ? { mpPointName: sanitizePlainLine(String(raw.mpPointName), 120) } : {}),
     ...(attemptStatus ? { attemptStatus } : {}),
     ...(raw.forceReconciled ? { forceReconciled: true } : {}),
     ...(raw.forceReconciledAt
@@ -269,6 +271,7 @@ export function recordRecoveredPayment(
       rawError: clean.attemptStatus === 'approved' ? undefined : clean.rawError || prev.rawError,
       reconciledSaleId: prev.reconciledSaleId || clean.reconciledSaleId,
       reconciledRepairId: prev.reconciledRepairId || clean.reconciledRepairId,
+      mpPointName: clean.mpPointName || prev.mpPointName,
       dismissed:
         prev.attemptStatus === 'failed_attempt' || prev.attemptStatus === 'pending_verification'
           ? false
@@ -507,11 +510,22 @@ export function mergeSyncedMpPayments(
         (mp.mpChannel === 'mp_point' ? 'Cobro Point Smart' : 'Cobro QR Mercado Pago'),
       subtitle: [
         mp.mpChannel === 'mp_point' ? 'Mercado Pago Point' : 'Mercado Pago QR',
+        mp.pointName || mp.posName || mp.terminalId || '',
         mp.paymentMethodId ? mp.paymentMethodId.toUpperCase() : '',
+        mp.cardLastFour ? `****${mp.cardLastFour}` : '',
         mp.externalReference ? `Ref ${mp.externalReference}` : '',
       ]
         .filter(Boolean)
         .join(' · '),
+      ...(mp.pointName || mp.posName || mp.terminalId
+        ? {
+            mpPointName: sanitizePlainLine(
+              mp.pointName || mp.posName || mp.terminalId || '',
+              120
+            ),
+          }
+        : {}),
+      ...(mp.payerLabel ? { clientName: sanitizePlainLine(mp.payerLabel, 120) || 'Mercado Pago' } : {}),
       ...(mp.orderId ? { mpOrderId: sanitizePlainLine(mp.orderId, 80) } : {}),
       ...(mp.externalReference
         ? { mpExternalReference: sanitizePlainLine(mp.externalReference, 80) }
@@ -543,7 +557,8 @@ export function mergeSyncedMpPayments(
         wasUnconfirmedAttempt ||
         !prev.mpPaymentId ||
         (!prev.mpOrderId && candidate.mpOrderId) ||
-        (!prev.mpChannel && candidate.mpChannel)
+        (!prev.mpChannel && candidate.mpChannel) ||
+        (!prev.mpPointName && candidate.mpPointName)
       ) {
         next[existingIdx] = {
           ...prev,
@@ -551,6 +566,7 @@ export function mergeSyncedMpPayments(
           mpOrderId: prev.mpOrderId || candidate.mpOrderId,
           mpExternalReference: prev.mpExternalReference || candidate.mpExternalReference,
           mpChannel: prev.mpChannel || candidate.mpChannel,
+          mpPointName: prev.mpPointName || candidate.mpPointName,
           ...(wasUnconfirmedAttempt
             ? {
                 attemptStatus: 'approved',
@@ -765,6 +781,7 @@ export function toSyntheticSalesFromRecovered(
               ? { mpExternalReference: entry.mpExternalReference }
               : {}),
             ...(entry.mpPaymentId ? { mpPaymentId: entry.mpPaymentId } : {}),
+            ...(entry.mpPointName ? { mpPointName: entry.mpPointName } : {}),
             note: entry.subtitle || entry.saveError || '',
           },
         }),

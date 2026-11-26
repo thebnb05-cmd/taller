@@ -44,7 +44,12 @@ import {
   fetchRecentMercadoPagoPayments,
   hydrateMercadoPagoConfig,
   loadMercadoPagoConfig,
+  resolvePointDisplayName,
 } from '../utils/mercadoPago';
+import {
+  syncAllElectronicPaymentsToPurchases,
+  syncRecoveredEntryToPurchase,
+} from '../utils/mpPurchasesSync';
 import { PAYMENT_METHOD_LABELS, type PaymentMethod } from '../utils/payment';
 import {
   dismissRecoveredPayment,
@@ -81,6 +86,7 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
   tasks,
   sales,
   repairs,
+  purchases,
   products = [],
   profile,
 }) => {
@@ -283,7 +289,16 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
           return;
         }
         const list = res.payments || [];
-        mergeSyncedMpPayments(ownerId, list);
+        const updatedLedger = mergeSyncedMpPayments(ownerId, list);
+        void syncAllElectronicPaymentsToPurchases({
+          ownerId,
+          sales,
+          repairs,
+          purchases,
+          recoveredEntries: updatedLedger,
+          mpPayments: list,
+          mpConfig: loadMercadoPagoConfig(ownerId),
+        });
 
         // Auto-check recent pending/failed attempts with orderId against MP orders API
         let promotedCount = 0;
@@ -315,7 +330,18 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
         setSyncingMp(false);
       }
     },
-    [mpAccessToken, notify, ownerId, periodFailedAttempts, profile, verifySingleAttemptWithMp, windowBounds.startMs]
+    [
+      mpAccessToken,
+      notify,
+      ownerId,
+      periodFailedAttempts,
+      profile,
+      purchases,
+      repairs,
+      sales,
+      verifySingleAttemptWithMp,
+      windowBounds.startMs,
+    ]
   );
 
   // Automatic initial & periodic MP consolidation while CashRegisterPage is active
@@ -381,6 +407,19 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
         mpChannelOverride: resolvedMpChannel,
       });
       if (updated) {
+        const cfg = loadMercadoPagoConfig(ownerId);
+        if (updated.method !== 'efectivo' || updated.mpChannel) {
+          void syncRecoveredEntryToPurchase(
+            ownerId,
+            {
+              ...updated,
+              mpPointName:
+                updated.mpPointName ||
+                (updated.mpChannel ? resolvePointDisplayName(cfg) : undefined),
+            },
+            cfg
+          );
+        }
         if (updated.draftSalePayload) {
           const retry = await retrySaveRecoveredSale(updated, products);
           if (retry.ok) {
@@ -402,6 +441,7 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
       notify('Ingresá un monto válido mayor a 0 para conciliar.', 'error');
       return;
     }
+    const cfg = loadMercadoPagoConfig(ownerId);
     const created = forceReconcilePaymentAttempt({
       ownerId,
       clientConfirmedNote: cleanNote,
@@ -422,6 +462,16 @@ export const CashRegisterPage: React.FC<CashRegisterPageProps> = ({
       },
     });
     if (created) {
+      if (resolvedMethod !== 'efectivo' || resolvedMpChannel) {
+        void syncRecoveredEntryToPurchase(
+          ownerId,
+          {
+            ...created,
+            mpPointName: resolvedMpChannel ? resolvePointDisplayName(cfg) : undefined,
+          },
+          cfg
+        );
+      }
       notify('Cobro capturado por reconciliación forzada y sumado al arqueo diario.');
       setShowForceManualModal(false);
     }

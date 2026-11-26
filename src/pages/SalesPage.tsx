@@ -33,11 +33,9 @@ import {
   useRecoveredPayments,
   type RecoveredPaymentEntry,
 } from '../utils/paymentLedger';
-import {
-  parseSaleDetails,
-  parseSalePaymentInfo,
-  serializeSaleStatus,
-} from '../utils/saleMeta';
+import { loadMercadoPagoConfig } from '../utils/mercadoPago';
+import { syncSaleToPurchases } from '../utils/mpPurchasesSync';
+import { parseSaleDetails, parseSalePaymentInfo, serializeSaleStatus } from '../utils/saleMeta';
 import { parseSafePositiveNumber, sanitizeDbErrorMessage, sanitizePlainLine } from '../utils/validation';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
 import { useI18n } from '../utils/i18n';
@@ -216,6 +214,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
             ...(details.mpOrderId ? { mpOrderId: details.mpOrderId } : {}),
             ...(details.mpExternalReference ? { mpExternalReference: details.mpExternalReference } : {}),
             ...(details.mpPaymentId ? { mpPaymentId: details.mpPaymentId } : {}),
+            ...(details.mpPointName ? { mpPointName: details.mpPointName } : {}),
           }
         : payments.length > 0 || details.mpChannel || details.mpOrderId
           ? {
@@ -226,6 +225,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
               ...(details.mpOrderId ? { mpOrderId: details.mpOrderId } : {}),
               ...(details.mpExternalReference ? { mpExternalReference: details.mpExternalReference } : {}),
               ...(details.mpPaymentId ? { mpPaymentId: details.mpPaymentId } : {}),
+              ...(details.mpPointName ? { mpPointName: details.mpPointName } : {}),
             }
           : undefined,
     });
@@ -265,6 +265,9 @@ export const SalesPage: React.FC<SalesPageProps> = ({
     setBusyId(s.id);
     try {
       await updateRow('sales', s.id, { status: nextStatus });
+      if (ownerId && (partialMethod === 'transferencia' || partialMethod === 'tarjeta')) {
+        void syncSaleToPurchases(ownerId, { ...s, status: nextStatus }, loadMercadoPagoConfig(ownerId));
+      }
       setPayingSaleId(null);
       notify(nextPaid ? 'Saldo cancelado en su totalidad.' : 'Abono parcial registrado.');
     } catch (err) {
@@ -278,15 +281,16 @@ export const SalesPage: React.FC<SalesPageProps> = ({
     const info = parseSalePaymentInfo(s);
     const totalSale = Math.max(0, Number(s.amount || 0));
     const diff = Math.max(0, totalSale - info.deposit);
+    const resolvedMethod = info.method || 'efectivo';
     const next = serializePreservingMeta(s, {
       status: 'cobrado',
-      method: info.method || 'efectivo',
+      method: resolvedMethod,
       deposit: totalSale,
       appendPayment:
         diff > 0
           ? {
               amount: diff,
-              method: info.method || 'efectivo',
+              method: resolvedMethod,
               note: 'Cobro de saldo',
             }
           : undefined,
@@ -294,6 +298,9 @@ export const SalesPage: React.FC<SalesPageProps> = ({
     setBusyId(s.id);
     try {
       await updateRow('sales', s.id, { status: next });
+      if (ownerId && (resolvedMethod === 'transferencia' || resolvedMethod === 'tarjeta')) {
+        void syncSaleToPurchases(ownerId, { ...s, status: next }, loadMercadoPagoConfig(ownerId));
+      }
       notify('Saldo cobrado en su totalidad.');
     } catch (err) {
       notify(sanitizeDbErrorMessage(err, 'No se pudo cobrar el saldo.'), 'error');
@@ -306,16 +313,17 @@ export const SalesPage: React.FC<SalesPageProps> = ({
     const info = parseSalePaymentInfo(s);
     const totalSale = Math.max(0, Number(s.amount || 0));
     const diff = !info.isPaid ? Math.max(0, totalSale - info.deposit) : 0;
+    const resolvedMethod = info.method || 'efectivo';
     const next = serializePreservingMeta(s, {
       status: info.isPaid ? 'pendiente' : 'cobrado',
-      method: info.method || 'efectivo',
+      method: resolvedMethod,
       deposit: info.isPaid ? 0 : totalSale,
       clearPayments: info.isPaid,
       appendPayment:
         !info.isPaid && diff > 0
           ? {
               amount: diff,
-              method: info.method || 'efectivo',
+              method: resolvedMethod,
               note: 'Cobro total',
             }
           : undefined,
@@ -323,6 +331,9 @@ export const SalesPage: React.FC<SalesPageProps> = ({
     setBusyId(s.id);
     try {
       await updateRow('sales', s.id, { status: next });
+      if (!info.isPaid && ownerId && (resolvedMethod === 'transferencia' || resolvedMethod === 'tarjeta')) {
+        void syncSaleToPurchases(ownerId, { ...s, status: next }, loadMercadoPagoConfig(ownerId));
+      }
     } catch (err) {
       notify(sanitizeDbErrorMessage(err, 'No se pudo actualizar la venta.'), 'error');
     } finally {

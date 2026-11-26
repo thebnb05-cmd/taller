@@ -81,7 +81,8 @@ function hasMercadoPagoFields(cfg?: MercadoPagoConfig | null): boolean {
       cfg.terminalId ||
       cfg.printOnTerminal ||
       cfg.sellerNickname ||
-      cfg.sellerEmail
+      cfg.sellerEmail ||
+      cfg.pointName
   );
 }
 
@@ -116,6 +117,7 @@ export function parseWorkshopMeta(
           pr: boolean;
           sn: string;
           se: string;
+          pn: string;
         }>;
         sub: SignedSubscriptionRecord;
       }>;
@@ -137,6 +139,7 @@ export function parseWorkshopMeta(
               printOnTerminal: parsed.mp.pr,
               sellerNickname: parsed.mp.sn,
               sellerEmail: parsed.mp.se,
+              pointName: parsed.mp.pn,
             })
           : undefined;
       const sub =
@@ -284,6 +287,7 @@ export function serializeWorkshopSubtitle(meta: {
             ...(cleanMp.printOnTerminal ? { pr: true } : {}),
             ...(cleanMp.sellerNickname ? { sn: cleanMp.sellerNickname } : {}),
             ...(cleanMp.sellerEmail ? { se: cleanMp.sellerEmail } : {}),
+            ...(cleanMp.pointName ? { pn: cleanMp.pointName } : {}),
           },
         }
       : {}),

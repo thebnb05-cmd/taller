@@ -108,6 +108,7 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
       printOnTerminal: false,
       sellerNickname: '',
       sellerEmail: '',
+      pointName: '',
     };
     setTerminals([]);
     setPosList([]);
@@ -142,17 +143,32 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
       setPosList(foundPos);
 
       const validPos = foundPos.find((p) => p.externalId && p.hasExternalId !== false);
+      const nextTerminalId = config.terminalId || foundTerminals[0]?.id || '';
+      const matchedTerm =
+        foundTerminals.find((t) => t.id === nextTerminalId) || foundTerminals[0];
+      const nextPosExternalId =
+        config.posExternalId ||
+        matchedTerm?.externalPosId ||
+        validPos?.externalId ||
+        '';
+      const matchedPos =
+        foundPos.find(
+          (p) =>
+            (matchedTerm?.posId && p.id === matchedTerm.posId) ||
+            (nextPosExternalId && p.externalId === nextPosExternalId)
+        ) || validPos || foundPos[0];
+
       const nextConfig: MercadoPagoConfig = {
         ...config,
         accessToken: trimmedToken,
         sellerNickname: result.account?.nickname || config.sellerNickname,
         sellerEmail: result.account?.email || config.sellerEmail,
-        terminalId: config.terminalId || foundTerminals[0]?.id || '',
-        posExternalId:
-          config.posExternalId ||
-          foundTerminals[0]?.externalPosId ||
-          validPos?.externalId ||
-          '',
+        terminalId: nextTerminalId,
+        posExternalId: nextPosExternalId,
+        pointName:
+          config.pointName ||
+          matchedPos?.name ||
+          (matchedTerm?.externalPosId ? `Point ${matchedTerm.externalPosId}` : ''),
       };
 
       if (profile) {
@@ -222,6 +238,7 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
       const nextConfig: MercadoPagoConfig = {
         ...config,
         posExternalId: createdPos.externalId,
+        pointName: config.pointName || createdPos.name || `Caja ${createdPos.externalId}`,
       };
       await persistMpConfig(
         nextConfig,
@@ -386,6 +403,27 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
         </div>
       </div>
 
+      <div>
+        <label
+          htmlFor="mp-point-name"
+          className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300"
+        >
+          {tr(
+            'Nombre del Point Mercado Pago (visible en Compras y Reportes)',
+            'Mercado Pago Point name (shown in Purchases & Reports)',
+            'Nome da Point Mercado Pago (visível em Compras e Relatórios)'
+          )}
+        </label>
+        <input
+          id="mp-point-name"
+          type="text"
+          value={config.pointName || ''}
+          onChange={(e) => setConfig((prev) => ({ ...prev, pointName: e.target.value }))}
+          placeholder="Ej: Point Smart Mostrador / Caja 1"
+          className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+        />
+      </div>
+
       <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
         <input
           type="checkbox"
@@ -429,13 +467,19 @@ export const PaymentSettingsPanel: React.FC<PaymentSettingsPanelProps> = ({
                 <button
                   key={term.id}
                   type="button"
-                  onClick={() =>
+                  onClick={() => {
+                    const matchedPos = posList.find(
+                      (p) =>
+                        (term.posId && p.id === term.posId) ||
+                        (term.externalPosId && p.externalId === term.externalPosId)
+                    );
                     setConfig((prev) => ({
                       ...prev,
                       terminalId: term.id,
                       posExternalId: prev.posExternalId || term.externalPosId || prev.posExternalId,
-                    }))
-                  }
+                      pointName: prev.pointName || matchedPos?.name || prev.pointName,
+                    }));
+                  }}
                   className={`rounded-lg border px-2.5 py-1 font-mono-num text-[11px] font-medium transition ${
                     active
                       ? 'border-[#0072BB] bg-sky-50 text-[#0072BB] dark:border-sky-400 dark:bg-sky-950/60 dark:text-sky-300'

@@ -11,8 +11,11 @@ import {
   Clock,
   CreditCard,
   DollarSign,
+  Download,
   FileDown,
   PackageX,
+  QrCode,
+  Search,
   ShoppingBag,
   Smartphone,
   TrendingUp,
@@ -20,6 +23,7 @@ import {
   Users,
   Wallet,
   Wrench,
+  X,
 } from 'lucide-react';
 import { RevenueTrendChart } from '../components/RevenueTrendChart';
 import { useToast } from '../components/ToastProvider';
@@ -33,18 +37,29 @@ import type {
   SaleRecord,
   WorkshopProfile,
 } from '../types/workshop';
+import { downloadCsvFile } from '../utils/csvExport';
 import {
   formatCompactCurrency,
   formatCurrency,
+  formatDateShort,
   isActiveRepairStatus,
   todayISO,
 } from '../utils/formatters';
+import {
+  loadMercadoPagoConfig,
+  resolvePointDisplayName,
+} from '../utils/mercadoPago';
 import { parsePaymentInfo } from '../utils/payment';
 import {
   getUnreconciledPayments,
   toSyntheticSalesFromRecovered,
   useRecoveredPayments,
 } from '../utils/paymentLedger';
+import {
+  isMirroredIncomePurchase,
+  parsePurchaseInfo,
+  PURCHASE_ORIGIN_LABELS,
+} from '../utils/purchaseMeta';
 import { parseRepairPaymentLedger } from '../utils/repairMeta';
 import { parseSaleDetails, parseSalePaymentInfo } from '../utils/saleMeta';
 import { useI18n } from '../utils/i18n';
@@ -138,6 +153,47 @@ interface TimelineBucket {
   ordersCount: number;
 }
 
+type ElectronicChannelType = 'mp_point' | 'mp_qr' | 'transferencia' | 'tarjeta';
+type ElectronicChannelFilter = 'all' | ElectronicChannelType;
+
+interface ElectronicHistoryItem {
+  id: string;
+  createdAt: number;
+  dateLabel: string;
+  originLabel: string;
+  counterparty: string;
+  concept: string;
+  channel: ElectronicChannelType;
+  channelLabel: string;
+  mpPointName: string;
+  reference: string;
+  amount: number;
+  isOutflow: boolean;
+}
+
+const ELECTRONIC_CHANNEL_LABELS: Record<ElectronicChannelType, string> = {
+  mp_point: 'Point Mercado Pago',
+  mp_qr: 'QR Mercado Pago',
+  transferencia: 'Transferencia',
+  tarjeta: 'Tarjeta',
+};
+
+function normalizeMpRef(ref?: string | null): string {
+  return String(ref || '')
+    .trim()
+    .replace(/-PT$/i, '')
+    .toUpperCase();
+}
+
+function toMsSafe(val: number | string | undefined, fallback: number): number {
+  if (typeof val === 'number' && Number.isFinite(val) && val > 0) return val;
+  if (typeof val === 'string') {
+    const parsed = Date.parse(val);
+    if (!Number.isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return fallback;
+}
+
 export const ReportsPage: React.FC<ReportsPageProps> = ({
   ownerId = '',
   profile,
@@ -160,6 +216,10 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
     () => [...sales, ...toSyntheticSalesFromRecovered(unreconciledRecovered)],
     [sales, unreconciledRecovered]
   );
+  const defaultMpPointName = useMemo(
+    () => resolvePointDisplayName(ownerId ? loadMercadoPagoConfig(ownerId) : null),
+    [ownerId]
+  );
   const [range, setRange] = useState<RangeId>('30');
   const [customFrom, setCustomFrom] = useState<string>(() => {
     const d = new Date();
@@ -171,6 +231,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
   const [customTo, setCustomTo] = useState<string>(() => todayISO());
   const [activeBucketIndex, setActiveBucketIndex] = useState<number | null>(null);
   const [pdfMenuOpen, setPdfMenuOpen] = useState(false);
+  const [electronicFilter, setElectronicFilter] = useState<ElectronicChannelFilter>('all');
+  const [electronicQuery, setElectronicQuery] = useState('');
   const pdfMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -274,15 +336,18 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
       prevStartMs !== null && prevEndMs !== null && ts >= prevStartMs && ts <= prevEndMs;
 
     const unreconciledRepairs = unreconciledRecovered.filter((r) => r.source === 'reparacion');
+    const realPurchases = purchases.filter(
+      (p) => !isMirroredIncomePurchase(parsePurchaseInfo(p))
+    );
 
     const rFiltered = repairs.filter((r) => inCurrent(r.createdAt));
     const sFiltered = effectiveSales.filter((s) => inCurrent(s.createdAt));
-    const pFiltered = purchases.filter((p) => inCurrent(p.createdAt));
+    const pFiltered = realPurchases.filter((p) => inCurrent(p.createdAt));
     const recRepFiltered = unreconciledRepairs.filter((r) => inCurrent(r.createdAt));
 
     const rPrev = repairs.filter((r) => inPrevious(r.createdAt));
     const sPrev = effectiveSales.filter((s) => inPrevious(s.createdAt));
-    const pPrev = purchases.filter((p) => inPrevious(p.createdAt));
+    const pPrev = realPurchases.filter((p) => inPrevious(p.createdAt));
     const recRepPrev = unreconciledRepairs.filter((r) => inPrevious(r.createdAt));
 
     // Financial aggregates
@@ -647,6 +712,284 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
       ...timeline.map((b) => Math.max(b.repairsRevenue + b.salesRevenue, b.purchasesExpense))
     );
 
+    // Detailed history of paid Transferencia, Tarjeta, Point MP & QR (including Mercado Pago Point name)
+    const electronicHistory: ElectronicHistoryItem[] = [];
+    const seenOriginRecordIds = new Set<string>();
+    const seenMpPaymentIds = new Set<string>();
+    const seenMpOrderIds = new Set<string>();
+    const seenExtRefs = new Set<string>();
+
+    const registerDedupeIds = (opts: {
+      originRecordId?: string;
+      mpPaymentId?: string;
+      mpOrderId?: string;
+      mpExternalReference?: string;
+    }) => {
+      if (opts.originRecordId) seenOriginRecordIds.add(opts.originRecordId);
+      if (opts.mpPaymentId) seenMpPaymentIds.add(opts.mpPaymentId);
+      if (opts.mpOrderId) seenMpOrderIds.add(opts.mpOrderId);
+      const norm = normalizeMpRef(opts.mpExternalReference);
+      if (norm) seenExtRefs.add(norm);
+    };
+
+    repairs.forEach((r) => {
+      const ledger = parseRepairPaymentLedger(r.checkoutState);
+      const repairInfo = parsePaymentInfo(r);
+      const deviceDesc = `${r.brand || ''} ${r.model || ''}`.trim() || r.deviceType;
+      if (ledger.length > 0) {
+        ledger.forEach((entry, idx) => {
+          const isElec =
+            entry.method === 'transferencia' ||
+            entry.method === 'tarjeta' ||
+            Boolean(entry.mpChannel);
+          if (!isElec || Number(entry.amount || 0) <= 0) return;
+          const entryTs = toMsSafe(entry.date, r.createdAt);
+          const originRecordId = `rep_${r.id}_${entry.id || idx}`;
+          registerDedupeIds({
+            originRecordId,
+            mpOrderId: entry.mpOrderId,
+            mpExternalReference: entry.mpExternalReference,
+          });
+          if (!inCurrent(entryTs)) return;
+          const ch: ElectronicChannelType =
+            entry.mpChannel === 'mp_point'
+              ? 'mp_point'
+              : entry.mpChannel === 'mp_qr'
+                ? 'mp_qr'
+                : entry.note?.toLowerCase().includes('point')
+                  ? 'mp_point'
+                  : entry.note?.toLowerCase().includes('qr')
+                    ? 'mp_qr'
+                    : entry.method === 'tarjeta'
+                      ? 'tarjeta'
+                      : 'transferencia';
+          const pointName =
+            entry.mpPointName ||
+            (ch === 'mp_point' || ch === 'mp_qr' ? defaultMpPointName : '');
+          electronicHistory.push({
+            id: originRecordId,
+            createdAt: entryTs,
+            dateLabel: formatDateShort(new Date(entryTs).toISOString().slice(0, 10)),
+            originLabel: 'Reparación',
+            counterparty: r.clientName || 'Cliente',
+            concept: [deviceDesc, entry.note].filter(Boolean).join(' · ') || 'Reparación',
+            channel: ch,
+            channelLabel: ELECTRONIC_CHANNEL_LABELS[ch],
+            mpPointName: pointName,
+            reference: entry.mpExternalReference || r.code || '—',
+            amount: Number(entry.amount || 0),
+            isOutflow: false,
+          });
+        });
+      } else {
+        const collected = Math.min(
+          Number(r.price || 0) || Number(r.deposit || 0),
+          Number(r.deposit || 0)
+        );
+        if (
+          collected > 0 &&
+          (repairInfo.method === 'transferencia' || repairInfo.method === 'tarjeta')
+        ) {
+          const originRecordId = `rep_${r.id}_main`;
+          registerDedupeIds({ originRecordId });
+          if (inCurrent(r.createdAt)) {
+            const ch: ElectronicChannelType =
+              repairInfo.method === 'tarjeta' ? 'tarjeta' : 'transferencia';
+            electronicHistory.push({
+              id: originRecordId,
+              createdAt: r.createdAt,
+              dateLabel: formatDateShort(r.dateIn),
+              originLabel: 'Reparación',
+              counterparty: r.clientName || 'Cliente',
+              concept: `${deviceDesc} · Cobro reparación`,
+              channel: ch,
+              channelLabel: ELECTRONIC_CHANNEL_LABELS[ch],
+              mpPointName: '',
+              reference: r.code || '—',
+              amount: collected,
+              isOutflow: false,
+            });
+          }
+        }
+      }
+    });
+
+    effectiveSales.forEach((s) => {
+      const info = parseSalePaymentInfo(s);
+      const details = parseSaleDetails(s);
+      registerDedupeIds({
+        mpOrderId: details.mpOrderId,
+        mpPaymentId: details.mpPaymentId,
+        mpExternalReference: details.mpExternalReference,
+      });
+      if (details.payments.length > 0) {
+        details.payments.forEach((pay, idx) => {
+          const isElec =
+            pay.method === 'transferencia' ||
+            pay.method === 'tarjeta' ||
+            Boolean(details.mpChannel);
+          if (!isElec || Number(pay.amount || 0) <= 0) return;
+          const payTs = toMsSafe(pay.date, s.createdAt);
+          const originRecordId = `sale_${s.id}_${pay.id || idx}`;
+          registerDedupeIds({ originRecordId });
+          if (!inCurrent(payTs)) return;
+          const ch: ElectronicChannelType =
+            details.mpChannel === 'mp_point'
+              ? 'mp_point'
+              : details.mpChannel === 'mp_qr'
+                ? 'mp_qr'
+                : pay.note?.toLowerCase().includes('point')
+                  ? 'mp_point'
+                  : pay.note?.toLowerCase().includes('qr')
+                    ? 'mp_qr'
+                    : pay.method === 'tarjeta'
+                      ? 'tarjeta'
+                      : 'transferencia';
+          const pointName =
+            details.mpPointName ||
+            (ch === 'mp_point' || ch === 'mp_qr' ? defaultMpPointName : '');
+          electronicHistory.push({
+            id: originRecordId,
+            createdAt: payTs,
+            dateLabel: formatDateShort(s.dueDate),
+            originLabel: s.id.startsWith('rec_') ? 'Mercado Pago' : 'Venta',
+            counterparty: s.clientName || 'Mostrador',
+            concept: [s.productName, pay.note].filter(Boolean).join(' · ') || 'Venta mostrador',
+            channel: ch,
+            channelLabel: ELECTRONIC_CHANNEL_LABELS[ch],
+            mpPointName: pointName,
+            reference: details.mpExternalReference || s.invoice || '—',
+            amount: Number(pay.amount || 0),
+            isOutflow: false,
+          });
+        });
+      } else if (
+        info.deposit > 0 &&
+        (info.method === 'transferencia' ||
+          info.method === 'tarjeta' ||
+          Boolean(details.mpChannel))
+      ) {
+        const originRecordId = `sale_${s.id}_main`;
+        registerDedupeIds({ originRecordId });
+        if (inCurrent(s.createdAt)) {
+          const ch: ElectronicChannelType =
+            details.mpChannel === 'mp_point'
+              ? 'mp_point'
+              : details.mpChannel === 'mp_qr'
+                ? 'mp_qr'
+                : info.method === 'tarjeta'
+                  ? 'tarjeta'
+                  : 'transferencia';
+          const pointName =
+            details.mpPointName ||
+            (ch === 'mp_point' || ch === 'mp_qr' ? defaultMpPointName : '');
+          electronicHistory.push({
+            id: originRecordId,
+            createdAt: s.createdAt,
+            dateLabel: formatDateShort(s.dueDate),
+            originLabel: s.id.startsWith('rec_') ? 'Mercado Pago' : 'Venta',
+            counterparty: s.clientName || 'Mostrador',
+            concept: s.productName || 'Venta de mostrador',
+            channel: ch,
+            channelLabel: ELECTRONIC_CHANNEL_LABELS[ch],
+            mpPointName: pointName,
+            reference: details.mpExternalReference || s.invoice || '—',
+            amount: info.deposit,
+            isOutflow: false,
+          });
+        }
+      }
+    });
+
+    unreconciledRepairs.forEach((rec) => {
+      const isElec =
+        rec.method === 'transferencia' ||
+        rec.method === 'tarjeta' ||
+        Boolean(rec.mpChannel);
+      if (!isElec || rec.amount <= 0) return;
+      registerDedupeIds({
+        mpOrderId: rec.mpOrderId,
+        mpPaymentId: rec.mpPaymentId,
+        mpExternalReference: rec.mpExternalReference,
+      });
+      if (!inCurrent(rec.createdAt)) return;
+      const ch: ElectronicChannelType =
+        rec.mpChannel === 'mp_point'
+          ? 'mp_point'
+          : rec.mpChannel === 'mp_qr'
+            ? 'mp_qr'
+            : rec.method === 'tarjeta'
+              ? 'tarjeta'
+              : 'transferencia';
+      electronicHistory.push({
+        id: `rec_${rec.id}`,
+        createdAt: rec.createdAt,
+        dateLabel: formatDateShort(rec.at.slice(0, 10)),
+        originLabel: 'Reparación',
+        counterparty: rec.clientName || 'Cliente',
+        concept: [rec.title, rec.subtitle].filter(Boolean).join(' · ') || 'Cobro MP',
+        channel: ch,
+        channelLabel: ELECTRONIC_CHANNEL_LABELS[ch],
+        mpPointName:
+          rec.mpPointName ||
+          (ch === 'mp_point' || ch === 'mp_qr' ? defaultMpPointName : ''),
+        reference: rec.mpExternalReference || rec.invoice || '—',
+        amount: rec.amount,
+        isOutflow: false,
+      });
+    });
+
+    purchases.forEach((p) => {
+      const info = parsePurchaseInfo(p);
+      if (!info.isPaid || Number(p.amount || 0) <= 0) return;
+      const isElec =
+        info.mpChannel === 'mp_point' ||
+        info.mpChannel === 'mp_qr' ||
+        info.paymentMethod === 'transferencia' ||
+        info.paymentMethod === 'tarjeta';
+      if (!isElec) return;
+      const mirrored = isMirroredIncomePurchase(info);
+      if (mirrored) {
+        const normExt = normalizeMpRef(info.mpExternalReference);
+        if (
+          (info.originRecordId && seenOriginRecordIds.has(info.originRecordId)) ||
+          (info.mpPaymentId && seenMpPaymentIds.has(info.mpPaymentId)) ||
+          (info.mpOrderId && seenMpOrderIds.has(info.mpOrderId)) ||
+          (normExt && seenExtRefs.has(normExt))
+        ) {
+          return;
+        }
+      }
+      if (!inCurrent(p.createdAt)) return;
+      const ch: ElectronicChannelType =
+        info.mpChannel === 'mp_point'
+          ? 'mp_point'
+          : info.mpChannel === 'mp_qr'
+            ? 'mp_qr'
+            : info.paymentMethod === 'tarjeta'
+              ? 'tarjeta'
+              : 'transferencia';
+      const pointName =
+        info.mpPointName ||
+        (ch === 'mp_point' || ch === 'mp_qr' ? defaultMpPointName : '');
+      electronicHistory.push({
+        id: `pur_${p.id}`,
+        createdAt: p.createdAt,
+        dateLabel: formatDateShort(p.dueDate),
+        originLabel: PURCHASE_ORIGIN_LABELS[info.originType],
+        counterparty: p.supplierName || 'Cuenta',
+        concept: info.note || p.invoice || 'Operación',
+        channel: ch,
+        channelLabel: ELECTRONIC_CHANNEL_LABELS[ch],
+        mpPointName: pointName,
+        reference: info.mpExternalReference || p.invoice || '—',
+        amount: Number(p.amount || 0),
+        isOutflow: !mirrored,
+      });
+    });
+
+    electronicHistory.sort((a, b) => b.createdAt - a.createdAt);
+
     return {
       rFiltered,
       sFiltered,
@@ -683,8 +1026,20 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
       byTechnician,
       timeline,
       maxTimelineValue,
+      electronicHistory,
     };
-  }, [products, purchases, range, repairs, effectiveSales, unreconciledRecovered, windowBounds, locale, tr]);
+  }, [
+    products,
+    purchases,
+    range,
+    repairs,
+    effectiveSales,
+    unreconciledRecovered,
+    windowBounds,
+    locale,
+    tr,
+    defaultMpPointName,
+  ]);
 
   const selectedBucket =
     activeBucketIndex !== null
@@ -751,6 +1106,71 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
         </span>
       </span>
     );
+  };
+
+  const filteredElectronicHistory = useMemo(() => {
+    const q = electronicQuery.trim().toLowerCase();
+    return report.electronicHistory.filter((item) => {
+      if (electronicFilter !== 'all' && item.channel !== electronicFilter) return false;
+      if (q) {
+        const hay = [
+          item.counterparty,
+          item.concept,
+          item.originLabel,
+          item.channelLabel,
+          item.mpPointName,
+          item.reference,
+        ]
+          .join(' ')
+          .toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [report.electronicHistory, electronicFilter, electronicQuery]);
+
+  const electronicChannelTotals = useMemo(() => {
+    const totals: Record<ElectronicChannelType, number> = {
+      mp_point: 0,
+      mp_qr: 0,
+      transferencia: 0,
+      tarjeta: 0,
+    };
+    for (const item of report.electronicHistory) {
+      totals[item.channel] += item.amount;
+    }
+    return totals;
+  }, [report.electronicHistory]);
+
+  const handleExportElectronicCsv = () => {
+    if (filteredElectronicHistory.length === 0) {
+      notify('No hay movimientos electrónicos para exportar con el filtro actual.', 'error');
+      return;
+    }
+    const headers = [
+      'Fecha',
+      'Origen',
+      'Cliente / Proveedor',
+      'Canal / Medio',
+      'Nombre Point Mercado Pago',
+      'Comprobante / Ref.',
+      'Detalle',
+      'Tipo',
+      'Monto',
+    ];
+    const rows = filteredElectronicHistory.map((item) => [
+      item.dateLabel,
+      item.originLabel,
+      item.counterparty,
+      item.channelLabel,
+      item.mpPointName || '—',
+      item.reference,
+      item.concept,
+      item.isOutflow ? 'Compra / Gasto' : 'Cobro',
+      item.amount,
+    ]);
+    downloadCsvFile(`historial-transferencias-point-qr-${todayISO()}.csv`, headers, rows);
+    notify(`Exportados ${filteredElectronicHistory.length} pagos electrónicos a CSV.`);
   };
 
   const maxClientTotal = Math.max(1, ...report.topClients.map((c) => c.total));
@@ -1519,6 +1939,247 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           )}
         </section>
       </div>
+
+      {/* Block 4B: Historial de Transferencias, Tarjeta y QR pagados */}
+      <section
+        aria-label="Historial de Transferencias, Tarjeta y QR pagados"
+        className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800">
+          <div>
+            <h2 className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white font-display">
+              <QrCode className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
+              <span>Historial de Transferencias, Tarjeta y QR pagados</span>
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              Cobros y compras pagadas con detalle del nombre del Point Mercado Pago ·{' '}
+              <span className="font-mono-num font-semibold text-slate-700 dark:text-slate-300">
+                {filteredElectronicHistory.length} registros
+              </span>
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={filteredElectronicHistory.length === 0}
+            onClick={handleExportElectronicCsv}
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Exportar CSV
+          </button>
+        </div>
+
+        {/* Channel subtotals */}
+        <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+          <div className="rounded-xl border border-violet-200/80 bg-violet-50/40 p-3 dark:border-violet-900/50 dark:bg-violet-950/20">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-violet-800 dark:text-violet-300">
+              <Smartphone className="h-3.5 w-3.5" />
+              <span>Point Mercado Pago</span>
+            </div>
+            <div className="mt-1 font-mono-num text-sm font-bold text-slate-900 dark:text-white">
+              {formatCurrency(electronicChannelTotals.mp_point)}
+            </div>
+          </div>
+          <div className="rounded-xl border border-sky-200/80 bg-sky-50/40 p-3 dark:border-sky-900/50 dark:bg-sky-950/20">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-sky-800 dark:text-sky-300">
+              <QrCode className="h-3.5 w-3.5" />
+              <span>QR Mercado Pago</span>
+            </div>
+            <div className="mt-1 font-mono-num text-sm font-bold text-slate-900 dark:text-white">
+              {formatCurrency(electronicChannelTotals.mp_qr)}
+            </div>
+          </div>
+          <div className="rounded-xl border border-cyan-200/80 bg-cyan-50/40 p-3 dark:border-cyan-900/50 dark:bg-cyan-950/20">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-cyan-800 dark:text-cyan-300">
+              <Wallet className="h-3.5 w-3.5" />
+              <span>Transferencias</span>
+            </div>
+            <div className="mt-1 font-mono-num text-sm font-bold text-slate-900 dark:text-white">
+              {formatCurrency(electronicChannelTotals.transferencia)}
+            </div>
+          </div>
+          <div className="rounded-xl border border-indigo-200/80 bg-indigo-50/40 p-3 dark:border-indigo-900/50 dark:bg-indigo-950/20">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-800 dark:text-indigo-300">
+              <CreditCard className="h-3.5 w-3.5" />
+              <span>Tarjeta</span>
+            </div>
+            <div className="mt-1 font-mono-num text-sm font-bold text-slate-900 dark:text-white">
+              {formatCurrency(electronicChannelTotals.tarjeta)}
+            </div>
+          </div>
+        </div>
+
+        {/* Channel Filter + Search */}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1">
+            {(
+              [
+                { id: 'all', label: 'Todos' },
+                { id: 'mp_point', label: 'Point MP' },
+                { id: 'mp_qr', label: 'QR MP' },
+                { id: 'transferencia', label: 'Transferencia' },
+                { id: 'tarjeta', label: 'Tarjeta' },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setElectronicFilter(tab.id)}
+                className={`h-8 rounded-lg px-2.5 text-xs font-semibold transition whitespace-nowrap shrink-0 ${
+                  electronicFilter === tab.id
+                    ? 'bg-[#0072BB] text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <div className="relative min-w-[200px] flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={electronicQuery}
+              onChange={(e) => setElectronicQuery(e.target.value)}
+              placeholder="Buscar cliente, comprobante o nombre del Point MP..."
+              className="h-8 w-full rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-7 text-xs text-slate-900 outline-none focus:border-[#0072BB] focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            />
+            {electronicQuery && (
+              <button
+                type="button"
+                onClick={() => setElectronicQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {filteredElectronicHistory.length === 0 ? (
+          <p className="mt-4 rounded-xl bg-slate-50 px-4 py-6 text-center text-xs text-slate-500 dark:bg-slate-800/40 dark:text-slate-400">
+            No hay transferencias, pagos con tarjeta, Point MP ni QR en este período o filtro.
+          </p>
+        ) : (
+          <>
+            {/* Desktop table */}
+            <div className="mt-3 hidden overflow-x-auto md:block">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-100 text-[11px] uppercase tracking-wider text-slate-400 dark:border-slate-800">
+                    <th className="py-2 pr-3 font-semibold">Fecha</th>
+                    <th className="py-2 pr-3 font-semibold">Origen</th>
+                    <th className="py-2 pr-3 font-semibold">Cliente / Cuenta</th>
+                    <th className="py-2 pr-3 font-semibold">Medio / Canal</th>
+                    <th className="py-2 pr-3 font-semibold">Nombre Point MP</th>
+                    <th className="py-2 pr-3 font-semibold">Ref.</th>
+                    <th className="py-2 text-right font-semibold">Monto</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {filteredElectronicHistory.slice(0, 60).map((item) => (
+                    <tr key={item.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                      <td className="py-2.5 pr-3 font-mono-num text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                        {item.dateLabel}
+                      </td>
+                      <td className="py-2.5 pr-3 whitespace-nowrap">
+                        <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                          {item.originLabel}
+                        </span>
+                      </td>
+                      <td className="py-2.5 pr-3">
+                        <div className="font-semibold text-slate-900 dark:text-white">
+                          {item.counterparty}
+                        </div>
+                        <div className="max-w-[260px] truncate text-[11px] text-slate-500 dark:text-slate-400">
+                          {item.concept}
+                        </div>
+                      </td>
+                      <td className="py-2.5 pr-3 whitespace-nowrap">
+                        <span
+                          className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
+                            item.channel === 'mp_point'
+                              ? 'bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300'
+                              : item.channel === 'mp_qr'
+                                ? 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300'
+                                : item.channel === 'tarjeta'
+                                  ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300'
+                                  : 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950/60 dark:text-cyan-300'
+                          }`}
+                        >
+                          {item.channelLabel}
+                        </span>
+                      </td>
+                      <td className="py-2.5 pr-3">
+                        {item.mpPointName ? (
+                          <span className="inline-flex items-center rounded-md bg-violet-50 px-2 py-0.5 text-[11px] font-bold text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">
+                            {item.mpPointName}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 pr-3 font-mono-num text-[11px] text-slate-500 dark:text-slate-400">
+                        {item.reference}
+                      </td>
+                      <td
+                        className={`py-2.5 text-right font-mono-num font-bold whitespace-nowrap ${
+                          item.isOutflow
+                            ? 'text-rose-600 dark:text-rose-400'
+                            : 'text-emerald-700 dark:text-emerald-400'
+                        }`}
+                      >
+                        {item.isOutflow ? '-' : ''}
+                        {formatCurrency(item.amount)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile list */}
+            <div className="mt-3 divide-y divide-slate-100 md:hidden dark:divide-slate-800">
+              {filteredElectronicHistory.slice(0, 60).map((item) => (
+                <div key={item.id} className="space-y-1 py-2.5 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-slate-900 dark:text-white">
+                      {item.counterparty}
+                    </span>
+                    <span
+                      className={`font-mono-num font-bold ${
+                        item.isOutflow
+                          ? 'text-rose-600 dark:text-rose-400'
+                          : 'text-emerald-700 dark:text-emerald-400'
+                      }`}
+                    >
+                      {item.isOutflow ? '-' : ''}
+                      {formatCurrency(item.amount)}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="font-mono-num">{item.dateLabel}</span>
+                    <span>·</span>
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">
+                      {item.channelLabel}
+                    </span>
+                    {item.mpPointName && (
+                      <span className="rounded bg-violet-50 px-1.5 py-0.5 font-bold text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">
+                        Point: {item.mpPointName}
+                      </span>
+                    )}
+                    <span>·</span>
+                    <span>{item.originLabel}</span>
+                  </div>
+                  <div className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                    {item.concept} ({item.reference})
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
 
       {/* Block 5: Devices & Brands Breakdown */}
       {(report.topDevices.length > 0 || report.topBrands.length > 0) && (

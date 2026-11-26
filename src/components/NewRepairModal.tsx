@@ -53,6 +53,8 @@ import {
   serializeRepairPaymentStatus,
   type PaymentMethod,
 } from '../utils/payment';
+import { loadMercadoPagoConfig } from '../utils/mercadoPago';
+import { syncRepairToPurchases } from '../utils/mpPurchasesSync';
 import { recordRecoveredPayment } from '../utils/paymentLedger';
 import {
   appendTimelineEntry,
@@ -1109,6 +1111,12 @@ export const NewRepairModal: React.FC<NewRepairModalProps> = ({
           createdAt: nowMs,
           updatedAt: nowMs,
         };
+        if (
+          item.deposit > 0 &&
+          (item.depositMethod === 'transferencia' || item.depositMethod === 'tarjeta')
+        ) {
+          void syncRepairToPurchases(ownerId, createdRepair, loadMercadoPagoConfig(ownerId));
+        }
         createdRepairs.push(createdRepair);
         runningRepairs.push(createdRepair);
       }

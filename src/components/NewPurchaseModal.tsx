@@ -29,8 +29,13 @@ import {
   type CurrencyCode,
 } from '../utils/currency';
 import { formatCurrency, todayISO } from '../utils/formatters';
+import {
+  loadMercadoPagoConfig,
+  resolvePointDisplayName,
+} from '../utils/mercadoPago';
 import { PAYMENT_METHOD_LABELS, type PaymentMethod } from '../utils/payment';
 import {
+  isMirroredIncomePurchase,
   parsePurchaseInfo,
   PURCHASE_CATEGORY_LABELS,
   serializePurchaseStatus,
@@ -58,6 +63,13 @@ interface NewPurchaseModalProps {
   profile?: WorkshopProfile | null;
   editPurchase?: PurchaseRecord | null;
 }
+
+type PurchasePaymentChannel =
+  | 'efectivo'
+  | 'transferencia'
+  | 'mp_point'
+  | 'mp_qr'
+  | 'tarjeta';
 
 function roundCurrencyValue(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -96,6 +108,11 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
   const [pickedQty, setPickedQty] = useState('1');
   const [pickedCost, setPickedCost] = useState('');
 
+  // Payment channel & Mercado Pago Point tracking
+  const [paymentChannel, setPaymentChannel] =
+    useState<PurchasePaymentChannel>('efectivo');
+  const [mpPointName, setMpPointName] = useState('');
+
   // Optional cash register egreso when marking as paid
   const [deductFromCash, setDeductFromCash] = useState(false);
   const [cashMethod, setCashMethod] = useState<PaymentMethod>('efectivo');
@@ -132,6 +149,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
 
   useEffect(() => {
     if (!open) return;
+    const defaultPoint = resolvePointDisplayName(loadMercadoPagoConfig(ownerId));
     if (editPurchase) {
       const info = parsePurchaseInfo(editPurchase);
       const hasConfigured =
@@ -145,6 +163,19 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
         getCurrencyRateFromBase(initCur, baseCurrency, secondaryCurrencies) ??
         (info.currency === initCur && info.rate ? info.rate : 1);
       const initIsSec = initCur !== baseCurrency && initRate !== 1;
+
+      const initChannel: PurchasePaymentChannel =
+        info.mpChannel === 'mp_point'
+          ? 'mp_point'
+          : info.mpChannel === 'mp_qr'
+            ? 'mp_qr'
+            : info.paymentMethod || 'efectivo';
+      const initCashMethod: PaymentMethod =
+        initChannel === 'mp_point'
+          ? 'tarjeta'
+          : initChannel === 'mp_qr'
+            ? 'transferencia'
+            : initChannel;
 
       setSelectedCurrency(initCur);
       setSupplierName(editPurchase.supplierName || '');
@@ -162,6 +193,12 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
       setCategory(info.category);
       setNote(info.note);
       setDueDate(editPurchase.dueDate || todayISO());
+      setPaymentChannel(initChannel);
+      setMpPointName(
+        info.mpPointName ||
+          (initChannel === 'mp_point' || initChannel === 'mp_qr' ? defaultPoint : '')
+      );
+      setCashMethod(initCashMethod);
       setStockLines(
         info.stockItems.map((l) => ({
           ...l,
@@ -180,23 +217,27 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
       setCategory('repuestos');
       setNote('');
       setDueDate(todayISO());
+      setPaymentChannel('efectivo');
+      setMpPointName('');
+      setCashMethod('efectivo');
       setStockLines([]);
     }
     setPickedProductId('');
     setPickedQty('1');
     setPickedCost('');
     setDeductFromCash(false);
-    setCashMethod('efectivo');
-  }, [open, editPurchase, baseCurrency, secondaryCurrencies]);
+  }, [open, editPurchase, baseCurrency, secondaryCurrencies, ownerId]);
 
   const numericAmount = parseSafePositiveNumber(amount, 0);
   const baseEquivalentAmount = isSecondaryCurrency
     ? roundCurrencyValue(convertToBaseCurrency(numericAmount, activeRate))
     : numericAmount;
 
+  const isMirroredEdit = Boolean(editParsedInfo && isMirroredIncomePurchase(editParsedInfo));
   const canOfferCashDeduction = Boolean(
     openShift &&
       status === 'pagado' &&
+      !isMirroredEdit &&
       (!editPurchase || !editParsedInfo?.isPaid)
   );
 
@@ -319,6 +360,20 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
         : l.unitCost,
     }));
 
+    const resolvedMethod: PaymentMethod =
+      paymentChannel === 'mp_point'
+        ? 'tarjeta'
+        : paymentChannel === 'mp_qr'
+          ? 'transferencia'
+          : paymentChannel;
+    const resolvedMpChannel: 'mp_point' | 'mp_qr' | undefined =
+      paymentChannel === 'mp_point'
+        ? 'mp_point'
+        : paymentChannel === 'mp_qr'
+          ? 'mp_qr'
+          : undefined;
+    const cleanPointName = sanitizePlainLine(mpPointName, 120) || undefined;
+
     const serializedStatus = serializePurchaseStatus({
       status,
       currency: selectedCurrency,
@@ -326,6 +381,14 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
       category,
       note: sanitizeText(note, 400),
       stockItems: baseStockLines,
+      paymentMethod: resolvedMethod,
+      mpChannel: resolvedMpChannel,
+      mpPointName: cleanPointName,
+      mpOrderId: editParsedInfo?.mpOrderId,
+      mpPaymentId: editParsedInfo?.mpPaymentId,
+      mpExternalReference: editParsedInfo?.mpExternalReference,
+      originType: editParsedInfo?.originType,
+      originRecordId: editParsedInfo?.originRecordId,
     });
 
     setSaving(true);
@@ -594,6 +657,65 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
               <option value="pagado">{tr('Pagado', 'Paid', 'Pago')}</option>
             </select>
           </div>
+
+          <div>
+            <label
+              htmlFor="purchase-payment-channel"
+              className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300"
+            >
+              {tr('Medio de pago / Canal', 'Payment method / Channel', 'Forma de pagamento / Canal')}
+            </label>
+            <select
+              id="purchase-payment-channel"
+              value={paymentChannel}
+              onChange={(e) => {
+                const next = e.target.value as PurchasePaymentChannel;
+                setPaymentChannel(next);
+                setCashMethod(
+                  next === 'mp_point'
+                    ? 'tarjeta'
+                    : next === 'mp_qr'
+                      ? 'transferencia'
+                      : next
+                );
+                if ((next === 'mp_point' || next === 'mp_qr') && !mpPointName.trim()) {
+                  setMpPointName(resolvePointDisplayName(loadMercadoPagoConfig(ownerId)));
+                }
+              }}
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            >
+              <option value="efectivo">Efectivo</option>
+              <option value="transferencia">Transferencia bancaria</option>
+              <option value="mp_point">Mercado Pago Point</option>
+              <option value="mp_qr">Mercado Pago QR</option>
+              <option value="tarjeta">Tarjeta / Débito / Crédito</option>
+            </select>
+          </div>
+
+          {(paymentChannel === 'mp_point' ||
+            paymentChannel === 'mp_qr' ||
+            mpPointName.trim().length > 0) && (
+            <div>
+              <label
+                htmlFor="purchase-mp-point-name"
+                className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300"
+              >
+                {tr(
+                  'Nombre del Point Mercado Pago',
+                  'Mercado Pago Point name',
+                  'Nome do Point Mercado Pago'
+                )}
+              </label>
+              <input
+                id="purchase-mp-point-name"
+                type="text"
+                value={mpPointName}
+                onChange={(e) => setMpPointName(e.target.value)}
+                placeholder="Ej: Point Smart Mostrador"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
+            </div>
+          )}
         </div>
 
         {canOfferCashDeduction && openShift && (

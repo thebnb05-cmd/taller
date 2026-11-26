@@ -83,6 +83,7 @@ export interface RepairPaymentEntry {
   mpChannel?: 'mp_point' | 'mp_qr';
   mpOrderId?: string;
   mpExternalReference?: string;
+  mpPointName?: string;
 }
 
 export function createRepairMetaId(prefix = 'rm'): string {
@@ -317,6 +318,7 @@ export function parseRepairPaymentLedger(checkoutState?: string | null): RepairP
         ...(p.mpExternalReference
           ? { mpExternalReference: sanitizePlainLine(String(p.mpExternalReference), 80) }
           : {}),
+        ...(p.mpPointName ? { mpPointName: sanitizePlainLine(String(p.mpPointName), 120) } : {}),
       }));
   } catch {
     return [];
@@ -341,6 +343,9 @@ export function mergeCheckoutPaymentLedger(
       ...(e.mpOrderId ? { mpOrderId: sanitizePlainLine(e.mpOrderId, 80).replace(/-->/g, '') } : {}),
       ...(e.mpExternalReference
         ? { mpExternalReference: sanitizePlainLine(e.mpExternalReference, 80).replace(/-->/g, '') }
+        : {}),
+      ...(e.mpPointName
+        ? { mpPointName: sanitizePlainLine(e.mpPointName, 120).replace(/-->/g, '') }
         : {}),
     }));
 

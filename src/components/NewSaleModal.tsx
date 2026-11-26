@@ -52,6 +52,7 @@ import {
   createMercadoPagoOrder,
   hydrateMercadoPagoConfig,
   loadMercadoPagoConfig,
+  resolvePointDisplayName,
   saveMercadoPagoConfig,
   type MercadoPagoConfig,
 } from '../utils/mercadoPago';
@@ -78,6 +79,10 @@ import {
   recordPaymentAttempt,
   recordRecoveredPayment,
 } from '../utils/paymentLedger';
+import {
+  syncRecoveredEntryToPurchase,
+  syncSaleToPurchases,
+} from '../utils/mpPurchasesSync';
 import {
   loadSavedTransferQrIvaPct,
   saveTransferQrIvaPct,
@@ -658,12 +663,14 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           ? summarizeSaleItemsLabel(cartItems)
           : manualName.trim() || (mpOrder.mode === 'point' ? 'Cobro Point Smart' : 'Cobro QR Mercado Pago');
 
-      recordRecoveredPayment({
+      const pointDisplayName = resolvePointDisplayName(mpConfig);
+      const recovered = recordRecoveredPayment({
         id: mpOrder.orderId,
         ownerId,
         source: 'venta',
         method: methodForOrder,
         mpChannel,
+        mpPointName: pointDisplayName,
         amount: mpOrder.amount,
         totalAmount: mpOrder.amount,
         clientName: clientName.trim() || 'Mostrador',
@@ -679,6 +686,9 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         mpExternalReference: mpOrder.externalReference,
         saveFailed: false,
       });
+      if (recovered) {
+        void syncRecoveredEntryToPurchase(ownerId, recovered, mpConfig);
+      }
 
       // Cancel the counterpart order so the customer cannot pay twice
       if (viaCompanionPoint && mpOrder.orderId) {
@@ -1367,6 +1377,12 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
     const effectiveMpChannel = mpPaidChannel || existingDetails?.mpChannel;
     const effectiveMpOrderId = mpOrder?.orderId || existingDetails?.mpOrderId;
     const effectiveMpExtRef = mpOrder?.externalReference || existingDetails?.mpExternalReference;
+    const effectiveMpPointName =
+      existingDetails?.mpPointName ||
+      (effectiveMpChannel ||
+      (paymentMethod === 'tarjeta' && (mpConfig.terminalId || mpConfig.pointName))
+        ? resolvePointDisplayName(mpConfig)
+        : undefined);
 
     const serializedStatus = serializeSaleStatus({
       status,
@@ -1403,6 +1419,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         ...(effectiveMpChannel ? { mpChannel: effectiveMpChannel } : {}),
         ...(effectiveMpOrderId ? { mpOrderId: effectiveMpOrderId } : {}),
         ...(effectiveMpExtRef ? { mpExternalReference: effectiveMpExtRef } : {}),
+        ...(effectiveMpPointName ? { mpPointName: effectiveMpPointName } : {}),
       },
     });
 
@@ -1506,6 +1523,8 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         createdAt: editSale?.createdAt || Date.now(),
       };
 
+      void syncSaleToPurchases(ownerId, savedRecord, mpConfig);
+
       notify(editSale ? 'Venta actualizada.' : 'Venta registrada.');
       onClose();
       onSaved?.(savedRecord);
@@ -1519,12 +1538,13 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         : cleanDeposit;
 
       if (collectedNow > 0) {
-        recordRecoveredPayment({
+        const recFailed = recordRecoveredPayment({
           id: effectiveMpOrderId || saleId,
           ownerId,
           source: 'venta',
           method: paymentMethod,
           ...(effectiveMpChannel ? { mpChannel: effectiveMpChannel } : {}),
+          ...(effectiveMpPointName ? { mpPointName: effectiveMpPointName } : {}),
           amount: collectedNow,
           totalAmount: cleanAmount,
           clientName: cleanClientName,
@@ -1546,6 +1566,9 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
               }
             : {}),
         });
+        if (recFailed) {
+          void syncRecoveredEntryToPurchase(ownerId, recFailed, mpConfig);
+        }
         notify(
           `${safeErrMsg} El cobro de ${formatCurrency(collectedNow, baseCurrency)} quedó resguardado en Caja Diaria para no perderlo.`,
           'error'
@@ -1864,12 +1887,14 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
             ? summarizeSaleItemsLabel(cartItems)
             : manualName.trim() || (mpOrder.mode === 'point' ? 'Cobro Point Smart' : 'Cobro QR Mercado Pago');
 
-        recordRecoveredPayment({
+        const pointDisplayName = resolvePointDisplayName(mpConfig);
+        const recOnce = recordRecoveredPayment({
           id: mpOrder.orderId,
           ownerId,
           source: 'venta',
           method: methodForOrder,
           mpChannel,
+          mpPointName: pointDisplayName,
           amount: mpOrder.amount,
           totalAmount: mpOrder.amount,
           clientName: clientName.trim() || 'Mostrador',
@@ -1885,6 +1910,9 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           mpExternalReference: mpOrder.externalReference,
           saveFailed: false,
         });
+        if (recOnce) {
+          void syncRecoveredEntryToPurchase(ownerId, recOnce, mpConfig);
+        }
 
         if (companionPaid) {
           void cancelMercadoPagoOrder({

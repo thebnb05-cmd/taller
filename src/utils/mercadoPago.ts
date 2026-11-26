@@ -9,6 +9,7 @@ export interface MercadoPagoConfig {
   printOnTerminal: boolean;
   sellerNickname: string;
   sellerEmail: string;
+  pointName?: string;
 }
 
 export interface MpTerminalSummary {
@@ -85,6 +86,11 @@ export interface MpRecentPayment {
   paymentMethodId: string;
   paymentTypeId: string;
   posId: string;
+  posName?: string;
+  terminalId?: string;
+  pointName?: string;
+  cardLastFour?: string;
+  payerLabel?: string;
 }
 
 export interface MpRecentPaymentsResponse {
@@ -116,6 +122,7 @@ const EMPTY_MP_CONFIG: MercadoPagoConfig = {
   printOnTerminal: false,
   sellerNickname: '',
   sellerEmail: '',
+  pointName: '',
 };
 
 const mpConfigCache = new Map<string, MercadoPagoConfig>();
@@ -135,7 +142,31 @@ export function sanitizeMercadoPagoConfig(
     printOnTerminal: Boolean(cfg.printOnTerminal),
     sellerNickname: sanitizePlainLine(cfg.sellerNickname || '', 80),
     sellerEmail: sanitizePlainLine(cfg.sellerEmail || '', 120),
+    ...(cfg.pointName ? { pointName: sanitizePlainLine(cfg.pointName, 100) } : {}),
   };
+}
+
+export function resolvePointDisplayName(
+  cfg?: Partial<MercadoPagoConfig> | null,
+  explicitName?: string | null
+): string {
+  const explicit = sanitizePlainLine(explicitName || '', 100);
+  if (explicit) return explicit;
+  const pn = sanitizePlainLine(cfg?.pointName || '', 100);
+  const tid = sanitizePlainLine(cfg?.terminalId || '', 80);
+  const posExt = sanitizePlainLine(cfg?.posExternalId || '', 60);
+  const nick = sanitizePlainLine(cfg?.sellerNickname || '', 60);
+  if (pn && tid && !pn.toLowerCase().includes(tid.toLowerCase())) {
+    return `${pn} · ${tid}`;
+  }
+  if (pn) return pn;
+  if (posExt && tid && posExt.toLowerCase() !== tid.toLowerCase()) {
+    return `${posExt} · ${tid}`;
+  }
+  if (tid) return tid;
+  if (posExt) return posExt;
+  if (nick) return `Point ${nick}`;
+  return 'Point Mercado Pago';
 }
 
 export function loadMercadoPagoConfig(ownerId: string): MercadoPagoConfig {

@@ -2195,7 +2195,12 @@ export async function handleApiRequest(
 
     try {
       const searchUrl = `/v1/payments/search?sort=date_created&criteria=desc&status=approved&range=date_created&begin_date=${encodeURIComponent(beginIso)}&end_date=${encodeURIComponent(endIso)}&limit=50`;
-      const searchRes = await mpFetch(searchUrl, token);
+      const [searchRes, posRes, v1TerminalsRes, legacyDevicesRes] = await Promise.all([
+        mpFetch(searchUrl, token),
+        mpFetch('/pos?limit=50', token).catch(() => ({ ok: false, status: 0, data: {} as Record<string, unknown> })),
+        mpFetch('/terminals/v1/list?limit=50', token).catch(() => ({ ok: false, status: 0, data: {} as Record<string, unknown> })),
+        mpFetch('/point/integration-api/devices?limit=50', token).catch(() => ({ ok: false, status: 0, data: {} as Record<string, unknown> })),
+      ]);
       if (!searchRes.ok) {
         sendJson(res, searchRes.status >= 400 ? searchRes.status : 400, {
           ok: false,
@@ -2207,6 +2212,56 @@ export async function handleApiRequest(
         });
         return true;
       }
+
+      const posInfoByKey = new Map<string, { id: string; externalId: string; name: string }>();
+      const posData = posRes.data as Record<string, unknown>;
+      if (posRes.ok && Array.isArray(posData.results)) {
+        for (const item of posData.results) {
+          if (!item || typeof item !== 'object') continue;
+          const row = item as Record<string, unknown>;
+          const id = String(row.id || '').trim();
+          const externalId = String(row.external_id || '').trim();
+          const name = String(row.name || externalId || (id ? `Caja ${id}` : '')).trim();
+          const entry = { id, externalId, name };
+          if (id) posInfoByKey.set(id, entry);
+          if (externalId) posInfoByKey.set(externalId, entry);
+        }
+      }
+
+      const terminalById = new Map<string, { id: string; posId: string; externalPosId: string }>();
+      const terminalIdByPosKey = new Map<string, string>();
+      const addTerminalRow = (row: Record<string, unknown>) => {
+        const id = String(row.id || '').trim();
+        if (!id || terminalById.has(id)) return;
+        const posId = String(row.pos_id || '').trim();
+        const externalPosId = String(row.external_pos_id || '').trim();
+        terminalById.set(id, { id, posId, externalPosId });
+        if (posId && !terminalIdByPosKey.has(posId)) terminalIdByPosKey.set(posId, id);
+        if (externalPosId && !terminalIdByPosKey.has(externalPosId)) {
+          terminalIdByPosKey.set(externalPosId, id);
+        }
+      };
+
+      if (v1TerminalsRes.ok) {
+        const v1Data = v1TerminalsRes.data as Record<string, unknown>;
+        const list = Array.isArray(v1Data.data)
+          ? v1Data.data
+          : Array.isArray((v1Data.data as { terminals?: unknown[] } | undefined)?.terminals)
+            ? ((v1Data.data as { terminals?: unknown[] }).terminals as unknown[])
+            : [];
+        for (const item of list) {
+          if (item && typeof item === 'object') addTerminalRow(item as Record<string, unknown>);
+        }
+      }
+      const legacyData = legacyDevicesRes.data as Record<string, unknown>;
+      if (legacyDevicesRes.ok && Array.isArray(legacyData.devices)) {
+        for (const item of legacyData.devices) {
+          if (item && typeof item === 'object') addTerminalRow(item as Record<string, unknown>);
+        }
+      }
+
+      const singleTerminalFallback =
+        terminalById.size === 1 ? Array.from(terminalById.values())[0] : undefined;
 
       const rawResults = Array.isArray(searchRes.data.results) ? searchRes.data.results : [];
       const payments: Array<{
@@ -2221,6 +2276,11 @@ export async function handleApiRequest(
         paymentMethodId: string;
         paymentTypeId: string;
         posId: string;
+        posName: string;
+        terminalId: string;
+        pointName: string;
+        cardLastFour: string;
+        payerLabel: string;
       }> = [];
 
       for (const item of rawResults) {
@@ -2247,11 +2307,26 @@ export async function handleApiRequest(
           p.point_of_interaction && typeof p.point_of_interaction === 'object'
             ? (p.point_of_interaction as Record<string, unknown>)
             : {};
+        const poiTxData =
+          poi.transaction_data && typeof poi.transaction_data === 'object'
+            ? (poi.transaction_data as Record<string, unknown>)
+            : {};
+        const poiDevice =
+          poi.device && typeof poi.device === 'object'
+            ? (poi.device as Record<string, unknown>)
+            : {};
         const poiType = String(poi.type || '').toUpperCase();
         const poiSubType = String(poi.sub_type || '').toUpperCase();
         const paymentTypeId = String(p.payment_type_id || '').toLowerCase();
         const paymentMethodId = String(p.payment_method_id || '').toLowerCase();
-        const posId = String(p.pos_id || '').trim();
+        const posId = String(p.pos_id || poiTxData.pos_id || '').trim();
+        const rawTerminalId = String(
+          poiDevice.id ||
+            poi.device_id ||
+            poiTxData.terminal_id ||
+            p.terminal_id ||
+            ''
+        ).trim();
         const orderObj =
           p.order && typeof p.order === 'object' ? (p.order as Record<string, unknown>) : {};
         const orderId = String(orderObj.id || '').trim();
@@ -2279,6 +2354,45 @@ export async function handleApiRequest(
         const appMethod: 'tarjeta' | 'transferencia' =
           mpChannel === 'mp_qr' ? 'transferencia' : 'tarjeta';
 
+        const termInfo =
+          (rawTerminalId ? terminalById.get(rawTerminalId) : undefined) ||
+          (mpChannel === 'mp_point' && !posId ? singleTerminalFallback : undefined);
+        const resolvedTerminalId =
+          rawTerminalId ||
+          (posId ? terminalIdByPosKey.get(posId) || '' : '') ||
+          termInfo?.id ||
+          '';
+        const posMatch =
+          (posId ? posInfoByKey.get(posId) : undefined) ||
+          (termInfo?.posId ? posInfoByKey.get(termInfo.posId) : undefined) ||
+          (termInfo?.externalPosId ? posInfoByKey.get(termInfo.externalPosId) : undefined);
+        const posName = posMatch?.name || '';
+        const pointName =
+          posName && resolvedTerminalId && !posName.includes(resolvedTerminalId)
+            ? `${posName} · ${resolvedTerminalId}`
+            : posName ||
+              resolvedTerminalId ||
+              (mpChannel === 'mp_point' ? 'Point Mercado Pago' : 'QR Mercado Pago');
+
+        const cardObj =
+          p.card && typeof p.card === 'object' ? (p.card as Record<string, unknown>) : {};
+        const cardholder =
+          cardObj.cardholder && typeof cardObj.cardholder === 'object'
+            ? (cardObj.cardholder as Record<string, unknown>)
+            : {};
+        const payerObj =
+          p.payer && typeof p.payer === 'object' ? (p.payer as Record<string, unknown>) : {};
+        const payerFullName = [payerObj.first_name, payerObj.last_name]
+          .filter((x) => typeof x === 'string' && x.trim())
+          .join(' ')
+          .trim();
+        const cardLastFour = String(cardObj.last_four_digits || '').trim().slice(0, 4);
+        const payerLabel = String(
+          cardholder.name || payerFullName || payerObj.email || ''
+        )
+          .trim()
+          .slice(0, 80);
+
         payments.push({
           paymentId: String(p.id || ''),
           orderId,
@@ -2291,6 +2405,11 @@ export async function handleApiRequest(
           paymentMethodId,
           paymentTypeId,
           posId,
+          posName,
+          terminalId: resolvedTerminalId,
+          pointName,
+          cardLastFour,
+          payerLabel,
         });
       }
 

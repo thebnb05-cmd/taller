@@ -1,10 +1,24 @@
-import React, { useMemo, useState } from 'react';
-import { Banknote, Download, Edit3, Plus, Search, Trash2, X } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Banknote,
+  CreditCard,
+  Download,
+  Edit3,
+  Plus,
+  QrCode,
+  RefreshCw,
+  Search,
+  Smartphone,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
 import { deleteRow, updateRow } from '../lib/db';
 import type {
   ProductRecord,
   PurchaseRecord,
+  RepairRecord,
+  SaleRecord,
   TaskRecord,
   WorkshopProfile,
 } from '../types/workshop';
@@ -20,10 +34,24 @@ import {
   formatDateShort,
   todayISO,
 } from '../utils/formatters';
-import { PAYMENT_METHOD_LABELS, type PaymentMethod } from '../utils/payment';
 import {
+  fetchRecentMercadoPagoPayments,
+  loadMercadoPagoConfig,
+  resolvePointDisplayName,
+  type MpRecentPayment,
+} from '../utils/mercadoPago';
+import {
+  clearMirroredPurchaseDismissed,
+  markMirroredPurchaseDismissed,
+  syncAllElectronicPaymentsToPurchases,
+} from '../utils/mpPurchasesSync';
+import { PAYMENT_METHOD_LABELS, type PaymentMethod } from '../utils/payment';
+import { useRecoveredPayments } from '../utils/paymentLedger';
+import {
+  isMirroredIncomePurchase,
   parsePurchaseInfo,
   PURCHASE_CATEGORY_LABELS,
+  PURCHASE_ORIGIN_LABELS,
   serializePurchaseStatus,
   type PurchaseCategory,
 } from '../utils/purchaseMeta';
@@ -35,6 +63,8 @@ interface PurchasesPageProps {
   purchases: PurchaseRecord[];
   products?: ProductRecord[];
   tasks?: TaskRecord[];
+  sales?: SaleRecord[];
+  repairs?: RepairRecord[];
   ownerId?: string;
   profile?: WorkshopProfile | null;
   onNewPurchase: () => void;
@@ -43,12 +73,59 @@ interface PurchasesPageProps {
 
 type StatusFilter = 'all' | 'pendiente' | 'pagado';
 type CategoryFilter = 'all' | PurchaseCategory;
+type OriginFilter = 'all' | 'manual' | 'electronic';
+
+function getPurchaseChannelBadge(
+  info: ReturnType<typeof parsePurchaseInfo>
+): { label: string; className: string; kind: 'point' | 'qr' | 'transfer' | 'card' | 'cash' | null } {
+  if (info.mpChannel === 'mp_point') {
+    return {
+      label: 'Point MP',
+      kind: 'point',
+      className:
+        'bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300',
+    };
+  }
+  if (info.mpChannel === 'mp_qr') {
+    return {
+      label: 'QR Mercado Pago',
+      kind: 'qr',
+      className: 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300',
+    };
+  }
+  if (info.paymentMethod === 'transferencia') {
+    return {
+      label: 'Transferencia',
+      kind: 'transfer',
+      className: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950/60 dark:text-cyan-300',
+    };
+  }
+  if (info.paymentMethod === 'tarjeta') {
+    return {
+      label: 'Tarjeta',
+      kind: 'card',
+      className:
+        'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300',
+    };
+  }
+  if (info.paymentMethod === 'efectivo') {
+    return {
+      label: 'Efectivo',
+      kind: 'cash',
+      className:
+        'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300',
+    };
+  }
+  return { label: '', kind: null, className: '' };
+}
 
 export const PurchasesPage: React.FC<PurchasesPageProps> = ({
   purchases,
   products = [],
   tasks = [],
-  ownerId,
+  sales = [],
+  repairs = [],
+  ownerId = '',
   profile,
   onNewPurchase,
   onEditPurchase,
@@ -57,20 +134,120 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
   const { tr } = useI18n();
   const baseCurrency = useMemo(() => parseWorkshopMeta(profile).currency, [profile]);
   const openShift = useMemo(() => findOpenCashShift(tasks), [tasks]);
+  const recoveredEntries = useRecoveredPayments(ownerId);
+  const mpConfig = useMemo(
+    () => (ownerId ? loadMercadoPagoConfig(ownerId) : null),
+    [ownerId]
+  );
+  const defaultPointName = useMemo(
+    () => resolvePointDisplayName(mpConfig),
+    [mpConfig]
+  );
 
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
+  const [originFilter, setOriginFilter] = useState<OriginFilter>('all');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [payingPurchaseId, setPayingPurchaseId] = useState<string | null>(null);
   const [payCashMethod, setPayCashMethod] = useState<PaymentMethod>('efectivo');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [syncingMp, setSyncingMp] = useState(false);
 
-  const total = purchases.reduce((s, x) => s + Number(x.amount || 0), 0);
-  const paid = purchases
-    .filter((x) => parsePurchaseInfo(x).isPaid)
-    .reduce((s, x) => s + Number(x.amount || 0), 0);
-  const pending = Math.max(0, total - paid);
+  const lastAutoSyncSigRef = useRef<string>('');
+  useEffect(() => {
+    if (!ownerId) return;
+    const sig = `${ownerId}|${sales.length}|${repairs.length}|${recoveredEntries.length}`;
+    if (lastAutoSyncSigRef.current === sig) return;
+    lastAutoSyncSigRef.current = sig;
+
+    void syncAllElectronicPaymentsToPurchases({
+      ownerId,
+      sales,
+      repairs,
+      purchases,
+      recoveredEntries,
+      mpConfig,
+      respectDismissed: true,
+    });
+  }, [ownerId, sales, repairs, purchases, recoveredEntries, mpConfig]);
+
+  const handleSyncElectronicAccounts = async () => {
+    if (!ownerId || syncingMp) return;
+    setSyncingMp(true);
+    try {
+      clearMirroredPurchaseDismissed(ownerId);
+      const liveCfg = loadMercadoPagoConfig(ownerId);
+      let mpPayments: MpRecentPayment[] = [];
+      let mpWarn = '';
+      if (liveCfg.accessToken) {
+        const res = await fetchRecentMercadoPagoPayments({
+          accessToken: liveCfg.accessToken,
+        });
+        if (res.ok && Array.isArray(res.payments)) {
+          mpPayments = res.payments;
+        } else if (res.error) {
+          mpWarn = res.error;
+        }
+      }
+
+      const result = await syncAllElectronicPaymentsToPurchases({
+        ownerId,
+        sales,
+        repairs,
+        purchases,
+        recoveredEntries,
+        mpPayments,
+        mpConfig: liveCfg,
+        respectDismissed: false,
+      });
+
+      const totalSynced = result.created + result.updated;
+      if (totalSynced > 0) {
+        notify(
+          `Sincronizadas ${totalSynced} cuentas de Point, QR o Transferencia en Compras.`
+        );
+      } else if (mpWarn) {
+        notify(
+          `Cuentas locales revisadas. Mercado Pago devolvió: ${mpWarn}`,
+          'info'
+        );
+      } else {
+        notify('Todas las cuentas de Point, QR y Transferencia ya están al día en Compras.');
+      }
+    } catch (err) {
+      notify(
+        sanitizeDbErrorMessage(err, 'No se pudieron sincronizar las cuentas electrónicas.'),
+        'error'
+      );
+    } finally {
+      setSyncingMp(false);
+    }
+  };
+
+  const { manualTotal, manualPending, electronicTotal, electronicCount } = useMemo(() => {
+    let mTotal = 0;
+    let mPaid = 0;
+    let eTotal = 0;
+    let eCount = 0;
+    for (const x of purchases) {
+      const info = parsePurchaseInfo(x);
+      const amt = Number(x.amount || 0);
+      if (isMirroredIncomePurchase(info)) {
+        eTotal += amt;
+        eCount += 1;
+      } else {
+        mTotal += amt;
+        if (info.isPaid) mPaid += amt;
+      }
+    }
+    return {
+      manualTotal: mTotal,
+      manualPending: Math.max(0, mTotal - mPaid),
+      electronicTotal: eTotal,
+      electronicCount: eCount,
+    };
+  }, [purchases]);
 
   const filteredPurchases = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -78,14 +255,21 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
       .sort((a, b) => b.createdAt - a.createdAt)
       .filter((p) => {
         const info = parsePurchaseInfo(p);
+        const mirrored = isMirroredIncomePurchase(info);
+        if (originFilter === 'manual' && mirrored) return false;
+        if (originFilter === 'electronic' && !mirrored) return false;
         if (statusFilter === 'pagado' && !info.isPaid) return false;
         if (statusFilter === 'pendiente' && info.isPaid) return false;
         if (categoryFilter !== 'all' && info.category !== categoryFilter) return false;
         if (q) {
+          const badge = getPurchaseChannelBadge(info);
           const hay = [
             p.invoice,
             p.supplierName,
             PURCHASE_CATEGORY_LABELS[info.category],
+            PURCHASE_ORIGIN_LABELS[info.originType],
+            badge.label,
+            info.mpPointName || '',
             info.note,
             ...info.stockItems.map((s) => s.name),
           ]
@@ -95,7 +279,7 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
         }
         return true;
       });
-  }, [purchases, query, statusFilter, categoryFilter]);
+  }, [purchases, query, statusFilter, categoryFilter, originFilter]);
 
   const commitPaidStatus = async (p: PurchaseRecord, withCashEgreso: boolean) => {
     const info = parsePurchaseInfo(p);
@@ -106,6 +290,14 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
       category: info.category,
       note: info.note,
       stockItems: info.stockItems,
+      paymentMethod: info.paymentMethod,
+      mpChannel: info.mpChannel,
+      mpPointName: info.mpPointName,
+      mpOrderId: info.mpOrderId,
+      mpPaymentId: info.mpPaymentId,
+      mpExternalReference: info.mpExternalReference,
+      originType: info.originType,
+      originRecordId: info.originRecordId,
     });
     setBusyId(p.id);
     try {
@@ -139,9 +331,9 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
 
   const toggleStatus = async (p: PurchaseRecord) => {
     const info = parsePurchaseInfo(p);
-    if (!info.isPaid && openShift && ownerId) {
+    if (!info.isPaid && openShift && ownerId && !isMirroredIncomePurchase(info)) {
       setConfirmDeleteId(null);
-      setPayCashMethod('efectivo');
+      setPayCashMethod(info.paymentMethod || 'efectivo');
       setPayingPurchaseId((prev) => (prev === p.id ? null : p.id));
       return;
     }
@@ -152,6 +344,14 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
       category: info.category,
       note: info.note,
       stockItems: info.stockItems,
+      paymentMethod: info.paymentMethod,
+      mpChannel: info.mpChannel,
+      mpPointName: info.mpPointName,
+      mpOrderId: info.mpOrderId,
+      mpPaymentId: info.mpPaymentId,
+      mpExternalReference: info.mpExternalReference,
+      originType: info.originType,
+      originRecordId: info.originRecordId,
     });
     setBusyId(p.id);
     try {
@@ -167,6 +367,9 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
     setBusyId(p.id);
     try {
       const info = parsePurchaseInfo(p);
+      if (ownerId && isMirroredIncomePurchase(info)) {
+        markMirroredPurchaseDismissed(ownerId, p);
+      }
       await deleteRow('purchases', p.id);
 
       let revertedStock = false;
@@ -185,7 +388,7 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
       notify(
         revertedStock
           ? 'Compra eliminada y stock ingresado revertido en inventario.'
-          : 'Compra / gasto eliminado.'
+          : 'Registro eliminado de Compras.'
       );
     } catch (err) {
       notify(sanitizeDbErrorMessage(err, 'No se pudo eliminar la compra.'), 'error');
@@ -201,8 +404,11 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
     }
     const headers = [
       'Comprobante',
-      'Vencimiento / Fecha',
-      'Proveedor',
+      'Fecha',
+      'Origen',
+      'Cuenta / Proveedor',
+      'Canal / Medio de pago',
+      'Nombre Point Mercado Pago',
       'Categoría',
       'Estado',
       `Importe (${baseCurrency})`,
@@ -211,10 +417,16 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
     ];
     const rows = filteredPurchases.map((p) => {
       const info = parsePurchaseInfo(p);
+      const channel = getPurchaseChannelBadge(info);
+      const pointName =
+        info.mpPointName || (info.mpChannel ? defaultPointName : '');
       return [
         p.invoice,
         p.dueDate || new Date(p.createdAt || Date.now()).toISOString().slice(0, 10),
+        PURCHASE_ORIGIN_LABELS[info.originType],
         p.supplierName,
+        channel.label || 'Sin especificar',
+        pointName,
         PURCHASE_CATEGORY_LABELS[info.category],
         info.isPaid ? 'Pagado' : 'Pendiente',
         Number(p.amount || 0),
@@ -235,13 +447,24 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             {tr(
-              'Reposición de repuestos, servicios fijos y pagos a proveedores',
-              'Parts restock, fixed expenses and supplier payments',
-              'Reposição de peças, despesas fixas e pagamentos a fornecedores'
+              'Reposición, gastos y cuentas cobradas por Point, QR y Transferencia',
+              'Restock, expenses and accounts paid via Point, QR and Transfer',
+              'Reposição, despesas e contas pagas via Point, QR e Transferência'
             )}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {ownerId && (
+            <button
+              type="button"
+              disabled={syncingMp}
+              onClick={() => void handleSyncElectronicAccounts()}
+              className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-3.5 text-xs font-semibold text-[#0072BB] hover:bg-sky-100 disabled:opacity-50 whitespace-nowrap shrink-0 dark:border-sky-800/70 dark:bg-sky-950/40 dark:text-sky-300"
+            >
+              <RefreshCw className={`h-4 w-4 ${syncingMp ? 'animate-spin' : ''}`} />
+              {syncingMp ? 'Sincronizando...' : 'Sincronizar Point / QR'}
+            </button>
+          )}
           <button
             type="button"
             onClick={handleExportCsv}
@@ -262,24 +485,30 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="font-mono-num text-xl font-bold text-slate-900 sm:text-2xl dark:text-white">
-            {formatCompactCurrency(total, baseCurrency)}
+            {formatCompactCurrency(manualTotal, baseCurrency)}
           </div>
-          <div className="text-xs text-slate-500">{tr('Total compras', 'Total purchases', 'Total de compras')}</div>
+          <div className="text-xs text-slate-500">
+            {tr('Compras / Gastos', 'Purchases / Expenses', 'Compras / Despesas')}
+          </div>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="font-mono-num text-xl font-bold text-amber-600 sm:text-2xl dark:text-amber-400">
-            {formatCompactCurrency(pending, baseCurrency)}
+            {formatCompactCurrency(manualPending, baseCurrency)}
           </div>
-          <div className="text-xs text-slate-500">{tr('Pendiente', 'Pending', 'Pendente')}</div>
+          <div className="text-xs text-slate-500">
+            {tr('Pendiente a proveedores', 'Pending to suppliers', 'Pendente a fornecedores')}
+          </div>
         </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-          <div className="font-mono-num text-xl font-bold text-emerald-600 sm:text-2xl dark:text-emerald-400">
-            {formatCompactCurrency(paid, baseCurrency)}
+        <div className="rounded-2xl border border-sky-200/80 bg-sky-50/40 p-4 dark:border-sky-900/50 dark:bg-sky-950/20">
+          <div className="font-mono-num text-xl font-bold text-[#0072BB] sm:text-2xl dark:text-sky-400">
+            {formatCompactCurrency(electronicTotal, baseCurrency)}
           </div>
-          <div className="text-xs text-slate-500">{tr('Pagado', 'Paid', 'Pago')}</div>
+          <div className="text-xs text-sky-900/80 dark:text-sky-300/80">
+            Cuentas Point / QR / Transf. ({electronicCount})
+          </div>
         </div>
       </div>
 
@@ -292,9 +521,9 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={tr(
-              'Buscar proveedor, factura, categoría o repuesto...',
-              'Search supplier, invoice, category or part...',
-              'Buscar fornecedor, nota fiscal, categoria ou peça...'
+              'Buscar proveedor, Point, factura, QR o transferencia...',
+              'Search supplier, Point, invoice, QR or transfer...',
+              'Buscar fornecedor, Point, fatura, QR ou transferência...'
             )}
             className="h-9 w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-9 pr-8 text-xs text-slate-900 outline-none focus:border-[#0072BB] focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
           />
@@ -326,6 +555,29 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
         <div className="flex items-center gap-1">
           {(
             [
+              { id: 'all', label: 'Todo' },
+              { id: 'manual', label: 'Compras / Gastos' },
+              { id: 'electronic', label: 'Point / QR / Transf.' },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setOriginFilter(tab.id)}
+              className={`h-9 rounded-xl px-2.5 text-xs font-semibold transition whitespace-nowrap shrink-0 ${
+                originFilter === tab.id
+                  ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-slate-950'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-1">
+          {(
+            [
               { id: 'all', label: tr('Todas', 'All', 'Todas') },
               { id: 'pendiente', label: tr('Pendientes', 'Pending', 'Pendentes') },
               { id: 'pagado', label: tr('Pagadas', 'Paid', 'Pagas') },
@@ -351,12 +603,16 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
         {filteredPurchases.length === 0 ? (
           <div className="p-8 text-center text-sm text-slate-500">
             {purchases.length === 0
-              ? 'No hay compras registradas.'
-              : 'No hay compras o gastos que coincidan con el filtro.'}
+              ? 'No hay compras ni cuentas registradas.'
+              : 'No hay registros que coincidan con el filtro.'}
           </div>
         ) : (
           filteredPurchases.map((p) => {
             const info = parsePurchaseInfo(p);
+            const mirrored = isMirroredIncomePurchase(info);
+            const channelBadge = getPurchaseChannelBadge(info);
+            const displayPointName =
+              info.mpPointName || (info.mpChannel ? defaultPointName : '');
             const hasForeignCurrency = Boolean(
               info.currency &&
                 info.currency !== baseCurrency &&
@@ -382,9 +638,42 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
                       <span>·</span>
                       <span>{formatDateShort(p.dueDate)}</span>
                       <span>·</span>
-                      <span className="font-medium text-slate-600 dark:text-slate-300">
-                        {PURCHASE_CATEGORY_LABELS[info.category]}
+                      <span
+                        className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
+                          mirrored
+                            ? 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300'
+                            : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                        }`}
+                      >
+                        {PURCHASE_ORIGIN_LABELS[info.originType]}
                       </span>
+                      {channelBadge.label && (
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold ${channelBadge.className}`}
+                        >
+                          {channelBadge.kind === 'qr' ? (
+                            <QrCode className="h-3 w-3" />
+                          ) : channelBadge.kind === 'point' ? (
+                            <Smartphone className="h-3 w-3" />
+                          ) : channelBadge.kind === 'card' ? (
+                            <CreditCard className="h-3 w-3" />
+                          ) : null}
+                          {channelBadge.label}
+                        </span>
+                      )}
+                      {displayPointName && (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-violet-50 px-1.5 py-0.5 text-[10px] font-bold text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">
+                          Point: {displayPointName}
+                        </span>
+                      )}
+                      {!mirrored && (
+                        <>
+                          <span>·</span>
+                          <span className="font-medium text-slate-600 dark:text-slate-300">
+                            {PURCHASE_CATEGORY_LABELS[info.category]}
+                          </span>
+                        </>
+                      )}
                       {hasForeignCurrency && info.currency && (
                         <>
                           <span>·</span>
@@ -534,3 +823,4 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
     </div>
   );
 };
+

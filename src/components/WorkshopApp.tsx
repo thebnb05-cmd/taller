@@ -1370,6 +1370,8 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
                   purchases={purchases}
                   products={products}
                   tasks={tasks}
+                  sales={sales}
+                  repairs={repairs}
                   ownerId={userId}
                   profile={profile}
                   onNewPurchase={() => {

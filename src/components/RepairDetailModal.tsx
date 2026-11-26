@@ -81,9 +81,14 @@ import {
   createMercadoPagoOrder,
   hydrateMercadoPagoConfig,
   loadMercadoPagoConfig,
+  resolvePointDisplayName,
   saveMercadoPagoConfig,
   type MercadoPagoConfig,
 } from '../utils/mercadoPago';
+import {
+  syncRecoveredEntryToPurchase,
+  syncRepairToPurchases,
+} from '../utils/mpPurchasesSync';
 import {
   compressPhotoForTracking,
   createMediaId,
@@ -462,13 +467,15 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
           ? ` (incl. IVA Transf./QR ${orderSnapshot.ivaPct}%)`
           : '';
 
+      const pointDisplayName = resolvePointDisplayName(mpConfig);
       if (paidAmt > 0 && repair.ownerId) {
-        recordRecoveredPayment({
+        const recMp = recordRecoveredPayment({
           id: orderSnapshot.orderId,
           ownerId: repair.ownerId,
           source: 'reparacion',
           method: methodForOrder,
           mpChannel,
+          mpPointName: pointDisplayName,
           amount: paidAmt,
           totalAmount: nextBudget || paidAmt,
           clientName: repair.clientName || 'Cliente',
@@ -483,6 +490,9 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
           mpExternalReference: orderSnapshot.externalReference,
           saveFailed: false,
         });
+        if (recMp) {
+          void syncRecoveredEntryToPurchase(repair.ownerId, recMp, mpConfig);
+        }
       }
 
       const token = mpConfig.accessToken.trim();
@@ -516,6 +526,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
           mpChannel,
           mpOrderId: orderSnapshot.orderId,
           mpExternalReference: orderSnapshot.externalReference,
+          mpPointName: pointDisplayName,
           note: `${
             isFullNow
               ? prevDeposit > 0
@@ -615,6 +626,19 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
             mpExternalReference: orderSnapshot.externalReference,
             repairId: repair.id,
           });
+          void syncRepairToPurchases(
+            repair.ownerId,
+            {
+              ...repair,
+              price: nextBudget,
+              deposit: nextDeposit,
+              paidAmount: nextDeposit,
+              paymentStatus: nextPaymentStatus,
+              checkoutState: nextCheckoutState,
+              workDetail: nextWorkDetail || repair.workDetail,
+            },
+            mpConfig
+          );
         }
 
         const localRate =
@@ -655,12 +679,13 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
       } catch (err) {
         const msg = sanitizeDbErrorMessage(err, 'No se pudo guardar el cobro en la orden.');
         if (paidAmt > 0 && repair.ownerId) {
-          recordRecoveredPayment({
+          const recErr = recordRecoveredPayment({
             id: orderSnapshot.orderId,
             ownerId: repair.ownerId,
             source: 'reparacion',
             method: methodForOrder,
             mpChannel,
+            mpPointName: pointDisplayName,
             amount: paidAmt,
             totalAmount: nextBudget || paidAmt,
             clientName: repair.clientName || 'Cliente',
@@ -672,13 +697,16 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
             saveFailed: true,
             saveError: msg,
           });
+          if (recErr) {
+            void syncRecoveredEntryToPurchase(repair.ownerId, recErr, mpConfig);
+          }
           notify(`${msg} El cobro aprobado quedó resguardado en Caja diaria.`, 'error');
         } else {
           notify(msg, 'error');
         }
       }
     },
-    [repair, mpConfig.accessToken, mpConfig.posExternalId, mpConfig.terminalId, baseCurrency, notify, tr]
+    [repair, mpConfig, baseCurrency, notify, tr]
   );
 
   useEffect(() => {
@@ -1460,13 +1488,29 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
         }
       }
 
+      if (repair.ownerId && (paymentMethod === 'transferencia' || paymentMethod === 'tarjeta')) {
+        void syncRepairToPurchases(
+          repair.ownerId,
+          {
+            ...repair,
+            price: nextBudget,
+            deposit: nextBudget,
+            paidAmount: nextBudget,
+            paymentStatus: nextPaymentStatus,
+            checkoutState: nextCheckoutState,
+            workDetail: nextWorkDetail || repair.workDetail,
+          },
+          mpConfig
+        );
+      }
+
       notify(`Pago en ${PAYMENT_METHOD_LABELS[paymentMethod]} registrado.`);
       setJustPaid(true);
       setTab('receipt');
     } catch (err) {
       const msg = sanitizeDbErrorMessage(err, 'No se pudo registrar el pago.');
       if (paidNow > 0 && repair.ownerId) {
-        recordRecoveredPayment({
+        const recFullErr = recordRecoveredPayment({
           id: `rec-rep-${repair.id}-${Date.now()}`,
           ownerId: repair.ownerId,
           source: 'reparacion',
@@ -1479,6 +1523,9 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
           saveFailed: true,
           saveError: msg,
         });
+        if (recFullErr && (paymentMethod === 'transferencia' || paymentMethod === 'tarjeta')) {
+          void syncRecoveredEntryToPurchase(repair.ownerId, recFullErr, mpConfig);
+        }
         notify(`${msg} El cobro quedó resguardado en Caja diaria.`, 'error');
       } else {
         notify(msg, 'error');
@@ -1555,6 +1602,20 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
         }
       }
 
+      if (repair.ownerId && (partialMethod === 'transferencia' || partialMethod === 'tarjeta')) {
+        void syncRepairToPurchases(
+          repair.ownerId,
+          {
+            ...repair,
+            deposit: nextDeposit,
+            paidAmount: nextDeposit,
+            paymentStatus: nextPaymentStatus,
+            checkoutState: nextCheckoutState,
+          },
+          mpConfig
+        );
+      }
+
       setDeposit(
         String(
           isEditSecondary
@@ -1575,7 +1636,7 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
     } catch (err) {
       const msg = sanitizeDbErrorMessage(err, 'No se pudo registrar el abono.');
       if (amt > 0 && repair.ownerId) {
-        recordRecoveredPayment({
+        const recPartErr = recordRecoveredPayment({
           id: `rec-rep-part-${repair.id}-${Date.now()}`,
           ownerId: repair.ownerId,
           source: 'reparacion',
@@ -1588,6 +1649,9 @@ export const RepairDetailModal: React.FC<RepairDetailModalProps> = ({
           saveFailed: true,
           saveError: msg,
         });
+        if (recPartErr && (partialMethod === 'transferencia' || partialMethod === 'tarjeta')) {
+          void syncRecoveredEntryToPurchase(repair.ownerId, recPartErr, mpConfig);
+        }
         notify(`${msg} El abono quedó resguardado en Caja diaria.`, 'error');
       } else {
         notify(msg, 'error');

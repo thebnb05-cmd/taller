@@ -12,6 +12,7 @@ import type {
 import { convertFromBaseCurrency, type CurrencyCode } from './currency';
 import { formatCurrency, formatDateShort, getStatusLabel, todayISO } from './formatters';
 import { parsePaymentInfo } from './payment';
+import { isMirroredIncomePurchase, parsePurchaseInfo } from './purchaseMeta';
 import { parseSalePaymentInfo } from './saleMeta';
 import { parseCheckoutAndSignature } from './signatureMeta';
 import { parseWorkshopMeta } from './workshopMeta';
@@ -144,7 +145,10 @@ export function downloadSalesSummaryPdf(params: {
   const totalRevenue = repairIncome + salesIncome;
   const totalCollected = repairPaid + salesPaid;
   const totalPending = Math.max(0, totalRevenue - totalCollected);
-  const totalPurchases = purchases.reduce((s, p) => s + Number(p.amount || 0), 0);
+  const realPurchases = purchases.filter(
+    (p) => !isMirroredIncomePurchase(parsePurchaseInfo(p))
+  );
+  const totalPurchases = realPurchases.reduce((s, p) => s + Number(p.amount || 0), 0);
   const netResult = totalRevenue - totalPurchases;
   const avgTicket = repairs.length > 0 ? repairIncome / repairs.length : 0;
 
@@ -167,7 +171,7 @@ export function downloadSalesSummaryPdf(params: {
       ['Ingreso bruto total', 'Ventas + Reparaciones', formatCurrency(totalRevenue, brand.currency)],
       ['Total cobrado', 'Ventas cobradas + Señas', formatCurrency(totalCollected, brand.currency)],
       ['Saldo pendiente por cobrar', 'Cuentas por cobrar', formatCurrency(totalPending, brand.currency)],
-      ['Compras / reposición', `${purchases.length} comprobantes`, formatCurrency(totalPurchases, brand.currency)],
+      ['Compras / reposición', `${realPurchases.length} comprobantes`, formatCurrency(totalPurchases, brand.currency)],
       ['Resultado neto estimado', 'Ingresos - Compras', formatCurrency(netResult, brand.currency)],
       ['Ticket promedio (reparaciones)', `${repairs.length} órdenes`, formatCurrency(avgTicket, brand.currency)],
     ],
