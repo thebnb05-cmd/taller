@@ -16,6 +16,8 @@ import {
   isMirroredIncomePurchase,
   parsePurchaseInfo,
   serializePurchaseStatus,
+  type PurchaseCategory,
+  type PurchaseMpChannel,
   type PurchaseOriginType,
 } from './purchaseMeta';
 import { parseRepairPaymentLedger } from './repairMeta';
@@ -123,11 +125,13 @@ export interface ElectronicPurchaseDescriptor {
   originType: Exclude<PurchaseOriginType, 'manual'>;
   originRecordId: string;
   paymentMethod: PaymentMethod;
-  mpChannel?: 'mp_point' | 'mp_qr';
+  mpChannel?: PurchaseMpChannel;
   mpPointName?: string;
   mpOrderId?: string;
   mpPaymentId?: string;
   mpExternalReference?: string;
+  isOutflow?: boolean;
+  category?: PurchaseCategory;
   amount: number;
   counterparty: string;
   invoice: string;
@@ -140,8 +144,20 @@ function buildSupplierLabel(desc: ElectronicPurchaseDescriptor): string {
   const cleanParty = sanitizePlainLine(desc.counterparty || 'Cliente', 90) || 'Cliente';
   const cleanPoint = sanitizePlainLine(desc.mpPointName || '', 70);
 
+  if (desc.mpChannel === 'mp_meli' || desc.originType === 'mp_meli') {
+    const base =
+      cleanPoint && cleanPoint.toLowerCase() !== 'mercado libre'
+        ? `Mercado Libre · ${cleanPoint}`
+        : 'Mercado Libre';
+    return clampStr(
+      cleanParty && cleanParty.toLowerCase() !== 'mercado libre' && cleanParty.toLowerCase() !== 'mercado pago'
+        ? `${base} (${cleanParty})`
+        : base,
+      160
+    );
+  }
   if (desc.mpChannel === 'mp_point') {
-    const base = cleanPoint ? `Point MP · ${cleanPoint}` : 'Point Mercado Pago';
+    const base = cleanPoint ? `Point Smart · ${cleanPoint}` : 'Point Smart';
     return clampStr(
       cleanParty && cleanParty.toLowerCase() !== 'mercado pago'
         ? `${base} (${cleanParty})`
@@ -158,8 +174,9 @@ function buildSupplierLabel(desc: ElectronicPurchaseDescriptor): string {
       160
     );
   }
-  if (desc.paymentMethod === 'transferencia') {
-    return clampStr(`Transferencia · ${cleanParty}`, 160);
+  if (desc.mpChannel === 'mp_transfer' || desc.paymentMethod === 'transferencia') {
+    const prefix = desc.isOutflow ? 'Transferencia enviada' : 'Transferencia';
+    return clampStr(`${prefix} · ${cleanParty}`, 160);
   }
   return clampStr(
     cleanPoint ? `Tarjeta · ${cleanPoint} (${cleanParty})` : `Tarjeta · ${cleanParty}`,
@@ -175,7 +192,7 @@ function buildPurchasePayloadFromDescriptor(
   const id = purchaseIdOverride || makeMirroredPurchaseId(desc.originRecordId);
   const status = serializePurchaseStatus({
     status: 'pagado',
-    category: 'otro',
+    category: desc.category || (desc.isOutflow ? 'repuestos' : 'otro'),
     note: desc.note,
     paymentMethod: desc.paymentMethod,
     mpChannel: desc.mpChannel,
@@ -185,6 +202,7 @@ function buildPurchasePayloadFromDescriptor(
     mpExternalReference: desc.mpExternalReference,
     originType: desc.originType,
     originRecordId: desc.originRecordId,
+    isOutflow: desc.isOutflow,
   });
 
   return stripUndefined({
@@ -367,8 +385,10 @@ function extractDescriptorFromRecovered(
     Boolean(entry.mpChannel);
   if (!isElectronic || entry.amount <= 0) return null;
 
-  const originType: Exclude<PurchaseOriginType, 'manual'> =
-    entry.source === 'reparacion'
+  const isMeli = Boolean(entry.mpChannel === 'mp_meli' || entry.isMercadoLibre);
+  const originType: Exclude<PurchaseOriginType, 'manual'> = isMeli
+    ? 'mp_meli'
+    : entry.source === 'reparacion'
       ? 'reparacion'
       : entry.source === 'mp_sync'
         ? 'mp_sync'
@@ -376,7 +396,11 @@ function extractDescriptorFromRecovered(
 
   const pointName =
     entry.mpPointName ||
-    (entry.mpChannel ? resolvePointDisplayName(mpConfig) : undefined);
+    (isMeli
+      ? 'Mercado Libre'
+      : entry.mpChannel === 'mp_point' || entry.mpChannel === 'mp_qr'
+        ? resolvePointDisplayName(mpConfig)
+        : undefined);
 
   const uniqueKey = entry.mpPaymentId
     ? `mp_pay_${entry.mpPaymentId}`
@@ -393,15 +417,19 @@ function extractDescriptorFromRecovered(
     mpOrderId: entry.mpOrderId,
     mpPaymentId: entry.mpPaymentId,
     mpExternalReference: entry.mpExternalReference,
+    isOutflow: Boolean(entry.isOutflow || isMeli),
+    category: entry.isOutflow || isMeli ? 'repuestos' : 'otro',
     amount: safeMoney(entry.amount),
-    counterparty: entry.clientName || 'Mercado Pago',
+    counterparty: entry.clientName || (isMeli ? 'Mercado Libre' : 'Mercado Pago'),
     invoice:
       entry.invoice ||
-      (entry.mpChannel === 'mp_point'
-        ? 'MP-POINT'
-        : entry.mpChannel === 'mp_qr'
-          ? 'MP-QR'
-          : 'TRANSF'),
+      (isMeli
+        ? 'ML-COMPRA'
+        : entry.mpChannel === 'mp_point'
+          ? 'MP-POINT'
+          : entry.mpChannel === 'mp_qr'
+            ? 'MP-QR'
+            : 'TRANSF'),
     dueDate: toIsoDateOnly(entry.at || entry.createdAt),
     createdAtMs: toTimestampMs(entry.at || entry.createdAt),
     note: [entry.title, entry.subtitle].filter(Boolean).join(' · '),
@@ -413,10 +441,24 @@ function extractDescriptorFromMpRecent(
   mpConfig?: Partial<MercadoPagoConfig> | null
 ): ElectronicPurchaseDescriptor | null {
   if (!mp || Number(mp.amount || 0) <= 0) return null;
-  const pointName = resolvePointDisplayName(
-    mpConfig,
-    mp.pointName || mp.posName || mp.terminalId
-  );
+  const isMeli = Boolean(mp.mpChannel === 'mp_meli' || mp.isMercadoLibre);
+  const resolvedPurchaseChannel: PurchaseMpChannel | undefined =
+    mp.mpChannel === 'mp_point' ||
+    mp.mpChannel === 'mp_qr' ||
+    mp.mpChannel === 'mp_meli' ||
+    mp.mpChannel === 'mp_transfer'
+      ? mp.mpChannel
+      : undefined;
+
+  const pointName = isMeli
+    ? mp.pointName || mp.posName || mp.terminalId || 'Mercado Libre'
+    : mp.mpChannel === 'mp_transfer'
+      ? mp.pointName || (mp.isOutflow ? 'Transferencia enviada MP' : 'Transferencia recibida MP')
+      : resolvePointDisplayName(
+          mpConfig,
+          mp.pointName || mp.posName || mp.terminalId
+        );
+
   const uniqueKey = mp.paymentId
     ? `mp_pay_${mp.paymentId}`
     : mp.orderId
@@ -424,23 +466,44 @@ function extractDescriptorFromMpRecent(
       : `mp_ts_${Date.parse(mp.dateApproved || '') || Date.now()}`;
 
   return {
-    originType: 'mp_sync',
+    originType: isMeli ? 'mp_meli' : 'mp_sync',
     originRecordId: uniqueKey,
     paymentMethod: mp.appMethod,
-    mpChannel: mp.mpChannel,
+    mpChannel: resolvedPurchaseChannel,
     mpPointName: pointName,
     mpOrderId: mp.orderId || undefined,
     mpPaymentId: mp.paymentId || undefined,
     mpExternalReference: mp.externalReference || undefined,
+    isOutflow: Boolean(mp.isOutflow || isMeli),
+    category: mp.isOutflow || isMeli ? 'repuestos' : 'otro',
     amount: safeMoney(mp.amount),
-    counterparty: mp.payerLabel || 'Mercado Pago',
+    counterparty: mp.payerLabel || (isMeli ? 'Mercado Libre' : 'Mercado Pago'),
     invoice:
       mp.externalReference ||
-      (mp.mpChannel === 'mp_point' ? 'MP-POINT' : 'MP-QR'),
+      (isMeli
+        ? 'ML-COMPRA'
+        : mp.mpChannel === 'mp_point'
+          ? 'MP-POINT'
+          : mp.mpChannel === 'mp_qr'
+            ? 'MP-QR'
+            : mp.mpChannel === 'mp_transfer'
+              ? 'MP-TRANSF'
+              : 'MP-TARJ'),
     dueDate: toIsoDateOnly(mp.dateApproved),
     createdAtMs: toTimestampMs(mp.dateApproved),
     note: [
-      mp.description || (mp.mpChannel === 'mp_point' ? 'Cobro Point Smart' : 'Cobro QR Mercado Pago'),
+      mp.description ||
+        (isMeli
+          ? 'Compra en Mercado Libre'
+          : mp.mpChannel === 'mp_point'
+            ? mp.isOutflow
+              ? 'Pago Point Smart'
+              : 'Cobro Point Smart'
+            : mp.mpChannel === 'mp_qr'
+              ? 'Cobro QR Mercado Pago'
+              : mp.mpChannel === 'mp_transfer'
+                ? 'Transferencia Mercado Pago'
+                : 'Pago con Tarjeta'),
       mp.paymentMethodId ? mp.paymentMethodId.toUpperCase() : '',
       mp.cardLastFour ? `****${mp.cardLastFour}` : '',
     ]
@@ -623,14 +686,21 @@ export async function syncAllElectronicPaymentsToPurchases(params: {
       (normExt ? existingByExtRef.get(normExt) : undefined);
 
     if (existing) {
-      // Only enrich/update if mirrored row is missing mpPointName/mpPaymentId or amount changed
       const needsPointEnrich = Boolean(desc.mpPointName && !existing.info.mpPointName);
       const needsPaymentIdEnrich = Boolean(desc.mpPaymentId && !existing.info.mpPaymentId);
+      const needsChannelEnrich = Boolean(desc.mpChannel && !existing.info.mpChannel);
+      const needsOutflowEnrich = Boolean(desc.isOutflow && !existing.info.isOutflow);
       const needsAmountUpdate =
-        isMirroredIncomePurchase(existing.info) &&
+        (isMirroredIncomePurchase(existing.info) || existing.info.originType === 'mp_meli') &&
         Math.abs(Number(existing.row.amount || 0) - desc.amount) > 0.01;
 
-      if (needsPointEnrich || needsPaymentIdEnrich || needsAmountUpdate) {
+      if (
+        needsPointEnrich ||
+        needsPaymentIdEnrich ||
+        needsChannelEnrich ||
+        needsOutflowEnrich ||
+        needsAmountUpdate
+      ) {
         const nextStatus = serializePurchaseStatus({
           status: existing.info.baseStatus,
           currency: existing.info.currency,
@@ -644,14 +714,19 @@ export async function syncAllElectronicPaymentsToPurchases(params: {
           mpOrderId: existing.info.mpOrderId || desc.mpOrderId,
           mpPaymentId: existing.info.mpPaymentId || desc.mpPaymentId,
           mpExternalReference: existing.info.mpExternalReference || desc.mpExternalReference,
-          originType: existing.info.originType,
+          originType:
+            existing.info.originType === 'mp_sync' && desc.originType === 'mp_meli'
+              ? 'mp_meli'
+              : existing.info.originType,
           originRecordId: existing.info.originRecordId || desc.originRecordId,
+          isOutflow: existing.info.isOutflow || desc.isOutflow,
         });
         try {
           await updateRow('purchases', existing.row.id, {
             amount: needsAmountUpdate ? desc.amount : existing.row.amount,
             supplierName:
-              needsPointEnrich && isMirroredIncomePurchase(existing.info)
+              (needsPointEnrich || needsChannelEnrich) &&
+              (isMirroredIncomePurchase(existing.info) || existing.info.originType === 'mp_meli')
                 ? buildSupplierLabel(desc)
                 : existing.row.supplierName,
             status: nextStatus,

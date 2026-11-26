@@ -2,12 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowDownRight,
+  ArrowUpDown,
   ArrowUpRight,
   BarChart3,
   Boxes,
   CalendarRange,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   Clock,
   CreditCard,
   DollarSign,
@@ -15,6 +17,7 @@ import {
   FileDown,
   PackageX,
   QrCode,
+  RefreshCw,
   Search,
   ShoppingBag,
   Smartphone,
@@ -46,12 +49,17 @@ import {
   todayISO,
 } from '../utils/formatters';
 import {
+  fetchRecentMercadoPagoPayments,
+  hydrateMercadoPagoConfig,
   loadMercadoPagoConfig,
   resolvePointDisplayName,
+  type MercadoPagoConfig,
 } from '../utils/mercadoPago';
+import { syncAllElectronicPaymentsToPurchases } from '../utils/mpPurchasesSync';
 import { parsePaymentInfo } from '../utils/payment';
 import {
   getUnreconciledPayments,
+  mergeSyncedMpPayments,
   toSyntheticSalesFromRecovered,
   useRecoveredPayments,
 } from '../utils/paymentLedger';
@@ -62,6 +70,7 @@ import {
 } from '../utils/purchaseMeta';
 import { parseRepairPaymentLedger } from '../utils/repairMeta';
 import { parseSaleDetails, parseSalePaymentInfo } from '../utils/saleMeta';
+import { parseWorkshopMeta } from '../utils/workshopMeta';
 import { useI18n } from '../utils/i18n';
 
 interface ReportsPageProps {
@@ -153,13 +162,20 @@ interface TimelineBucket {
   ordersCount: number;
 }
 
-type ElectronicChannelType = 'mp_point' | 'mp_qr' | 'transferencia' | 'tarjeta';
+type ElectronicChannelType =
+  | 'mp_point'
+  | 'mp_meli'
+  | 'mp_qr'
+  | 'transferencia'
+  | 'tarjeta';
 type ElectronicChannelFilter = 'all' | ElectronicChannelType;
 
 interface ElectronicHistoryItem {
   id: string;
   createdAt: number;
   dateLabel: string;
+  timeLabel: string;
+  fullDateTimeLabel: string;
   originLabel: string;
   counterparty: string;
   concept: string;
@@ -167,16 +183,88 @@ interface ElectronicHistoryItem {
   channelLabel: string;
   mpPointName: string;
   reference: string;
+  mpPaymentId?: string;
+  mpOrderId?: string;
+  statusLabel: string;
   amount: number;
   isOutflow: boolean;
 }
 
 const ELECTRONIC_CHANNEL_LABELS: Record<ElectronicChannelType, string> = {
-  mp_point: 'Point Mercado Pago',
+  mp_point: 'Point Smart / MP',
+  mp_meli: 'Mercado Libre',
   mp_qr: 'QR Mercado Pago',
   transferencia: 'Transferencia',
   tarjeta: 'Tarjeta',
 };
+
+interface ElectronicChannelVisualMeta {
+  id: ElectronicChannelType;
+  label: string;
+  shortLabel: string;
+  swatchClass: string;
+  textClass: string;
+  activeTileClass: string;
+}
+
+const ELECTRONIC_CHANNEL_META: ElectronicChannelVisualMeta[] = [
+  {
+    id: 'mp_point',
+    label: 'Point Smart / MP',
+    shortLabel: 'Point Smart',
+    swatchClass: 'bg-violet-500',
+    textClass: 'text-violet-700 dark:text-violet-300',
+    activeTileClass:
+      'border-violet-300 bg-violet-50/75 dark:border-violet-700/70 dark:bg-violet-950/35',
+  },
+  {
+    id: 'mp_meli',
+    label: 'Mercado Libre',
+    shortLabel: 'Mercado Libre',
+    swatchClass: 'bg-amber-500',
+    textClass: 'text-amber-700 dark:text-amber-300',
+    activeTileClass:
+      'border-amber-300 bg-amber-50/75 dark:border-amber-700/70 dark:bg-amber-950/35',
+  },
+  {
+    id: 'mp_qr',
+    label: 'QR Mercado Pago',
+    shortLabel: 'QR MP',
+    swatchClass: 'bg-sky-500',
+    textClass: 'text-[#0072BB] dark:text-sky-300',
+    activeTileClass:
+      'border-sky-300 bg-sky-50/75 dark:border-sky-700/70 dark:bg-sky-950/35',
+  },
+  {
+    id: 'transferencia',
+    label: 'Transferencia',
+    shortLabel: 'Transferencia',
+    swatchClass: 'bg-teal-500',
+    textClass: 'text-teal-700 dark:text-teal-300',
+    activeTileClass:
+      'border-teal-300 bg-teal-50/75 dark:border-teal-700/70 dark:bg-teal-950/35',
+  },
+  {
+    id: 'tarjeta',
+    label: 'Tarjeta',
+    shortLabel: 'Tarjeta',
+    swatchClass: 'bg-indigo-500',
+    textClass: 'text-indigo-700 dark:text-indigo-300',
+    activeTileClass:
+      'border-indigo-300 bg-indigo-50/75 dark:border-indigo-700/70 dark:bg-indigo-950/35',
+  },
+];
+
+const ELECTRONIC_CHANNEL_META_MAP: Record<
+  ElectronicChannelType,
+  ElectronicChannelVisualMeta
+> = ELECTRONIC_CHANNEL_META.reduce(
+  (acc, item) => {
+    acc[item.id] = item;
+    return acc;
+  },
+  {} as Record<ElectronicChannelType, ElectronicChannelVisualMeta>
+);
 
 function normalizeMpRef(ref?: string | null): string {
   return String(ref || '')
@@ -192,6 +280,36 @@ function toMsSafe(val: number | string | undefined, fallback: number): number {
     if (!Number.isNaN(parsed) && parsed > 0) return parsed;
   }
   return fallback;
+}
+
+function formatTimeShort(ts: number, locale: string): string {
+  if (!Number.isFinite(ts) || ts <= 0) return '--:--';
+  try {
+    return new Intl.DateTimeFormat(locale, {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date(ts));
+  } catch {
+    const d = new Date(ts);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+}
+
+function formatDateTimeFull(ts: number, locale: string): string {
+  if (!Number.isFinite(ts) || ts <= 0) return '—';
+  try {
+    return new Intl.DateTimeFormat(locale, {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date(ts));
+  } catch {
+    return `${formatDateShort(new Date(ts).toISOString().slice(0, 10))} ${formatTimeShort(ts, locale)}`;
+  }
 }
 
 export const ReportsPage: React.FC<ReportsPageProps> = ({
@@ -216,10 +334,52 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
     () => [...sales, ...toSyntheticSalesFromRecovered(unreconciledRecovered)],
     [sales, unreconciledRecovered]
   );
-  const defaultMpPointName = useMemo(
-    () => resolvePointDisplayName(ownerId ? loadMercadoPagoConfig(ownerId) : null),
-    [ownerId]
+
+  const [hydratedMpConfig, setHydratedMpConfig] = useState<MercadoPagoConfig | null>(() =>
+    ownerId ? loadMercadoPagoConfig(ownerId) : null
   );
+  useEffect(() => {
+    if (!ownerId) return;
+    let active = true;
+    void hydrateMercadoPagoConfig(ownerId).then((cfg) => {
+      if (active) setHydratedMpConfig(cfg);
+    });
+    return () => {
+      active = false;
+    };
+  }, [ownerId]);
+
+  const profileMpConfig = useMemo(
+    () => parseWorkshopMeta(profile).mercadoPago ?? null,
+    [profile]
+  );
+  const mergedMpConfig = useMemo<Partial<MercadoPagoConfig> | null>(() => {
+    const token = hydratedMpConfig?.accessToken || profileMpConfig?.accessToken || '';
+    const posExternalId =
+      hydratedMpConfig?.posExternalId || profileMpConfig?.posExternalId || '';
+    const terminalId =
+      hydratedMpConfig?.terminalId || profileMpConfig?.terminalId || '';
+    const pointName =
+      hydratedMpConfig?.pointName || profileMpConfig?.pointName || '';
+    const sellerNickname =
+      hydratedMpConfig?.sellerNickname || profileMpConfig?.sellerNickname || '';
+    if (!token && !posExternalId && !terminalId && !pointName && !sellerNickname) {
+      return null;
+    }
+    return {
+      accessToken: token,
+      posExternalId,
+      terminalId,
+      pointName,
+      sellerNickname,
+    };
+  }, [hydratedMpConfig, profileMpConfig]);
+
+  const defaultMpPointName = useMemo(
+    () => (mergedMpConfig ? resolvePointDisplayName(mergedMpConfig) : 'Point Smart'),
+    [mergedMpConfig]
+  );
+
   const [range, setRange] = useState<RangeId>('30');
   const [customFrom, setCustomFrom] = useState<string>(() => {
     const d = new Date();
@@ -232,7 +392,12 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
   const [activeBucketIndex, setActiveBucketIndex] = useState<number | null>(null);
   const [pdfMenuOpen, setPdfMenuOpen] = useState(false);
   const [electronicFilter, setElectronicFilter] = useState<ElectronicChannelFilter>('all');
+  const [electronicPointFilter, setElectronicPointFilter] = useState<string>('all');
+  const [electronicSortOrder, setElectronicSortOrder] = useState<'desc' | 'asc'>('desc');
   const [electronicQuery, setElectronicQuery] = useState('');
+  const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
+  const [showAllElectronic, setShowAllElectronic] = useState(false);
+  const [syncingMpHistory, setSyncingMpHistory] = useState(false);
   const pdfMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -248,6 +413,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
 
   useEffect(() => {
     setActiveBucketIndex(null);
+    setShowAllElectronic(false);
+    setSelectedHistoryId(null);
   }, [range, customFrom, customTo]);
 
   const windowBounds = useMemo(() => {
@@ -770,6 +937,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
             id: originRecordId,
             createdAt: entryTs,
             dateLabel: formatDateShort(new Date(entryTs).toISOString().slice(0, 10)),
+            timeLabel: formatTimeShort(entryTs, locale),
+            fullDateTimeLabel: formatDateTimeFull(entryTs, locale),
             originLabel: 'Reparación',
             counterparty: r.clientName || 'Cliente',
             concept: [deviceDesc, entry.note].filter(Boolean).join(' · ') || 'Reparación',
@@ -777,6 +946,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
             channelLabel: ELECTRONIC_CHANNEL_LABELS[ch],
             mpPointName: pointName,
             reference: entry.mpExternalReference || r.code || '—',
+            mpOrderId: entry.mpOrderId,
+            statusLabel: 'Procesado',
             amount: Number(entry.amount || 0),
             isOutflow: false,
           });
@@ -799,6 +970,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
               id: originRecordId,
               createdAt: r.createdAt,
               dateLabel: formatDateShort(r.dateIn),
+              timeLabel: formatTimeShort(r.createdAt, locale),
+              fullDateTimeLabel: formatDateTimeFull(r.createdAt, locale),
               originLabel: 'Reparación',
               counterparty: r.clientName || 'Cliente',
               concept: `${deviceDesc} · Cobro reparación`,
@@ -806,6 +979,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
               channelLabel: ELECTRONIC_CHANNEL_LABELS[ch],
               mpPointName: '',
               reference: r.code || '—',
+              statusLabel: 'Procesado',
               amount: collected,
               isOutflow: false,
             });
@@ -851,7 +1025,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           electronicHistory.push({
             id: originRecordId,
             createdAt: payTs,
-            dateLabel: formatDateShort(s.dueDate),
+            dateLabel: formatDateShort(s.dueDate || new Date(payTs).toISOString().slice(0, 10)),
+            timeLabel: formatTimeShort(payTs, locale),
+            fullDateTimeLabel: formatDateTimeFull(payTs, locale),
             originLabel: s.id.startsWith('rec_') ? 'Mercado Pago' : 'Venta',
             counterparty: s.clientName || 'Mostrador',
             concept: [s.productName, pay.note].filter(Boolean).join(' · ') || 'Venta mostrador',
@@ -859,6 +1035,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
             channelLabel: ELECTRONIC_CHANNEL_LABELS[ch],
             mpPointName: pointName,
             reference: details.mpExternalReference || s.invoice || '—',
+            mpPaymentId: details.mpPaymentId,
+            mpOrderId: details.mpOrderId,
+            statusLabel: s.id.startsWith('rec_') ? 'Conciliado MP' : 'Procesado',
             amount: Number(pay.amount || 0),
             isOutflow: false,
           });
@@ -886,7 +1065,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           electronicHistory.push({
             id: originRecordId,
             createdAt: s.createdAt,
-            dateLabel: formatDateShort(s.dueDate),
+            dateLabel: formatDateShort(s.dueDate || new Date(s.createdAt).toISOString().slice(0, 10)),
+            timeLabel: formatTimeShort(s.createdAt, locale),
+            fullDateTimeLabel: formatDateTimeFull(s.createdAt, locale),
             originLabel: s.id.startsWith('rec_') ? 'Mercado Pago' : 'Venta',
             counterparty: s.clientName || 'Mostrador',
             concept: s.productName || 'Venta de mostrador',
@@ -894,6 +1075,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
             channelLabel: ELECTRONIC_CHANNEL_LABELS[ch],
             mpPointName: pointName,
             reference: details.mpExternalReference || s.invoice || '—',
+            mpPaymentId: details.mpPaymentId,
+            mpOrderId: details.mpOrderId,
+            statusLabel: s.id.startsWith('rec_') ? 'Conciliado MP' : 'Procesado',
             amount: info.deposit,
             isOutflow: false,
           });
@@ -925,6 +1109,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
         id: `rec_${rec.id}`,
         createdAt: rec.createdAt,
         dateLabel: formatDateShort(rec.at.slice(0, 10)),
+        timeLabel: formatTimeShort(rec.createdAt, locale),
+        fullDateTimeLabel: formatDateTimeFull(rec.createdAt, locale),
         originLabel: 'Reparación',
         counterparty: rec.clientName || 'Cliente',
         concept: [rec.title, rec.subtitle].filter(Boolean).join(' · ') || 'Cobro MP',
@@ -934,22 +1120,91 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           rec.mpPointName ||
           (ch === 'mp_point' || ch === 'mp_qr' ? defaultMpPointName : ''),
         reference: rec.mpExternalReference || rec.invoice || '—',
+        mpPaymentId: rec.mpPaymentId,
+        mpOrderId: rec.mpOrderId,
+        statusLabel: rec.forceReconciled ? 'Reconciliación forzada' : 'Conciliado MP',
         amount: rec.amount,
         isOutflow: false,
+      });
+    });
+
+    // Include synced outflows (Mercado Libre purchases & outgoing MP transfers/Point charges)
+    recoveredEntries.forEach((rec) => {
+      if (rec.dismissed || !rec.isOutflow || rec.amount <= 0) return;
+      const normExt = normalizeMpRef(rec.mpExternalReference);
+      if (
+        (rec.mpPaymentId && seenMpPaymentIds.has(rec.mpPaymentId)) ||
+        (rec.mpOrderId && seenMpOrderIds.has(rec.mpOrderId)) ||
+        (normExt && seenExtRefs.has(normExt))
+      ) {
+        return;
+      }
+      registerDedupeIds({
+        mpOrderId: rec.mpOrderId,
+        mpPaymentId: rec.mpPaymentId,
+        mpExternalReference: rec.mpExternalReference,
+      });
+      if (!inCurrent(rec.createdAt)) return;
+      const ch: ElectronicChannelType =
+        rec.mpChannel === 'mp_meli' || rec.isMercadoLibre
+          ? 'mp_meli'
+          : rec.mpChannel === 'mp_point'
+            ? 'mp_point'
+            : rec.mpChannel === 'mp_qr'
+              ? 'mp_qr'
+              : rec.method === 'tarjeta'
+                ? 'tarjeta'
+                : 'transferencia';
+      const pointName =
+        rec.mpPointName ||
+        (ch === 'mp_meli'
+          ? 'Mercado Libre'
+          : ch === 'mp_point' || ch === 'mp_qr'
+            ? defaultMpPointName
+            : '');
+      electronicHistory.push({
+        id: `rec_out_${rec.id}`,
+        createdAt: rec.createdAt,
+        dateLabel: formatDateShort(rec.at.slice(0, 10)),
+        timeLabel: formatTimeShort(rec.createdAt, locale),
+        fullDateTimeLabel: formatDateTimeFull(rec.createdAt, locale),
+        originLabel: ch === 'mp_meli' ? 'Mercado Libre' : 'Compra MP',
+        counterparty:
+          rec.clientName || (ch === 'mp_meli' ? 'Mercado Libre' : 'Cuenta Mercado Pago'),
+        concept: [rec.title, rec.subtitle].filter(Boolean).join(' · ') || 'Compra / Egreso MP',
+        channel: ch,
+        channelLabel: ELECTRONIC_CHANNEL_LABELS[ch],
+        mpPointName: pointName,
+        reference: rec.mpExternalReference || rec.invoice || '—',
+        mpPaymentId: rec.mpPaymentId,
+        mpOrderId: rec.mpOrderId,
+        statusLabel: 'Compra / Pago MP',
+        amount: rec.amount,
+        isOutflow: true,
       });
     });
 
     purchases.forEach((p) => {
       const info = parsePurchaseInfo(p);
       if (!info.isPaid || Number(p.amount || 0) <= 0) return;
+      const supLower = (p.supplierName || '').toLowerCase();
+      const ptLower = (info.mpPointName || '').toLowerCase();
       const isElec =
+        info.originType === 'mp_meli' ||
         info.mpChannel === 'mp_point' ||
         info.mpChannel === 'mp_qr' ||
+        info.mpChannel === 'mp_meli' ||
+        info.mpChannel === 'mp_transfer' ||
         info.paymentMethod === 'transferencia' ||
-        info.paymentMethod === 'tarjeta';
+        info.paymentMethod === 'tarjeta' ||
+        supLower.includes('mercado libre') ||
+        supLower.includes('mercadolibre') ||
+        supLower.includes('point smart');
       if (!isElec) return;
       const mirrored = isMirroredIncomePurchase(info);
-      if (mirrored) {
+      const isAutoSyncedPurchase =
+        mirrored || info.originType === 'mp_sync' || info.originType === 'mp_meli';
+      if (isAutoSyncedPurchase) {
         const normExt = normalizeMpRef(info.mpExternalReference);
         if (
           (info.originRecordId && seenOriginRecordIds.has(info.originRecordId)) ||
@@ -962,20 +1217,34 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
       }
       if (!inCurrent(p.createdAt)) return;
       const ch: ElectronicChannelType =
-        info.mpChannel === 'mp_point'
-          ? 'mp_point'
-          : info.mpChannel === 'mp_qr'
-            ? 'mp_qr'
-            : info.paymentMethod === 'tarjeta'
-              ? 'tarjeta'
-              : 'transferencia';
+        info.mpChannel === 'mp_meli' ||
+        info.originType === 'mp_meli' ||
+        supLower.includes('mercado libre') ||
+        supLower.includes('mercadolibre') ||
+        ptLower.includes('mercado libre')
+          ? 'mp_meli'
+          : info.mpChannel === 'mp_point' ||
+              ptLower.includes('point') ||
+              supLower.includes('point smart')
+            ? 'mp_point'
+            : info.mpChannel === 'mp_qr'
+              ? 'mp_qr'
+              : info.paymentMethod === 'tarjeta'
+                ? 'tarjeta'
+                : 'transferencia';
       const pointName =
         info.mpPointName ||
-        (ch === 'mp_point' || ch === 'mp_qr' ? defaultMpPointName : '');
+        (ch === 'mp_meli'
+          ? 'Mercado Libre'
+          : ch === 'mp_point' || ch === 'mp_qr'
+            ? defaultMpPointName
+            : '');
       electronicHistory.push({
         id: `pur_${p.id}`,
         createdAt: p.createdAt,
-        dateLabel: formatDateShort(p.dueDate),
+        dateLabel: formatDateShort(p.dueDate || new Date(p.createdAt).toISOString().slice(0, 10)),
+        timeLabel: formatTimeShort(p.createdAt, locale),
+        fullDateTimeLabel: formatDateTimeFull(p.createdAt, locale),
         originLabel: PURCHASE_ORIGIN_LABELS[info.originType],
         counterparty: p.supplierName || 'Cuenta',
         concept: info.note || p.invoice || 'Operación',
@@ -983,6 +1252,13 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
         channelLabel: ELECTRONIC_CHANNEL_LABELS[ch],
         mpPointName: pointName,
         reference: info.mpExternalReference || p.invoice || '—',
+        mpPaymentId: info.mpPaymentId,
+        mpOrderId: info.mpOrderId,
+        statusLabel: mirrored
+          ? 'Sincronizado en Compras'
+          : ch === 'mp_meli'
+            ? 'Compra Mercado Libre'
+            : 'Compra pagada',
         amount: Number(p.amount || 0),
         isOutflow: !mirrored,
       });
@@ -1034,6 +1310,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
     range,
     repairs,
     effectiveSales,
+    recoveredEntries,
     unreconciledRecovered,
     windowBounds,
     locale,
@@ -1108,10 +1385,21 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
     );
   };
 
+  const availablePointNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const item of report.electronicHistory) {
+      if (item.mpPointName) names.add(item.mpPointName);
+    }
+    return Array.from(names).sort((a, b) => a.localeCompare(b, 'es'));
+  }, [report.electronicHistory]);
+
   const filteredElectronicHistory = useMemo(() => {
     const q = electronicQuery.trim().toLowerCase();
-    return report.electronicHistory.filter((item) => {
+    const list = report.electronicHistory.filter((item) => {
       if (electronicFilter !== 'all' && item.channel !== electronicFilter) return false;
+      if (electronicPointFilter !== 'all' && item.mpPointName !== electronicPointFilter) {
+        return false;
+      }
       if (q) {
         const hay = [
           item.counterparty,
@@ -1120,6 +1408,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           item.channelLabel,
           item.mpPointName,
           item.reference,
+          item.mpPaymentId || '',
+          item.mpOrderId || '',
+          item.statusLabel,
         ]
           .join(' ')
           .toLowerCase();
@@ -1127,50 +1418,139 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
       }
       return true;
     });
-  }, [report.electronicHistory, electronicFilter, electronicQuery]);
+    return electronicSortOrder === 'asc' ? [...list].reverse() : list;
+  }, [
+    report.electronicHistory,
+    electronicFilter,
+    electronicPointFilter,
+    electronicQuery,
+    electronicSortOrder,
+  ]);
 
-  const electronicChannelTotals = useMemo(() => {
-    const totals: Record<ElectronicChannelType, number> = {
-      mp_point: 0,
-      mp_qr: 0,
-      transferencia: 0,
-      tarjeta: 0,
+  const visibleElectronicHistory = useMemo(
+    () =>
+      showAllElectronic
+        ? filteredElectronicHistory
+        : filteredElectronicHistory.slice(0, 40),
+    [filteredElectronicHistory, showAllElectronic]
+  );
+
+  const {
+    electronicChannelTotals,
+    electronicVolumeTotal,
+    electronicInflowTotal,
+    electronicOutflowTotal,
+  } = useMemo(() => {
+    const totals: Record<ElectronicChannelType, { amount: number; count: number }> = {
+      mp_point: { amount: 0, count: 0 },
+      mp_meli: { amount: 0, count: 0 },
+      mp_qr: { amount: 0, count: 0 },
+      transferencia: { amount: 0, count: 0 },
+      tarjeta: { amount: 0, count: 0 },
     };
+    let volTotal = 0;
+    let inTotal = 0;
+    let outTotal = 0;
     for (const item of report.electronicHistory) {
-      totals[item.channel] += item.amount;
+      totals[item.channel].amount += item.amount;
+      totals[item.channel].count += 1;
+      volTotal += item.amount;
+      if (item.isOutflow) outTotal += item.amount;
+      else inTotal += item.amount;
     }
-    return totals;
+    return {
+      electronicChannelTotals: totals,
+      electronicVolumeTotal: volTotal,
+      electronicInflowTotal: inTotal,
+      electronicOutflowTotal: outTotal,
+    };
   }, [report.electronicHistory]);
+
+  const handleSyncElectronicHistoryMp = async () => {
+    const token = mergedMpConfig?.accessToken || '';
+    if (!ownerId || !token || syncingMpHistory) {
+      if (!token) {
+        notify('Configurá tu Access Token de Mercado Pago para actualizar cobros y compras en vivo.', 'info');
+      }
+      return;
+    }
+    setSyncingMpHistory(true);
+    try {
+      const minBoundMs = Date.now() - 89 * 24 * 60 * 60 * 1000;
+      const sinceMs =
+        windowBounds.startMs > 0
+          ? Math.max(minBoundMs, windowBounds.startMs - 5 * 60 * 1000)
+          : Date.now() - 30 * 24 * 60 * 60 * 1000;
+      const res = await fetchRecentMercadoPagoPayments({
+        accessToken: token,
+        sinceIso: new Date(sinceMs).toISOString(),
+      });
+      if (!res.ok) {
+        notify(res.error || 'No se pudieron consultar los movimientos en Mercado Pago.', 'error');
+        return;
+      }
+      const list = res.payments || [];
+      const updatedLedger = mergeSyncedMpPayments(ownerId, list);
+      const syncResult = await syncAllElectronicPaymentsToPurchases({
+        ownerId,
+        sales,
+        repairs,
+        purchases,
+        recoveredEntries: updatedLedger,
+        mpPayments: list,
+        mpConfig: mergedMpConfig,
+        respectDismissed: true,
+      });
+      const movedToPurchases = syncResult.created + syncResult.updated;
+      notify(
+        list.length > 0
+          ? movedToPurchases > 0
+            ? `Sincronizadas ${list.length} transacciones MP/ML (${movedToPurchases} pasadas a Compras).`
+            : `Sincronizadas ${list.length} transacciones desde Mercado Pago y Mercado Libre.`
+          : 'No se encontraron transacciones nuevas en Mercado Pago para este período.'
+      );
+    } catch {
+      notify('Error de conexión al consultar Mercado Pago.', 'error');
+    } finally {
+      setSyncingMpHistory(false);
+    }
+  };
 
   const handleExportElectronicCsv = () => {
     if (filteredElectronicHistory.length === 0) {
-      notify('No hay movimientos electrónicos para exportar con el filtro actual.', 'error');
+      notify('No hay transacciones procesadas para exportar con el filtro actual.', 'error');
       return;
     }
     const headers = [
-      'Fecha',
+      'Fecha y hora',
       'Origen',
-      'Cliente / Proveedor',
+      'Cliente / Cuenta',
       'Canal / Medio',
-      'Nombre Point Mercado Pago',
+      'Punto de cobro Mercado Pago',
       'Comprobante / Ref.',
+      'ID Pago MP',
+      'ID Orden MP',
       'Detalle',
+      'Estado',
       'Tipo',
       'Monto',
     ];
     const rows = filteredElectronicHistory.map((item) => [
-      item.dateLabel,
+      item.fullDateTimeLabel,
       item.originLabel,
       item.counterparty,
       item.channelLabel,
       item.mpPointName || '—',
       item.reference,
+      item.mpPaymentId || '—',
+      item.mpOrderId || '—',
       item.concept,
-      item.isOutflow ? 'Compra / Gasto' : 'Cobro',
+      item.statusLabel,
+      item.isOutflow ? 'Egreso / Compra' : 'Cobro',
       item.amount,
     ]);
-    downloadCsvFile(`historial-transferencias-point-qr-${todayISO()}.csv`, headers, rows);
-    notify(`Exportados ${filteredElectronicHistory.length} pagos electrónicos a CSV.`);
+    downloadCsvFile(`historial-transacciones-mp-${todayISO()}.csv`, headers, rows);
+    notify(`Exportadas ${filteredElectronicHistory.length} transacciones a CSV.`);
   };
 
   const maxClientTotal = Math.max(1, ...report.topClients.map((c) => c.total));
@@ -1940,115 +2320,209 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
         </section>
       </div>
 
-      {/* Block 4B: Historial de Transferencias, Tarjeta y QR pagados */}
+      {/* Block 4B: Historial cronológico de transacciones procesadas */}
       <section
-        aria-label="Historial de Transferencias, Tarjeta y QR pagados"
+        aria-label="Historial cronológico de transacciones procesadas"
         className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"
       >
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800">
           <div>
-            <h2 className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white font-display">
-              <QrCode className="h-4 w-4 text-[#0072BB] dark:text-sky-400" />
-              <span>Historial de Transferencias, Tarjeta y QR pagados</span>
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white font-display">
+              Historial cronológico de transacciones procesadas
             </h2>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              Cobros y compras pagadas con detalle del nombre del Point Mercado Pago ·{' '}
+              Cobros y compras de Point Smart, Mercado Libre, QR, Transferencia y Tarjeta con conteo por medio
+              {' · '}
               <span className="font-mono-num font-semibold text-slate-700 dark:text-slate-300">
-                {filteredElectronicHistory.length} registros
+                {filteredElectronicHistory.length}{' '}
+                {filteredElectronicHistory.length === 1 ? 'operación' : 'operaciones'}
               </span>
+              {(electronicInflowTotal > 0 || electronicOutflowTotal > 0) && (
+                <>
+                  {' · '}
+                  <span className="font-mono-num font-semibold text-emerald-700 dark:text-emerald-400">
+                    +{formatCompactCurrency(electronicInflowTotal)} cobros
+                  </span>
+                  {electronicOutflowTotal > 0 && (
+                    <>
+                      {' · '}
+                      <span className="font-mono-num font-semibold text-rose-600 dark:text-rose-400">
+                        -{formatCompactCurrency(electronicOutflowTotal)} compras
+                      </span>
+                    </>
+                  )}
+                </>
+              )}
             </p>
           </div>
-          <button
-            type="button"
-            disabled={filteredElectronicHistory.length === 0}
-            onClick={handleExportElectronicCsv}
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-          >
-            <Download className="h-3.5 w-3.5" />
-            Exportar CSV
-          </button>
-        </div>
-
-        {/* Channel subtotals */}
-        <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-          <div className="rounded-xl border border-violet-200/80 bg-violet-50/40 p-3 dark:border-violet-900/50 dark:bg-violet-950/20">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-violet-800 dark:text-violet-300">
-              <Smartphone className="h-3.5 w-3.5" />
-              <span>Point Mercado Pago</span>
-            </div>
-            <div className="mt-1 font-mono-num text-sm font-bold text-slate-900 dark:text-white">
-              {formatCurrency(electronicChannelTotals.mp_point)}
-            </div>
-          </div>
-          <div className="rounded-xl border border-sky-200/80 bg-sky-50/40 p-3 dark:border-sky-900/50 dark:bg-sky-950/20">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-sky-800 dark:text-sky-300">
-              <QrCode className="h-3.5 w-3.5" />
-              <span>QR Mercado Pago</span>
-            </div>
-            <div className="mt-1 font-mono-num text-sm font-bold text-slate-900 dark:text-white">
-              {formatCurrency(electronicChannelTotals.mp_qr)}
-            </div>
-          </div>
-          <div className="rounded-xl border border-cyan-200/80 bg-cyan-50/40 p-3 dark:border-cyan-900/50 dark:bg-cyan-950/20">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-cyan-800 dark:text-cyan-300">
-              <Wallet className="h-3.5 w-3.5" />
-              <span>Transferencias</span>
-            </div>
-            <div className="mt-1 font-mono-num text-sm font-bold text-slate-900 dark:text-white">
-              {formatCurrency(electronicChannelTotals.transferencia)}
-            </div>
-          </div>
-          <div className="rounded-xl border border-indigo-200/80 bg-indigo-50/40 p-3 dark:border-indigo-900/50 dark:bg-indigo-950/20">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-800 dark:text-indigo-300">
-              <CreditCard className="h-3.5 w-3.5" />
-              <span>Tarjeta</span>
-            </div>
-            <div className="mt-1 font-mono-num text-sm font-bold text-slate-900 dark:text-white">
-              {formatCurrency(electronicChannelTotals.tarjeta)}
-            </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {mergedMpConfig?.accessToken && (
+              <button
+                type="button"
+                disabled={syncingMpHistory}
+                onClick={() => void handleSyncElectronicHistoryMp()}
+                className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition hover:border-[#0072BB] hover:text-[#0072BB] disabled:opacity-50 whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${syncingMpHistory ? 'animate-spin' : ''}`} />
+                <span>{syncingMpHistory ? 'Actualizando...' : 'Actualizar MP / ML'}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() =>
+                setElectronicSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'))
+              }
+              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition hover:border-[#0072BB] hover:text-[#0072BB] whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            >
+              <ArrowUpDown className="h-3.5 w-3.5" />
+              <span>{electronicSortOrder === 'desc' ? 'Recientes primero' : 'Cronológico ↑'}</span>
+            </button>
+            <button
+              type="button"
+              disabled={filteredElectronicHistory.length === 0}
+              onClick={handleExportElectronicCsv}
+              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition hover:border-[#0072BB] hover:text-[#0072BB] disabled:opacity-50 whitespace-nowrap shrink-0 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span>Exportar CSV</span>
+            </button>
           </div>
         </div>
 
-        {/* Channel Filter + Search */}
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <div className="flex flex-wrap items-center gap-1">
-            {(
-              [
-                { id: 'all', label: 'Todos' },
-                { id: 'mp_point', label: 'Point MP' },
-                { id: 'mp_qr', label: 'QR MP' },
-                { id: 'transferencia', label: 'Transferencia' },
-                { id: 'tarjeta', label: 'Tarjeta' },
-              ] as const
-            ).map((tab) => (
+        {/* Color-coded proportional distribution bar + interactive channel conteo */}
+        <div className="border-b border-slate-100 py-3.5 dark:border-slate-800">
+          {electronicVolumeTotal > 0 && (
+            <div
+              className="mb-3 flex h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"
+              aria-label="Distribución proporcional por canal electrónico"
+            >
+              {ELECTRONIC_CHANNEL_META.map((ch) => {
+                const stat = electronicChannelTotals[ch.id];
+                if (stat.amount <= 0) return null;
+                const pct = Math.max(2, Math.round((stat.amount / electronicVolumeTotal) * 100));
+                return (
+                  <button
+                    key={ch.id}
+                    type="button"
+                    title={`${ch.label}: ${stat.count} op. · ${formatCurrency(stat.amount)}`}
+                    onClick={() =>
+                      setElectronicFilter((prev) => (prev === ch.id ? 'all' : ch.id))
+                    }
+                    style={{ width: `${pct}%` }}
+                    className={`h-full transition-opacity ${ch.swatchClass} ${
+                      electronicFilter !== 'all' && electronicFilter !== ch.id
+                        ? 'opacity-30'
+                        : 'opacity-100'
+                    }`}
+                  />
+                );
+              })}
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+            {ELECTRONIC_CHANNEL_META.map((ch) => {
+              const stat = electronicChannelTotals[ch.id];
+              const isSelected = electronicFilter === ch.id;
+              return (
+                <button
+                  key={ch.id}
+                  type="button"
+                  onClick={() =>
+                    setElectronicFilter((prev) => (prev === ch.id ? 'all' : ch.id))
+                  }
+                  className={`rounded-xl border px-3 py-2.5 text-left transition ${
+                    isSelected
+                      ? ch.activeTileClass
+                      : 'border-slate-200/80 bg-slate-50/50 hover:border-slate-300 hover:bg-white dark:border-slate-800 dark:bg-slate-800/35 dark:hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="inline-flex min-w-0 items-center gap-1.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      <span
+                        className={`h-2 w-2 shrink-0 rounded-[2px] ${ch.swatchClass}`}
+                        aria-hidden="true"
+                      />
+                      <span className="truncate">{ch.label}</span>
+                    </span>
+                    <span className={`font-mono-num text-[11px] font-bold ${ch.textClass}`}>
+                      {stat.count}
+                    </span>
+                  </div>
+                  <div className="mt-1 font-mono-num text-sm font-bold text-slate-900 dark:text-white">
+                    {formatCurrency(stat.amount)}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Channel Filter + Point Selector + Search */}
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1 rounded-xl bg-slate-100/90 p-1 dark:bg-slate-800/80">
+            <button
+              type="button"
+              onClick={() => setElectronicFilter('all')}
+              className={`h-8 rounded-lg px-2.5 text-xs font-semibold transition whitespace-nowrap shrink-0 ${
+                electronicFilter === 'all'
+                  ? 'bg-white text-slate-900 shadow-2xs dark:bg-slate-900 dark:text-white'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
+              }`}
+            >
+              Todos
+            </button>
+            {ELECTRONIC_CHANNEL_META.map((tab) => (
               <button
                 key={tab.id}
                 type="button"
                 onClick={() => setElectronicFilter(tab.id)}
-                className={`h-8 rounded-lg px-2.5 text-xs font-semibold transition whitespace-nowrap shrink-0 ${
+                className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold transition whitespace-nowrap shrink-0 ${
                   electronicFilter === tab.id
-                    ? 'bg-[#0072BB] text-white'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
+                    ? 'bg-white text-slate-900 shadow-2xs dark:bg-slate-900 dark:text-white'
+                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
                 }`}
               >
-                {tab.label}
+                <span
+                  className={`h-2 w-2 shrink-0 rounded-[2px] ${tab.swatchClass}`}
+                  aria-hidden="true"
+                />
+                <span>{tab.shortLabel}</span>
               </button>
             ))}
           </div>
-          <div className="relative min-w-[200px] flex-1">
+
+          {availablePointNames.length > 0 && (
+            <select
+              value={electronicPointFilter}
+              onChange={(e) => setElectronicPointFilter(e.target.value)}
+              aria-label="Filtrar por punto de cobro Mercado Pago"
+              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-[#0072BB] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            >
+              <option value="all">Todos los Points / Cuentas ({availablePointNames.length})</option>
+              {availablePointNames.map((point) => (
+                <option key={point} value={point}>
+                  {point}
+                </option>
+              ))}
+            </select>
+          )}
+
+          <div className="relative min-w-[220px] flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               value={electronicQuery}
               onChange={(e) => setElectronicQuery(e.target.value)}
-              placeholder="Buscar cliente, comprobante o nombre del Point MP..."
-              className="h-8 w-full rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-7 text-xs text-slate-900 outline-none focus:border-[#0072BB] focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              placeholder="Buscar cliente, Mercado Libre, comprobante, ID MP o Point Smart..."
+              className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-8 pr-8 text-xs text-slate-900 outline-none focus:border-[#0072BB] focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
             {electronicQuery && (
               <button
                 type="button"
                 onClick={() => setElectronicQuery('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                aria-label="Limpiar búsqueda"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -2056,127 +2530,297 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           </div>
         </div>
 
-        {filteredElectronicHistory.length === 0 ? (
-          <p className="mt-4 rounded-xl bg-slate-50 px-4 py-6 text-center text-xs text-slate-500 dark:bg-slate-800/40 dark:text-slate-400">
-            No hay transferencias, pagos con tarjeta, Point MP ni QR en este período o filtro.
-          </p>
+        {syncingMpHistory ? (
+          <div className="mt-4 divide-y divide-slate-100 dark:divide-slate-800" aria-busy="true">
+            {[0, 1, 2, 3].map((idx) => (
+              <div key={idx} className="grid grid-cols-6 gap-3 py-3">
+                <div className="h-4 rounded bg-slate-100 dark:bg-slate-800" />
+                <div className="h-4 rounded bg-slate-100 dark:bg-slate-800" />
+                <div className="col-span-2 h-4 rounded bg-slate-100 dark:bg-slate-800" />
+                <div className="h-4 rounded bg-slate-100 dark:bg-slate-800" />
+                <div className="h-4 rounded bg-slate-100 dark:bg-slate-800" />
+              </div>
+            ))}
+          </div>
+        ) : filteredElectronicHistory.length === 0 ? (
+          <div className="mt-4 border-t border-slate-100 py-8 text-center dark:border-slate-800">
+            <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
+              No hay transacciones procesadas que coincidan con el período o filtro actual.
+            </p>
+            <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+              Las operaciones de Point Smart, Mercado Libre, QR, Transferencia y Tarjeta aparecerán acá en orden cronológico.
+            </p>
+            {(electronicFilter !== 'all' || electronicPointFilter !== 'all' || electronicQuery) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setElectronicFilter('all');
+                  setElectronicPointFilter('all');
+                  setElectronicQuery('');
+                }}
+                className="mt-3 inline-flex h-9 items-center rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] dark:border-slate-700 dark:text-slate-200"
+              >
+                Restablecer filtros
+              </button>
+            )}
+          </div>
         ) : (
           <>
-            {/* Desktop table */}
+            {/* Desktop chronological ledger table */}
             <div className="mt-3 hidden overflow-x-auto md:block">
               <table className="w-full text-left text-xs">
                 <thead>
-                  <tr className="border-b border-slate-100 text-[11px] uppercase tracking-wider text-slate-400 dark:border-slate-800">
-                    <th className="py-2 pr-3 font-semibold">Fecha</th>
-                    <th className="py-2 pr-3 font-semibold">Origen</th>
-                    <th className="py-2 pr-3 font-semibold">Cliente / Cuenta</th>
-                    <th className="py-2 pr-3 font-semibold">Medio / Canal</th>
-                    <th className="py-2 pr-3 font-semibold">Nombre Point MP</th>
-                    <th className="py-2 pr-3 font-semibold">Ref.</th>
-                    <th className="py-2 text-right font-semibold">Monto</th>
+                  <tr className="border-b border-slate-200 text-[11px] font-semibold text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                    <th className="w-6 py-2.5 pr-2" aria-label="Detalle" />
+                    <th className="py-2.5 pr-3">Fecha y hora</th>
+                    <th className="py-2.5 pr-3">Cuenta / Concepto</th>
+                    <th className="py-2.5 pr-3">Medio procesado</th>
+                    <th className="py-2.5 pr-3">Point Smart / Cuenta MP</th>
+                    <th className="py-2.5 pr-3">Comprobante / Ref.</th>
+                    <th className="py-2.5 text-right">Monto</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {filteredElectronicHistory.slice(0, 60).map((item) => (
-                    <tr key={item.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
-                      <td className="py-2.5 pr-3 font-mono-num text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                        {item.dateLabel}
-                      </td>
-                      <td className="py-2.5 pr-3 whitespace-nowrap">
-                        <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                          {item.originLabel}
-                        </span>
-                      </td>
-                      <td className="py-2.5 pr-3">
-                        <div className="font-semibold text-slate-900 dark:text-white">
-                          {item.counterparty}
-                        </div>
-                        <div className="max-w-[260px] truncate text-[11px] text-slate-500 dark:text-slate-400">
-                          {item.concept}
-                        </div>
-                      </td>
-                      <td className="py-2.5 pr-3 whitespace-nowrap">
-                        <span
-                          className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
-                            item.channel === 'mp_point'
-                              ? 'bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300'
-                              : item.channel === 'mp_qr'
-                                ? 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300'
-                                : item.channel === 'tarjeta'
-                                  ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300'
-                                  : 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950/60 dark:text-cyan-300'
-                          }`}
+                  {visibleElectronicHistory.map((item) => {
+                    const isExpanded = selectedHistoryId === item.id;
+                    const chMeta = ELECTRONIC_CHANNEL_META_MAP[item.channel];
+                    return (
+                      <React.Fragment key={item.id}>
+                        <tr
+                          onClick={() =>
+                            setSelectedHistoryId((prev) => (prev === item.id ? null : item.id))
+                          }
+                          className="cursor-pointer transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40"
                         >
-                          {item.channelLabel}
-                        </span>
-                      </td>
-                      <td className="py-2.5 pr-3">
-                        {item.mpPointName ? (
-                          <span className="inline-flex items-center rounded-md bg-violet-50 px-2 py-0.5 text-[11px] font-bold text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">
-                            {item.mpPointName}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">—</span>
+                          <td className="py-2.5 pr-2 text-slate-400">
+                            <ChevronRight
+                              className={`h-3.5 w-3.5 transition-transform duration-150 ${
+                                isExpanded ? 'rotate-90 text-[#0072BB] dark:text-sky-400' : ''
+                              }`}
+                            />
+                          </td>
+                          <td className="py-2.5 pr-3 font-mono-num whitespace-nowrap">
+                            <div className="font-semibold text-slate-800 dark:text-slate-200">
+                              {item.dateLabel}
+                            </div>
+                            <div className="text-[11px] text-slate-400 dark:text-slate-500">
+                              {item.timeLabel} · {item.originLabel}
+                            </div>
+                          </td>
+                          <td className="py-2.5 pr-3">
+                            <div className="font-semibold text-slate-900 dark:text-white">
+                              {item.counterparty}
+                            </div>
+                            <div className="max-w-[260px] truncate text-[11px] text-slate-500 dark:text-slate-400">
+                              {item.concept}
+                            </div>
+                          </td>
+                          <td className="py-2.5 pr-3 whitespace-nowrap">
+                            <span className={`inline-flex items-center gap-1.5 font-semibold ${chMeta.textClass}`}>
+                              <span
+                                className={`h-2 w-2 shrink-0 rounded-[2px] ${chMeta.swatchClass}`}
+                                aria-hidden="true"
+                              />
+                              <span>{item.channelLabel}</span>
+                            </span>
+                            <div className="text-[11px] text-slate-400 dark:text-slate-500">
+                              {item.statusLabel}
+                            </div>
+                          </td>
+                          <td className="py-2.5 pr-3">
+                            {item.mpPointName ? (
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">
+                                {item.mpPointName}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 dark:text-slate-500">
+                                {item.channel === 'mp_meli'
+                                  ? 'Mercado Libre'
+                                  : 'Transferencia directa'}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 pr-3 font-mono-num text-[11px] text-slate-500 dark:text-slate-400">
+                            <div>{item.reference}</div>
+                            {item.mpPaymentId && (
+                              <div className="text-[10px] text-slate-400 dark:text-slate-500">
+                                Pago #{item.mpPaymentId}
+                              </div>
+                            )}
+                          </td>
+                          <td
+                            className={`py-2.5 text-right font-mono-num whitespace-nowrap ${
+                              item.isOutflow
+                                ? 'text-rose-600 dark:text-rose-400'
+                                : 'text-emerald-700 dark:text-emerald-400'
+                            }`}
+                          >
+                            <div className="font-bold">
+                              {item.isOutflow ? '-' : '+'}
+                              {formatCurrency(item.amount)}
+                            </div>
+                            <div className="text-[10px] font-medium opacity-80">
+                              {item.isOutflow ? 'Compra / Egreso' : 'Cobro'}
+                            </div>
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr className="bg-slate-50/70 dark:bg-slate-800/30">
+                            <td colSpan={7} className="px-8 py-3">
+                              <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-[11px] sm:grid-cols-4">
+                                <div>
+                                  <div className="text-slate-400 dark:text-slate-500">
+                                    Fecha y hora exacta
+                                  </div>
+                                  <div className="mt-0.5 font-mono-num font-semibold text-slate-800 dark:text-slate-200">
+                                    {item.fullDateTimeLabel}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-slate-400 dark:text-slate-500">
+                                    Point Smart / Cuenta MP
+                                  </div>
+                                  <div className="mt-0.5 font-semibold text-slate-800 dark:text-slate-200">
+                                    {item.mpPointName || 'Sin Point vinculado'}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-slate-400 dark:text-slate-500">
+                                    ID Pago / Orden MP
+                                  </div>
+                                  <div className="mt-0.5 font-mono-num font-semibold text-slate-800 dark:text-slate-200">
+                                    {item.mpPaymentId || item.mpOrderId
+                                      ? [
+                                          item.mpPaymentId ? `Pago ${item.mpPaymentId}` : '',
+                                          item.mpOrderId ? `Orden ${item.mpOrderId}` : '',
+                                        ]
+                                          .filter(Boolean)
+                                          .join(' · ')
+                                      : 'Operación local'}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-slate-400 dark:text-slate-500">
+                                    Estado y origen
+                                  </div>
+                                  <div className="mt-0.5 font-semibold text-slate-800 dark:text-slate-200">
+                                    {item.statusLabel} · {item.originLabel}
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
                         )}
-                      </td>
-                      <td className="py-2.5 pr-3 font-mono-num text-[11px] text-slate-500 dark:text-slate-400">
-                        {item.reference}
-                      </td>
-                      <td
-                        className={`py-2.5 text-right font-mono-num font-bold whitespace-nowrap ${
-                          item.isOutflow
-                            ? 'text-rose-600 dark:text-rose-400'
-                            : 'text-emerald-700 dark:text-emerald-400'
-                        }`}
-                      >
-                        {item.isOutflow ? '-' : ''}
-                        {formatCurrency(item.amount)}
-                      </td>
-                    </tr>
-                  ))}
+                      </React.Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
-            {/* Mobile list */}
+            {/* Mobile chronological list */}
             <div className="mt-3 divide-y divide-slate-100 md:hidden dark:divide-slate-800">
-              {filteredElectronicHistory.slice(0, 60).map((item) => (
-                <div key={item.id} className="space-y-1 py-2.5 text-xs">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold text-slate-900 dark:text-white">
-                      {item.counterparty}
-                    </span>
-                    <span
-                      className={`font-mono-num font-bold ${
-                        item.isOutflow
-                          ? 'text-rose-600 dark:text-rose-400'
-                          : 'text-emerald-700 dark:text-emerald-400'
-                      }`}
+              {visibleElectronicHistory.map((item) => {
+                const isExpanded = selectedHistoryId === item.id;
+                const chMeta = ELECTRONIC_CHANNEL_META_MAP[item.channel];
+                return (
+                  <div key={item.id} className="py-3 text-xs">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSelectedHistoryId((prev) => (prev === item.id ? null : item.id))
+                      }
+                      className="w-full space-y-1 text-left"
                     >
-                      {item.isOutflow ? '-' : ''}
-                      {formatCurrency(item.amount)}
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
-                    <span className="font-mono-num">{item.dateLabel}</span>
-                    <span>·</span>
-                    <span className="font-semibold text-slate-700 dark:text-slate-300">
-                      {item.channelLabel}
-                    </span>
-                    {item.mpPointName && (
-                      <span className="rounded bg-violet-50 px-1.5 py-0.5 font-bold text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">
-                        Point: {item.mpPointName}
-                      </span>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-slate-900 dark:text-white">
+                          {item.counterparty}
+                        </span>
+                        <span
+                          className={`font-mono-num font-bold ${
+                            item.isOutflow
+                              ? 'text-rose-600 dark:text-rose-400'
+                              : 'text-emerald-700 dark:text-emerald-400'
+                          }`}
+                        >
+                          {item.isOutflow ? '-' : '+'}
+                          {formatCurrency(item.amount)}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                        <span className="font-mono-num">
+                          {item.dateLabel} {item.timeLabel}
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <span className={`inline-flex items-center gap-1 font-semibold ${chMeta.textClass}`}>
+                          <span
+                            className={`h-1.5 w-1.5 shrink-0 rounded-[2px] ${chMeta.swatchClass}`}
+                            aria-hidden="true"
+                          />
+                          <span>{item.channelLabel}</span>
+                        </span>
+                        {item.mpPointName && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="font-semibold text-slate-700 dark:text-slate-300">
+                              {item.mpPointName}
+                            </span>
+                          </>
+                        )}
+                        <span aria-hidden="true">·</span>
+                        <span>{item.isOutflow ? 'Compra / Egreso' : 'Cobro'}</span>
+                      </div>
+                      <div className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                        {item.concept} · {item.reference}
+                      </div>
+                    </button>
+                    {isExpanded && (
+                      <div className="mt-2 space-y-1 border-t border-slate-100 pt-2 text-[11px] text-slate-600 dark:border-slate-800 dark:text-slate-300">
+                        <div>
+                          Fecha exacta:{' '}
+                          <span className="font-mono-num font-semibold">{item.fullDateTimeLabel}</span>
+                        </div>
+                        <div>
+                          Point Smart / Cuenta MP:{' '}
+                          <span className="font-semibold">
+                            {item.mpPointName || 'Sin Point vinculado'}
+                          </span>
+                        </div>
+                        {(item.mpPaymentId || item.mpOrderId) && (
+                          <div className="font-mono-num">
+                            MP:{' '}
+                            {[
+                              item.mpPaymentId ? `Pago ${item.mpPaymentId}` : '',
+                              item.mpOrderId ? `Orden ${item.mpOrderId}` : '',
+                            ]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </div>
+                        )}
+                        <div>Estado: {item.statusLabel}</div>
+                      </div>
                     )}
-                    <span>·</span>
-                    <span>{item.originLabel}</span>
                   </div>
-                  <div className="truncate text-[11px] text-slate-500 dark:text-slate-400">
-                    {item.concept} ({item.reference})
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
+
+            {filteredElectronicHistory.length > 40 && (
+              <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs dark:border-slate-800">
+                <span className="font-mono-num text-slate-500 dark:text-slate-400">
+                  Mostrando {visibleElectronicHistory.length} de {filteredElectronicHistory.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowAllElectronic((prev) => !prev)}
+                  className="h-9 rounded-xl border border-slate-200 px-3 font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] dark:border-slate-700 dark:text-slate-200"
+                >
+                  {showAllElectronic
+                    ? 'Mostrar primeras 40'
+                    : `Ver todas (${filteredElectronicHistory.length})`}
+                </button>
+              </div>
+            )}
           </>
         )}
       </section>

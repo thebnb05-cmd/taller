@@ -7,7 +7,8 @@ const PUR_META_MARKER = '<!--TH3BNB_PUR:';
 const PUR_META_END = '-->';
 
 export type PurchaseCategory = 'repuestos' | 'gasto_fijo' | 'herramientas' | 'otro';
-export type PurchaseOriginType = 'manual' | 'venta' | 'reparacion' | 'mp_sync';
+export type PurchaseOriginType = 'manual' | 'venta' | 'reparacion' | 'mp_sync' | 'mp_meli';
+export type PurchaseMpChannel = 'mp_point' | 'mp_qr' | 'mp_meli' | 'mp_transfer';
 
 export const PURCHASE_CATEGORY_LABELS: Record<PurchaseCategory, string> = {
   repuestos: 'Repuestos / Stock',
@@ -21,6 +22,7 @@ export const PURCHASE_ORIGIN_LABELS: Record<PurchaseOriginType, string> = {
   venta: 'Venta / Mostrador',
   reparacion: 'Reparación',
   mp_sync: 'Mercado Pago',
+  mp_meli: 'Mercado Libre',
 };
 
 export interface PurchaseStockLine {
@@ -35,13 +37,14 @@ export interface PurchaseExtraMeta {
   note?: string;
   stockItems?: PurchaseStockLine[];
   paymentMethod?: PaymentMethod;
-  mpChannel?: 'mp_point' | 'mp_qr';
+  mpChannel?: PurchaseMpChannel;
   mpPointName?: string;
   mpOrderId?: string;
   mpPaymentId?: string;
   mpExternalReference?: string;
   originType?: PurchaseOriginType;
   originRecordId?: string;
+  isOutflow?: boolean;
 }
 
 export interface ParsedPurchaseInfo {
@@ -53,18 +56,20 @@ export interface ParsedPurchaseInfo {
   note: string;
   stockItems: PurchaseStockLine[];
   paymentMethod?: PaymentMethod;
-  mpChannel?: 'mp_point' | 'mp_qr';
+  mpChannel?: PurchaseMpChannel;
   mpPointName?: string;
   mpOrderId?: string;
   mpPaymentId?: string;
   mpExternalReference?: string;
   originType: PurchaseOriginType;
   originRecordId?: string;
+  isOutflow?: boolean;
 }
 
 export function isMirroredIncomePurchase(
-  info: Pick<ParsedPurchaseInfo, 'originType'>
+  info: Pick<ParsedPurchaseInfo, 'originType' | 'isOutflow'>
 ): boolean {
+  if (info.isOutflow) return false;
   return (
     info.originType === 'venta' ||
     info.originType === 'reparacion' ||
@@ -99,10 +104,28 @@ function sanitizeCategory(raw: unknown): PurchaseCategory {
 }
 
 function sanitizeOriginType(raw: unknown): PurchaseOriginType {
-  if (raw === 'venta' || raw === 'reparacion' || raw === 'mp_sync' || raw === 'manual') {
+  if (
+    raw === 'venta' ||
+    raw === 'reparacion' ||
+    raw === 'mp_sync' ||
+    raw === 'mp_meli' ||
+    raw === 'manual'
+  ) {
     return raw;
   }
   return 'manual';
+}
+
+function sanitizeMpChannel(raw: unknown): PurchaseMpChannel | undefined {
+  if (
+    raw === 'mp_point' ||
+    raw === 'mp_qr' ||
+    raw === 'mp_meli' ||
+    raw === 'mp_transfer'
+  ) {
+    return raw;
+  }
+  return undefined;
 }
 
 function sanitizePurchaseMethod(raw: unknown): PaymentMethod | undefined {
@@ -139,13 +162,14 @@ export function parsePurchaseInfo(purchase: Pick<PurchaseRecord, 'status'>): Par
   let note = '';
   let stockItems: PurchaseStockLine[] = [];
   let paymentMethod: PaymentMethod | undefined;
-  let mpChannel: 'mp_point' | 'mp_qr' | undefined;
+  let mpChannel: PurchaseMpChannel | undefined;
   let mpPointName: string | undefined;
   let mpOrderId: string | undefined;
   let mpPaymentId: string | undefined;
   let mpExternalReference: string | undefined;
   let originType: PurchaseOriginType = 'manual';
   let originRecordId: string | undefined;
+  let isOutflow = false;
 
   if (metaJson) {
     try {
@@ -153,9 +177,7 @@ export function parsePurchaseInfo(purchase: Pick<PurchaseRecord, 'status'>): Par
       category = sanitizeCategory(parsed.category);
       note = parsed.note ? sanitizeText(String(parsed.note), 400) : '';
       paymentMethod = sanitizePurchaseMethod(parsed.paymentMethod);
-      if (parsed.mpChannel === 'mp_point' || parsed.mpChannel === 'mp_qr') {
-        mpChannel = parsed.mpChannel;
-      }
+      mpChannel = sanitizeMpChannel(parsed.mpChannel);
       if (parsed.mpPointName) {
         mpPointName = sanitizePlainLine(String(parsed.mpPointName), 120) || undefined;
       }
@@ -172,6 +194,7 @@ export function parsePurchaseInfo(purchase: Pick<PurchaseRecord, 'status'>): Par
       if (parsed.originRecordId) {
         originRecordId = sanitizePlainLine(String(parsed.originRecordId), 120) || undefined;
       }
+      isOutflow = Boolean(parsed.isOutflow || originType === 'mp_meli' || originType === 'manual');
       if (Array.isArray(parsed.stockItems)) {
         stockItems = parsed.stockItems
           .slice(0, 40)
@@ -204,6 +227,7 @@ export function parsePurchaseInfo(purchase: Pick<PurchaseRecord, 'status'>): Par
     ...(mpExternalReference ? { mpExternalReference } : {}),
     originType,
     ...(originRecordId ? { originRecordId } : {}),
+    ...(isOutflow ? { isOutflow: true } : {}),
   };
 }
 
@@ -215,13 +239,14 @@ export function serializePurchaseStatus(params: {
   note?: string;
   stockItems?: PurchaseStockLine[];
   paymentMethod?: PaymentMethod;
-  mpChannel?: 'mp_point' | 'mp_qr';
+  mpChannel?: PurchaseMpChannel;
   mpPointName?: string;
   mpOrderId?: string;
   mpPaymentId?: string;
   mpExternalReference?: string;
   originType?: PurchaseOriginType;
   originRecordId?: string;
+  isOutflow?: boolean;
 }): string {
   const extras: string[] = [];
   if (params.currency && isValidCurrencyCode(params.currency)) {
@@ -245,10 +270,7 @@ export function serializePurchaseStatus(params: {
     }));
 
   const cleanMethod = sanitizePurchaseMethod(params.paymentMethod);
-  const cleanChannel =
-    params.mpChannel === 'mp_point' || params.mpChannel === 'mp_qr'
-      ? params.mpChannel
-      : undefined;
+  const cleanChannel = sanitizeMpChannel(params.mpChannel);
   const cleanPointName = params.mpPointName
     ? sanitizePlainLine(params.mpPointName, 120).replace(/-->/g, '')
     : '';
@@ -265,6 +287,7 @@ export function serializePurchaseStatus(params: {
   const cleanOriginRecordId = params.originRecordId
     ? sanitizePlainLine(params.originRecordId, 120).replace(/-->/g, '')
     : '';
+  const cleanOutflow = Boolean(params.isOutflow);
 
   if (
     cleanCategory === 'repuestos' &&
@@ -277,7 +300,8 @@ export function serializePurchaseStatus(params: {
     !cleanPaymentId &&
     !cleanExtRef &&
     cleanOrigin === 'manual' &&
-    !cleanOriginRecordId
+    !cleanOriginRecordId &&
+    !cleanOutflow
   ) {
     return head;
   }
@@ -294,6 +318,7 @@ export function serializePurchaseStatus(params: {
     ...(cleanExtRef ? { mpExternalReference: cleanExtRef } : {}),
     ...(cleanOrigin !== 'manual' ? { originType: cleanOrigin } : {}),
     ...(cleanOriginRecordId ? { originRecordId: cleanOriginRecordId } : {}),
+    ...(cleanOutflow ? { isOutflow: true } : {}),
   };
 
   return `${head}\n${PUR_META_MARKER}${JSON.stringify(meta)}${PUR_META_END}`;

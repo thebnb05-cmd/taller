@@ -316,7 +316,7 @@ export function computeShiftFinancials(params: {
 
   // 3. Unreconciled / recovered payments (failed save or MP Point/QR paid directly)
   for (const rec of recoveredPayments) {
-    if (rec.amount <= 0) continue;
+    if (rec.isOutflow || rec.amount <= 0) continue;
     const atMs = Number.isFinite(rec.createdAt) ? rec.createdAt : Date.parse(rec.at);
     if (Number.isNaN(atMs) || !inWindow(atMs)) continue;
 
@@ -326,8 +326,10 @@ export function computeShiftFinancials(params: {
     } else {
       salesTotal += rec.amount;
     }
-    if (rec.mpChannel === 'mp_point') mpPointTotal += rec.amount;
-    else if (rec.mpChannel === 'mp_qr') mpQrTotal += rec.amount;
+    const shiftMpChannel =
+      rec.mpChannel === 'mp_point' || rec.mpChannel === 'mp_qr' ? rec.mpChannel : undefined;
+    if (shiftMpChannel === 'mp_point') mpPointTotal += rec.amount;
+    else if (shiftMpChannel === 'mp_qr') mpQrTotal += rec.amount;
 
     const isForced = Boolean(rec.forceReconciled || rec.attemptStatus === 'force_reconciled');
     recoveredTotal += rec.amount;
@@ -344,7 +346,7 @@ export function computeShiftFinancials(params: {
       source: 'recuperado',
       direction: 'in',
       method: rec.method,
-      ...(rec.mpChannel ? { mpChannel: rec.mpChannel } : {}),
+      ...(shiftMpChannel ? { mpChannel: shiftMpChannel } : {}),
       amount: rec.amount,
       title: rec.clientName ? `${rec.clientName} · ${rec.title}` : rec.title,
       subtitle: isForced

@@ -74,6 +74,8 @@ export interface MpOrderStatusResponse {
   isFailed?: boolean;
 }
 
+export type MpExtendedChannel = 'mp_point' | 'mp_qr' | 'mp_meli' | 'mp_transfer' | 'tarjeta';
+
 export interface MpRecentPayment {
   paymentId: string;
   orderId: string;
@@ -81,8 +83,10 @@ export interface MpRecentPayment {
   amount: number;
   dateApproved: string;
   description: string;
-  mpChannel: 'mp_point' | 'mp_qr';
+  mpChannel: MpExtendedChannel;
   appMethod: 'tarjeta' | 'transferencia';
+  isOutflow?: boolean;
+  isMercadoLibre?: boolean;
   paymentMethodId: string;
   paymentTypeId: string;
   posId: string;

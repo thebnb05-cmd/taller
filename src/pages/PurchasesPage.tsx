@@ -1,14 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Banknote,
-  CreditCard,
   Download,
   Edit3,
   Plus,
-  QrCode,
   RefreshCw,
   Search,
-  Smartphone,
   Trash2,
   X,
 } from 'lucide-react';
@@ -36,8 +33,10 @@ import {
 } from '../utils/formatters';
 import {
   fetchRecentMercadoPagoPayments,
+  hydrateMercadoPagoConfig,
   loadMercadoPagoConfig,
   resolvePointDisplayName,
+  type MercadoPagoConfig,
   type MpRecentPayment,
 } from '../utils/mercadoPago';
 import {
@@ -46,7 +45,10 @@ import {
   syncAllElectronicPaymentsToPurchases,
 } from '../utils/mpPurchasesSync';
 import { PAYMENT_METHOD_LABELS, type PaymentMethod } from '../utils/payment';
-import { useRecoveredPayments } from '../utils/paymentLedger';
+import {
+  mergeSyncedMpPayments,
+  useRecoveredPayments,
+} from '../utils/paymentLedger';
 import {
   isMirroredIncomePurchase,
   parsePurchaseInfo,
@@ -74,49 +76,129 @@ interface PurchasesPageProps {
 type StatusFilter = 'all' | 'pendiente' | 'pagado';
 type CategoryFilter = 'all' | PurchaseCategory;
 type OriginFilter = 'all' | 'manual' | 'electronic';
+type PurchaseChannelKey =
+  | 'mp_point'
+  | 'mp_meli'
+  | 'mp_qr'
+  | 'transferencia'
+  | 'tarjeta'
+  | 'efectivo';
+type ChannelFilter = 'all' | PurchaseChannelKey;
 
-function getPurchaseChannelBadge(
+interface ChannelStyleMeta {
+  key: PurchaseChannelKey;
+  label: string;
+  shortLabel: string;
+  swatchClass: string;
+  textClass: string;
+  activeTileClass: string;
+}
+
+const CHANNEL_STYLE_LIST: ChannelStyleMeta[] = [
+  {
+    key: 'mp_point',
+    label: 'Point Smart / MP',
+    shortLabel: 'Point Smart',
+    swatchClass: 'bg-violet-500',
+    textClass: 'text-violet-700 dark:text-violet-300',
+    activeTileClass:
+      'border-violet-300 bg-violet-50/75 dark:border-violet-700/70 dark:bg-violet-950/35',
+  },
+  {
+    key: 'mp_meli',
+    label: 'Mercado Libre',
+    shortLabel: 'Mercado Libre',
+    swatchClass: 'bg-amber-500',
+    textClass: 'text-amber-700 dark:text-amber-300',
+    activeTileClass:
+      'border-amber-300 bg-amber-50/75 dark:border-amber-700/70 dark:bg-amber-950/35',
+  },
+  {
+    key: 'mp_qr',
+    label: 'QR Mercado Pago',
+    shortLabel: 'QR MP',
+    swatchClass: 'bg-sky-500',
+    textClass: 'text-[#0072BB] dark:text-sky-300',
+    activeTileClass:
+      'border-sky-300 bg-sky-50/75 dark:border-sky-700/70 dark:bg-sky-950/35',
+  },
+  {
+    key: 'transferencia',
+    label: 'Transferencia',
+    shortLabel: 'Transferencia',
+    swatchClass: 'bg-teal-500',
+    textClass: 'text-teal-700 dark:text-teal-300',
+    activeTileClass:
+      'border-teal-300 bg-teal-50/75 dark:border-teal-700/70 dark:bg-teal-950/35',
+  },
+  {
+    key: 'tarjeta',
+    label: 'Tarjeta',
+    shortLabel: 'Tarjeta',
+    swatchClass: 'bg-indigo-500',
+    textClass: 'text-indigo-700 dark:text-indigo-300',
+    activeTileClass:
+      'border-indigo-300 bg-indigo-50/75 dark:border-indigo-700/70 dark:bg-indigo-950/35',
+  },
+  {
+    key: 'efectivo',
+    label: 'Efectivo',
+    shortLabel: 'Efectivo',
+    swatchClass: 'bg-emerald-500',
+    textClass: 'text-emerald-700 dark:text-emerald-300',
+    activeTileClass:
+      'border-emerald-300 bg-emerald-50/75 dark:border-emerald-700/70 dark:bg-emerald-950/35',
+  },
+];
+
+const CHANNEL_STYLE_MAP: Record<PurchaseChannelKey, ChannelStyleMeta> =
+  CHANNEL_STYLE_LIST.reduce(
+    (acc, item) => {
+      acc[item.key] = item;
+      return acc;
+    },
+    {} as Record<PurchaseChannelKey, ChannelStyleMeta>
+  );
+
+function resolvePurchaseChannelKey(
+  purchase: Pick<PurchaseRecord, 'supplierName'>,
   info: ReturnType<typeof parsePurchaseInfo>
-): { label: string; className: string; kind: 'point' | 'qr' | 'transfer' | 'card' | 'cash' | null } {
-  if (info.mpChannel === 'mp_point') {
-    return {
-      label: 'Point MP',
-      kind: 'point',
-      className:
-        'bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300',
-    };
+): PurchaseChannelKey | null {
+  const supLower = (purchase.supplierName || '').toLowerCase();
+  const ptLower = (info.mpPointName || '').toLowerCase();
+  const noteLower = (info.note || '').toLowerCase();
+
+  if (
+    info.mpChannel === 'mp_meli' ||
+    info.originType === 'mp_meli' ||
+    supLower.includes('mercado libre') ||
+    supLower.includes('mercadolibre') ||
+    ptLower.includes('mercado libre')
+  ) {
+    return 'mp_meli';
+  }
+  if (
+    info.mpChannel === 'mp_point' ||
+    ptLower.includes('point') ||
+    supLower.includes('point smart')
+  ) {
+    return 'mp_point';
   }
   if (info.mpChannel === 'mp_qr') {
-    return {
-      label: 'QR Mercado Pago',
-      kind: 'qr',
-      className: 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300',
-    };
+    return 'mp_qr';
   }
-  if (info.paymentMethod === 'transferencia') {
-    return {
-      label: 'Transferencia',
-      kind: 'transfer',
-      className: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950/60 dark:text-cyan-300',
-    };
+  if (info.mpChannel === 'mp_transfer' || info.paymentMethod === 'transferencia') {
+    return 'transferencia';
   }
   if (info.paymentMethod === 'tarjeta') {
-    return {
-      label: 'Tarjeta',
-      kind: 'card',
-      className:
-        'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300',
-    };
+    return 'tarjeta';
   }
   if (info.paymentMethod === 'efectivo') {
-    return {
-      label: 'Efectivo',
-      kind: 'cash',
-      className:
-        'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300',
-    };
+    return 'efectivo';
   }
-  return { label: '', kind: null, className: '' };
+  if (noteLower.includes('point')) return 'mp_point';
+  if (noteLower.includes('qr')) return 'mp_qr';
+  return null;
 }
 
 export const PurchasesPage: React.FC<PurchasesPageProps> = ({
@@ -132,15 +214,42 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
 }) => {
   const { notify } = useToast();
   const { tr } = useI18n();
-  const baseCurrency = useMemo(() => parseWorkshopMeta(profile).currency, [profile]);
+  const workshopMeta = useMemo(() => parseWorkshopMeta(profile), [profile]);
+  const baseCurrency = workshopMeta.currency;
   const openShift = useMemo(() => findOpenCashShift(tasks), [tasks]);
   const recoveredEntries = useRecoveredPayments(ownerId);
-  const mpConfig = useMemo(
-    () => (ownerId ? loadMercadoPagoConfig(ownerId) : null),
-    [ownerId]
+
+  const [hydratedMpConfig, setHydratedMpConfig] = useState<MercadoPagoConfig | null>(() =>
+    ownerId ? loadMercadoPagoConfig(ownerId) : null
   );
+  useEffect(() => {
+    if (!ownerId) return;
+    let active = true;
+    void hydrateMercadoPagoConfig(ownerId).then((cfg) => {
+      if (active) setHydratedMpConfig(cfg);
+    });
+    return () => {
+      active = false;
+    };
+  }, [ownerId]);
+
+  const mpConfig = useMemo<Partial<MercadoPagoConfig> | null>(() => {
+    const profMp = workshopMeta.mercadoPago;
+    const token = hydratedMpConfig?.accessToken || profMp?.accessToken || '';
+    const posExternalId =
+      hydratedMpConfig?.posExternalId || profMp?.posExternalId || '';
+    const terminalId = hydratedMpConfig?.terminalId || profMp?.terminalId || '';
+    const pointName = hydratedMpConfig?.pointName || profMp?.pointName || '';
+    const sellerNickname =
+      hydratedMpConfig?.sellerNickname || profMp?.sellerNickname || '';
+    if (!token && !posExternalId && !terminalId && !pointName && !sellerNickname) {
+      return null;
+    }
+    return { accessToken: token, posExternalId, terminalId, pointName, sellerNickname };
+  }, [hydratedMpConfig, workshopMeta.mercadoPago]);
+
   const defaultPointName = useMemo(
-    () => resolvePointDisplayName(mpConfig),
+    () => (mpConfig ? resolvePointDisplayName(mpConfig) : 'Point Smart'),
     [mpConfig]
   );
 
@@ -148,6 +257,8 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [originFilter, setOriginFilter] = useState<OriginFilter>('all');
+  const [channelFilter, setChannelFilter] = useState<ChannelFilter>('all');
+  const [pointFilter, setPointFilter] = useState<string>('all');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [payingPurchaseId, setPayingPurchaseId] = useState<string | null>(null);
   const [payCashMethod, setPayCashMethod] = useState<PaymentMethod>('efectivo');
@@ -157,7 +268,7 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
   const lastAutoSyncSigRef = useRef<string>('');
   useEffect(() => {
     if (!ownerId) return;
-    const sig = `${ownerId}|${sales.length}|${repairs.length}|${recoveredEntries.length}`;
+    const sig = `${ownerId}|${sales.length}|${repairs.length}|${recoveredEntries.length}|${mpConfig?.pointName || ''}`;
     if (lastAutoSyncSigRef.current === sig) return;
     lastAutoSyncSigRef.current = sig;
 
@@ -177,12 +288,20 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
     setSyncingMp(true);
     try {
       clearMirroredPurchaseDismissed(ownerId);
-      const liveCfg = loadMercadoPagoConfig(ownerId);
+      const hydrated = await hydrateMercadoPagoConfig(ownerId);
+      const liveCfg: Partial<MercadoPagoConfig> = {
+        ...workshopMeta.mercadoPago,
+        ...hydrated,
+        accessToken: hydrated.accessToken || workshopMeta.mercadoPago?.accessToken || '',
+      };
+
       let mpPayments: MpRecentPayment[] = [];
       let mpWarn = '';
       if (liveCfg.accessToken) {
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
         const res = await fetchRecentMercadoPagoPayments({
           accessToken: liveCfg.accessToken,
+          sinceIso: thirtyDaysAgo.toISOString(),
         });
         if (res.ok && Array.isArray(res.payments)) {
           mpPayments = res.payments;
@@ -191,12 +310,17 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
         }
       }
 
+      const updatedLedger =
+        mpPayments.length > 0
+          ? mergeSyncedMpPayments(ownerId, mpPayments)
+          : recoveredEntries;
+
       const result = await syncAllElectronicPaymentsToPurchases({
         ownerId,
         sales,
         repairs,
         purchases,
-        recoveredEntries,
+        recoveredEntries: updatedLedger,
         mpPayments,
         mpConfig: liveCfg,
         respectDismissed: false,
@@ -205,7 +329,7 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
       const totalSynced = result.created + result.updated;
       if (totalSynced > 0) {
         notify(
-          `Sincronizadas ${totalSynced} cuentas de Point, QR o Transferencia en Compras.`
+          `Sincronizadas ${totalSynced} cuentas de Point Smart, Mercado Libre, QR o Transferencia en Compras.`
         );
       } else if (mpWarn) {
         notify(
@@ -213,7 +337,9 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
           'info'
         );
       } else {
-        notify('Todas las cuentas de Point, QR y Transferencia ya están al día en Compras.');
+        notify(
+          'Todas las compras de Mercado Libre, Point Smart, QR y Transferencias ya están al día.'
+        );
       }
     } catch (err) {
       notify(
@@ -225,11 +351,29 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
     }
   };
 
-  const { manualTotal, manualPending, electronicTotal, electronicCount } = useMemo(() => {
+  const {
+    manualTotal,
+    manualPending,
+    electronicTotal,
+    electronicCount,
+    channelStats,
+    channelSumTotal,
+    availablePointNames,
+  } = useMemo(() => {
     let mTotal = 0;
     let mPaid = 0;
     let eTotal = 0;
     let eCount = 0;
+    const byChannel: Record<PurchaseChannelKey, { amount: number; count: number }> = {
+      mp_point: { amount: 0, count: 0 },
+      mp_meli: { amount: 0, count: 0 },
+      mp_qr: { amount: 0, count: 0 },
+      transferencia: { amount: 0, count: 0 },
+      tarjeta: { amount: 0, count: 0 },
+      efectivo: { amount: 0, count: 0 },
+    };
+    const pointSet = new Set<string>();
+
     for (const x of purchases) {
       const info = parsePurchaseInfo(x);
       const amt = Number(x.amount || 0);
@@ -240,14 +384,35 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
         mTotal += amt;
         if (info.isPaid) mPaid += amt;
       }
+
+      const chKey = resolvePurchaseChannelKey(x, info);
+      if (chKey) {
+        byChannel[chKey].amount += amt;
+        byChannel[chKey].count += 1;
+      }
+
+      const resolvedPt =
+        info.mpPointName ||
+        (chKey === 'mp_point' || chKey === 'mp_qr'
+          ? defaultPointName
+          : chKey === 'mp_meli'
+            ? 'Mercado Libre'
+            : '');
+      if (resolvedPt) pointSet.add(resolvedPt);
     }
+
+    const sumAllChannels = Object.values(byChannel).reduce((s, item) => s + item.amount, 0);
+
     return {
       manualTotal: mTotal,
       manualPending: Math.max(0, mTotal - mPaid),
       electronicTotal: eTotal,
       electronicCount: eCount,
+      channelStats: byChannel,
+      channelSumTotal: sumAllChannels,
+      availablePointNames: Array.from(pointSet).sort((a, b) => a.localeCompare(b, 'es')),
     };
-  }, [purchases]);
+  }, [purchases, defaultPointName]);
 
   const filteredPurchases = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -256,20 +421,34 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
       .filter((p) => {
         const info = parsePurchaseInfo(p);
         const mirrored = isMirroredIncomePurchase(info);
+        const chKey = resolvePurchaseChannelKey(p, info);
+        const resolvedPt =
+          info.mpPointName ||
+          (chKey === 'mp_point' || chKey === 'mp_qr'
+            ? defaultPointName
+            : chKey === 'mp_meli'
+              ? 'Mercado Libre'
+              : '');
+
         if (originFilter === 'manual' && mirrored) return false;
-        if (originFilter === 'electronic' && !mirrored) return false;
+        if (originFilter === 'electronic' && !mirrored && info.originType !== 'mp_meli') {
+          return false;
+        }
         if (statusFilter === 'pagado' && !info.isPaid) return false;
         if (statusFilter === 'pendiente' && info.isPaid) return false;
         if (categoryFilter !== 'all' && info.category !== categoryFilter) return false;
+        if (channelFilter !== 'all' && chKey !== channelFilter) return false;
+        if (pointFilter !== 'all' && resolvedPt !== pointFilter) return false;
+
         if (q) {
-          const badge = getPurchaseChannelBadge(info);
+          const chMeta = chKey ? CHANNEL_STYLE_MAP[chKey] : null;
           const hay = [
             p.invoice,
             p.supplierName,
             PURCHASE_CATEGORY_LABELS[info.category],
             PURCHASE_ORIGIN_LABELS[info.originType],
-            badge.label,
-            info.mpPointName || '',
+            chMeta?.label || '',
+            resolvedPt,
             info.note,
             ...info.stockItems.map((s) => s.name),
           ]
@@ -279,7 +458,16 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
         }
         return true;
       });
-  }, [purchases, query, statusFilter, categoryFilter, originFilter]);
+  }, [
+    purchases,
+    query,
+    statusFilter,
+    categoryFilter,
+    originFilter,
+    channelFilter,
+    pointFilter,
+    defaultPointName,
+  ]);
 
   const commitPaidStatus = async (p: PurchaseRecord, withCashEgreso: boolean) => {
     const info = parsePurchaseInfo(p);
@@ -298,6 +486,7 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
       mpExternalReference: info.mpExternalReference,
       originType: info.originType,
       originRecordId: info.originRecordId,
+      isOutflow: info.isOutflow,
     });
     setBusyId(p.id);
     try {
@@ -352,6 +541,7 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
       mpExternalReference: info.mpExternalReference,
       originType: info.originType,
       originRecordId: info.originRecordId,
+      isOutflow: info.isOutflow,
     });
     setBusyId(p.id);
     try {
@@ -367,7 +557,7 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
     setBusyId(p.id);
     try {
       const info = parsePurchaseInfo(p);
-      if (ownerId && isMirroredIncomePurchase(info)) {
+      if (ownerId && (isMirroredIncomePurchase(info) || info.originType === 'mp_meli')) {
         markMirroredPurchaseDismissed(ownerId, p);
       }
       await deleteRow('purchases', p.id);
@@ -406,9 +596,10 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
       'Comprobante',
       'Fecha',
       'Origen',
+      'Tipo',
       'Cuenta / Proveedor',
       'Canal / Medio de pago',
-      'Nombre Point Mercado Pago',
+      'Nombre Point / Mercado Libre',
       'Categoría',
       'Estado',
       `Importe (${baseCurrency})`,
@@ -417,15 +608,23 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
     ];
     const rows = filteredPurchases.map((p) => {
       const info = parsePurchaseInfo(p);
-      const channel = getPurchaseChannelBadge(info);
+      const mirrored = isMirroredIncomePurchase(info);
+      const chKey = resolvePurchaseChannelKey(p, info);
+      const chLabel = chKey ? CHANNEL_STYLE_MAP[chKey].label : 'Sin especificar';
       const pointName =
-        info.mpPointName || (info.mpChannel ? defaultPointName : '');
+        info.mpPointName ||
+        (chKey === 'mp_point' || chKey === 'mp_qr'
+          ? defaultPointName
+          : chKey === 'mp_meli'
+            ? 'Mercado Libre'
+            : '');
       return [
         p.invoice,
         p.dueDate || new Date(p.createdAt || Date.now()).toISOString().slice(0, 10),
         PURCHASE_ORIGIN_LABELS[info.originType],
+        mirrored ? 'Cobro sincronizado' : 'Compra / Egreso',
         p.supplierName,
-        channel.label || 'Sin especificar',
+        chLabel,
         pointName,
         PURCHASE_CATEGORY_LABELS[info.category],
         info.isPaid ? 'Pagado' : 'Pendiente',
@@ -438,6 +637,15 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
     notify(`Exportados ${filteredPurchases.length} registros a CSV.`);
   };
 
+  const hasAnyFilter = Boolean(
+    query ||
+      statusFilter !== 'all' ||
+      categoryFilter !== 'all' ||
+      originFilter !== 'all' ||
+      channelFilter !== 'all' ||
+      pointFilter !== 'all'
+  );
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -446,11 +654,7 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
             {tr('Compras y gastos', 'Purchases & expenses', 'Compras e despesas')}
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            {tr(
-              'Reposición, gastos y cuentas cobradas por Point, QR y Transferencia',
-              'Restock, expenses and accounts paid via Point, QR and Transfer',
-              'Reposição, despesas e contas pagas via Point, QR e Transferência'
-            )}
+            Compras en Mercado Libre, reposición y cuentas pagadas o cobradas con Point Smart, QR, Transferencia y Tarjeta
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -462,7 +666,7 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
               className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-3.5 text-xs font-semibold text-[#0072BB] hover:bg-sky-100 disabled:opacity-50 whitespace-nowrap shrink-0 dark:border-sky-800/70 dark:bg-sky-950/40 dark:text-sky-300"
             >
               <RefreshCw className={`h-4 w-4 ${syncingMp ? 'animate-spin' : ''}`} />
-              {syncingMp ? 'Sincronizando...' : 'Sincronizar Point / QR'}
+              {syncingMp ? 'Sincronizando...' : 'Sincronizar MP / Point'}
             </button>
           )}
           <button
@@ -485,30 +689,106 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
         </div>
       </div>
 
+      {/* Primary KPI Totals */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="font-mono-num text-xl font-bold text-slate-900 sm:text-2xl dark:text-white">
             {formatCompactCurrency(manualTotal, baseCurrency)}
           </div>
-          <div className="text-xs text-slate-500">
-            {tr('Compras / Gastos', 'Purchases / Expenses', 'Compras / Despesas')}
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            Compras / Mercado Libre / Gastos
           </div>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="font-mono-num text-xl font-bold text-amber-600 sm:text-2xl dark:text-amber-400">
             {formatCompactCurrency(manualPending, baseCurrency)}
           </div>
-          <div className="text-xs text-slate-500">
+          <div className="text-xs text-slate-500 dark:text-slate-400">
             {tr('Pendiente a proveedores', 'Pending to suppliers', 'Pendente a fornecedores')}
           </div>
         </div>
-        <div className="rounded-2xl border border-sky-200/80 bg-sky-50/40 p-4 dark:border-sky-900/50 dark:bg-sky-950/20">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="font-mono-num text-xl font-bold text-[#0072BB] sm:text-2xl dark:text-sky-400">
             {formatCompactCurrency(electronicTotal, baseCurrency)}
           </div>
-          <div className="text-xs text-sky-900/80 dark:text-sky-300/80">
+          <div className="text-xs text-slate-500 dark:text-slate-400">
             Cuentas Point / QR / Transf. ({electronicCount})
           </div>
+        </div>
+      </div>
+
+      {/* Color-Coded Conteo & Channel Breakdown Strip */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs font-bold text-slate-800 dark:text-slate-100">
+            Conteo por canal y medio de pago
+          </span>
+          {channelFilter !== 'all' && (
+            <button
+              type="button"
+              onClick={() => setChannelFilter('all')}
+              className="text-[11px] font-semibold text-[#0072BB] hover:underline dark:text-sky-400"
+            >
+              Ver todos los canales
+            </button>
+          )}
+        </div>
+
+        {channelSumTotal > 0 && (
+          <div
+            aria-label="Distribución por canal"
+            className="mt-2.5 flex h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"
+          >
+            {CHANNEL_STYLE_LIST.map((ch) => {
+              const amt = channelStats[ch.key].amount;
+              if (amt <= 0) return null;
+              const pct = (amt / channelSumTotal) * 100;
+              return (
+                <div
+                  key={ch.key}
+                  className={`h-full transition-all ${ch.swatchClass}`}
+                  style={{ width: `${pct}%` }}
+                  title={`${ch.label}: ${channelStats[ch.key].count} op. · ${formatCurrency(amt, baseCurrency)}`}
+                />
+              );
+            })}
+          </div>
+        )}
+
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          {CHANNEL_STYLE_LIST.map((ch) => {
+            const stat = channelStats[ch.key];
+            const isActive = channelFilter === ch.key;
+            return (
+              <button
+                key={ch.key}
+                type="button"
+                onClick={() =>
+                  setChannelFilter((prev) => (prev === ch.key ? 'all' : ch.key))
+                }
+                className={`flex flex-col items-start rounded-xl border px-3 py-2 text-left transition ${
+                  isActive
+                    ? ch.activeTileClass
+                    : 'border-slate-200/80 bg-slate-50/50 hover:border-slate-300 dark:border-slate-800 dark:bg-slate-800/40 dark:hover:border-slate-700'
+                }`}
+              >
+                <div className="flex w-full items-center justify-between gap-1.5">
+                  <span className="inline-flex min-w-0 items-center gap-1.5">
+                    <span className={`h-2 w-2 shrink-0 rounded-[2px] ${ch.swatchClass}`} />
+                    <span className={`truncate text-[11px] font-semibold ${ch.textClass}`}>
+                      {ch.shortLabel}
+                    </span>
+                  </span>
+                  <span className="font-mono-num text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                    {stat.count}
+                  </span>
+                </div>
+                <div className="mt-1 font-mono-num text-xs font-bold text-slate-900 dark:text-white">
+                  {formatCompactCurrency(stat.amount, baseCurrency)}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -521,9 +801,9 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={tr(
-              'Buscar proveedor, Point, factura, QR o transferencia...',
-              'Search supplier, Point, invoice, QR or transfer...',
-              'Buscar fornecedor, Point, fatura, QR ou transferência...'
+              'Buscar proveedor, Point Smart, Mercado Libre, QR o transferencia...',
+              'Search supplier, Point Smart, Mercado Libre, QR or transfer...',
+              'Buscar fornecedor, Point Smart, Mercado Libre, QR ou transferência...'
             )}
             className="h-9 w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-9 pr-8 text-xs text-slate-900 outline-none focus:border-[#0072BB] focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
           />
@@ -537,6 +817,22 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
             </button>
           )}
         </div>
+
+        {availablePointNames.length > 0 && (
+          <select
+            value={pointFilter}
+            onChange={(e) => setPointFilter(e.target.value)}
+            aria-label="Filtrar por Point o cuenta"
+            className="h-9 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+          >
+            <option value="all">Todos los Points / Cuentas ({availablePointNames.length})</option>
+            {availablePointNames.map((pt) => (
+              <option key={pt} value={pt}>
+                {pt}
+              </option>
+            ))}
+          </select>
+        )}
 
         <select
           value={categoryFilter}
@@ -557,7 +853,7 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
             [
               { id: 'all', label: 'Todo' },
               { id: 'manual', label: 'Compras / Gastos' },
-              { id: 'electronic', label: 'Point / QR / Transf.' },
+              { id: 'electronic', label: 'MP / Point / QR' },
             ] as const
           ).map((tab) => (
             <button
@@ -601,18 +897,42 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
 
       <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
         {filteredPurchases.length === 0 ? (
-          <div className="p-8 text-center text-sm text-slate-500">
-            {purchases.length === 0
-              ? 'No hay compras ni cuentas registradas.'
-              : 'No hay registros que coincidan con el filtro.'}
+          <div className="p-8 text-center text-sm text-slate-500 dark:text-slate-400">
+            <p>
+              {purchases.length === 0
+                ? 'No hay compras ni cuentas registradas.'
+                : 'No hay registros que coincidan con el filtro actual.'}
+            </p>
+            {hasAnyFilter && (
+              <button
+                type="button"
+                onClick={() => {
+                  setQuery('');
+                  setStatusFilter('all');
+                  setCategoryFilter('all');
+                  setOriginFilter('all');
+                  setChannelFilter('all');
+                  setPointFilter('all');
+                }}
+                className="mt-3 inline-flex h-9 items-center rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:border-[#0072BB] hover:text-[#0072BB] dark:border-slate-700 dark:text-slate-200"
+              >
+                Restablecer filtros
+              </button>
+            )}
           </div>
         ) : (
           filteredPurchases.map((p) => {
             const info = parsePurchaseInfo(p);
             const mirrored = isMirroredIncomePurchase(info);
-            const channelBadge = getPurchaseChannelBadge(info);
+            const chKey = resolvePurchaseChannelKey(p, info);
+            const chMeta = chKey ? CHANNEL_STYLE_MAP[chKey] : null;
             const displayPointName =
-              info.mpPointName || (info.mpChannel ? defaultPointName : '');
+              info.mpPointName ||
+              (chKey === 'mp_point' || chKey === 'mp_qr'
+                ? defaultPointName
+                : chKey === 'mp_meli'
+                  ? 'Mercado Libre'
+                  : '');
             const hasForeignCurrency = Boolean(
               info.currency &&
                 info.currency !== baseCurrency &&
@@ -628,55 +948,47 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
             const isBusy = busyId === p.id;
 
             return (
-              <div key={p.id} className="px-4 py-3.5">
+              <div key={p.id} className="px-4 py-3.5 transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-800/30">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
                       <span className="font-mono-num font-semibold text-slate-700 dark:text-slate-300">
                         {p.invoice}
                       </span>
-                      <span>·</span>
-                      <span>{formatDateShort(p.dueDate)}</span>
-                      <span>·</span>
-                      <span
-                        className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
-                          mirrored
-                            ? 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300'
-                            : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                        }`}
-                      >
+                      <span aria-hidden="true">·</span>
+                      <span className="font-mono-num">{formatDateShort(p.dueDate)}</span>
+                      <span aria-hidden="true">·</span>
+                      <span className="font-medium text-slate-600 dark:text-slate-300">
                         {PURCHASE_ORIGIN_LABELS[info.originType]}
                       </span>
-                      {channelBadge.label && (
-                        <span
-                          className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold ${channelBadge.className}`}
-                        >
-                          {channelBadge.kind === 'qr' ? (
-                            <QrCode className="h-3 w-3" />
-                          ) : channelBadge.kind === 'point' ? (
-                            <Smartphone className="h-3 w-3" />
-                          ) : channelBadge.kind === 'card' ? (
-                            <CreditCard className="h-3 w-3" />
-                          ) : null}
-                          {channelBadge.label}
-                        </span>
+                      {chMeta && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span className={`inline-flex items-center gap-1.5 font-semibold ${chMeta.textClass}`}>
+                            <span className={`h-2 w-2 rounded-[2px] ${chMeta.swatchClass}`} />
+                            <span>{chMeta.label}</span>
+                          </span>
+                        </>
                       )}
                       {displayPointName && (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-violet-50 px-1.5 py-0.5 text-[10px] font-bold text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">
-                          Point: {displayPointName}
-                        </span>
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200">
+                            {displayPointName}
+                          </span>
+                        </>
                       )}
                       {!mirrored && (
                         <>
-                          <span>·</span>
-                          <span className="font-medium text-slate-600 dark:text-slate-300">
+                          <span aria-hidden="true">·</span>
+                          <span className="text-slate-500 dark:text-slate-400">
                             {PURCHASE_CATEGORY_LABELS[info.category]}
                           </span>
                         </>
                       )}
                       {hasForeignCurrency && info.currency && (
                         <>
-                          <span>·</span>
+                          <span aria-hidden="true">·</span>
                           <span className="font-mono-num font-semibold text-[#0072BB] dark:text-sky-300">
                             {formatCurrency(foreignAmount, info.currency)}
                           </span>
@@ -700,10 +1012,22 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
                     )}
                   </div>
 
-                  <div className="flex items-center gap-1.5">
-                    <span className="mr-0.5 font-mono-num text-sm font-bold text-slate-900 dark:text-white">
-                      {formatCurrency(p.amount, baseCurrency)}
-                    </span>
+                  <div className="flex items-center gap-2">
+                    <div className="mr-0.5 text-right">
+                      <div
+                        className={`font-mono-num text-sm font-bold ${
+                          mirrored
+                            ? 'text-emerald-700 dark:text-emerald-400'
+                            : 'text-rose-600 dark:text-rose-400'
+                        }`}
+                      >
+                        {mirrored ? '+' : '-'}
+                        {formatCurrency(p.amount, baseCurrency)}
+                      </div>
+                      <div className="text-[10px] font-medium text-slate-400 dark:text-slate-500">
+                        {mirrored ? 'Cobro cuenta MP' : 'Compra / Egreso'}
+                      </div>
+                    </div>
                     <button
                       type="button"
                       disabled={isBusy}
@@ -823,4 +1147,5 @@ export const PurchasesPage: React.FC<PurchasesPageProps> = ({
     </div>
   );
 };
+
 

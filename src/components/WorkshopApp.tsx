@@ -49,8 +49,13 @@ import {
   fetchRecentMercadoPagoPayments,
   hydrateMercadoPagoConfig,
   loadMercadoPagoConfig,
+  type MpRecentPayment,
 } from '../utils/mercadoPago';
-import { mergeSyncedMpPayments } from '../utils/paymentLedger';
+import {
+  mergeSyncedMpPayments,
+  useRecoveredPayments,
+} from '../utils/paymentLedger';
+import { syncAllElectronicPaymentsToPurchases } from '../utils/mpPurchasesSync';
 import {
   fetchSubscriptionStatus,
   getPlanDisplayName,
@@ -306,6 +311,9 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   const [purchases, setPurchases] = useState<PurchaseRecord[]>([]);
   const [loadingCount, setLoadingCount] = useState(7);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [startupMpPayments, setStartupMpPayments] = useState<MpRecentPayment[]>([]);
+  const recoveredEntries = useRecoveredPayments(userId);
+  const lastPurchaseMirrorSigRef = useRef('');
 
   useEffect(() => {
     if (!userId) return;
@@ -320,14 +328,14 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
         ? hydrated
         : parseWorkshopMeta(profile).mercadoPago || loadMercadoPagoConfig(userId);
       if (effectiveMp.accessToken) {
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
         void fetchRecentMercadoPagoPayments({
           accessToken: effectiveMp.accessToken,
-          sinceIso: todayStart.toISOString(),
+          sinceIso: sevenDaysAgo.toISOString(),
         })
           .then((res) => {
             if (active && res.ok && Array.isArray(res.payments) && res.payments.length > 0) {
+              setStartupMpPayments(res.payments);
               mergeSyncedMpPayments(userId, res.payments);
             }
           })
@@ -434,6 +442,38 @@ export const WorkshopApp: React.FC<WorkshopAppProps> = ({
   }, [userId]);
 
   const isLoading = loadingCount > 0;
+
+  useEffect(() => {
+    if (!userId || isLoading) return;
+    const sig = `${userId}|${sales.length}|${repairs.length}|${recoveredEntries.length}|${startupMpPayments.length}`;
+    if (lastPurchaseMirrorSigRef.current === sig) return;
+    lastPurchaseMirrorSigRef.current = sig;
+
+    const effectiveMp =
+      loadMercadoPagoConfig(userId).accessToken
+        ? loadMercadoPagoConfig(userId)
+        : parseWorkshopMeta(profile).mercadoPago || loadMercadoPagoConfig(userId);
+
+    void syncAllElectronicPaymentsToPurchases({
+      ownerId: userId,
+      sales,
+      repairs,
+      purchases,
+      recoveredEntries,
+      mpPayments: startupMpPayments,
+      mpConfig: effectiveMp,
+      respectDismissed: true,
+    });
+  }, [
+    userId,
+    isLoading,
+    sales,
+    repairs,
+    purchases,
+    recoveredEntries,
+    startupMpPayments,
+    profile,
+  ]);
   const prevRepairStatusesRef = useRef<Map<string, string> | null>(null);
   const initialRepairParamHandledRef = useRef(false);
 

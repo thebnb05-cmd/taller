@@ -40,6 +40,8 @@ import {
   PURCHASE_CATEGORY_LABELS,
   serializePurchaseStatus,
   type PurchaseCategory,
+  type PurchaseMpChannel,
+  type PurchaseOriginType,
   type PurchaseStockLine,
 } from '../utils/purchaseMeta';
 import { parseWorkshopMeta } from '../utils/workshopMeta';
@@ -69,6 +71,7 @@ type PurchasePaymentChannel =
   | 'transferencia'
   | 'mp_point'
   | 'mp_qr'
+  | 'mp_meli'
   | 'tarjeta';
 
 function roundCurrencyValue(value: number): number {
@@ -165,13 +168,17 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
       const initIsSec = initCur !== baseCurrency && initRate !== 1;
 
       const initChannel: PurchasePaymentChannel =
-        info.mpChannel === 'mp_point'
-          ? 'mp_point'
-          : info.mpChannel === 'mp_qr'
-            ? 'mp_qr'
-            : info.paymentMethod || 'efectivo';
+        info.mpChannel === 'mp_meli' || info.originType === 'mp_meli'
+          ? 'mp_meli'
+          : info.mpChannel === 'mp_point'
+            ? 'mp_point'
+            : info.mpChannel === 'mp_qr'
+              ? 'mp_qr'
+              : info.mpChannel === 'mp_transfer'
+                ? 'transferencia'
+                : info.paymentMethod || 'efectivo';
       const initCashMethod: PaymentMethod =
-        initChannel === 'mp_point'
+        initChannel === 'mp_point' || initChannel === 'mp_meli'
           ? 'tarjeta'
           : initChannel === 'mp_qr'
             ? 'transferencia'
@@ -196,7 +203,11 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
       setPaymentChannel(initChannel);
       setMpPointName(
         info.mpPointName ||
-          (initChannel === 'mp_point' || initChannel === 'mp_qr' ? defaultPoint : '')
+          (initChannel === 'mp_meli'
+            ? 'Mercado Libre'
+            : initChannel === 'mp_point' || initChannel === 'mp_qr'
+              ? defaultPoint
+              : '')
       );
       setCashMethod(initCashMethod);
       setStockLines(
@@ -361,18 +372,28 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
     }));
 
     const resolvedMethod: PaymentMethod =
-      paymentChannel === 'mp_point'
+      paymentChannel === 'mp_point' || paymentChannel === 'mp_meli'
         ? 'tarjeta'
         : paymentChannel === 'mp_qr'
           ? 'transferencia'
           : paymentChannel;
-    const resolvedMpChannel: 'mp_point' | 'mp_qr' | undefined =
+    const resolvedMpChannel: PurchaseMpChannel | undefined =
       paymentChannel === 'mp_point'
         ? 'mp_point'
         : paymentChannel === 'mp_qr'
           ? 'mp_qr'
-          : undefined;
-    const cleanPointName = sanitizePlainLine(mpPointName, 120) || undefined;
+          : paymentChannel === 'mp_meli'
+            ? 'mp_meli'
+            : undefined;
+    const cleanPointName =
+      sanitizePlainLine(mpPointName, 120) ||
+      (paymentChannel === 'mp_meli' ? 'Mercado Libre' : undefined);
+    const resolvedOriginType: PurchaseOriginType =
+      editParsedInfo?.originType && editParsedInfo.originType !== 'manual'
+        ? editParsedInfo.originType
+        : paymentChannel === 'mp_meli'
+          ? 'mp_meli'
+          : 'manual';
 
     const serializedStatus = serializePurchaseStatus({
       status,
@@ -387,8 +408,12 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
       mpOrderId: editParsedInfo?.mpOrderId,
       mpPaymentId: editParsedInfo?.mpPaymentId,
       mpExternalReference: editParsedInfo?.mpExternalReference,
-      originType: editParsedInfo?.originType,
+      originType: resolvedOriginType,
       originRecordId: editParsedInfo?.originRecordId,
+      isOutflow:
+        editParsedInfo?.isOutflow !== undefined
+          ? editParsedInfo.isOutflow
+          : true,
     });
 
     setSaving(true);
@@ -665,20 +690,27 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
             >
               {tr('Medio de pago / Canal', 'Payment method / Channel', 'Forma de pagamento / Canal')}
             </label>
-            <select
+              <select
               id="purchase-payment-channel"
               value={paymentChannel}
               onChange={(e) => {
                 const next = e.target.value as PurchasePaymentChannel;
                 setPaymentChannel(next);
                 setCashMethod(
-                  next === 'mp_point'
+                  next === 'mp_point' || next === 'mp_meli'
                     ? 'tarjeta'
                     : next === 'mp_qr'
                       ? 'transferencia'
                       : next
                 );
-                if ((next === 'mp_point' || next === 'mp_qr') && !mpPointName.trim()) {
+                if (next === 'mp_meli') {
+                  if (!mpPointName.trim()) {
+                    setMpPointName('Mercado Libre');
+                  }
+                  if (!supplierName.trim()) {
+                    setSupplierName('Mercado Libre');
+                  }
+                } else if ((next === 'mp_point' || next === 'mp_qr') && !mpPointName.trim()) {
                   setMpPointName(resolvePointDisplayName(loadMercadoPagoConfig(ownerId)));
                 }
               }}
@@ -686,32 +718,40 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
             >
               <option value="efectivo">Efectivo</option>
               <option value="transferencia">Transferencia bancaria</option>
-              <option value="mp_point">Mercado Pago Point</option>
+              <option value="mp_point">Point Smart / Mercado Pago Point</option>
               <option value="mp_qr">Mercado Pago QR</option>
+              <option value="mp_meli">Mercado Libre (compra / cuenta MP)</option>
               <option value="tarjeta">Tarjeta / Débito / Crédito</option>
             </select>
           </div>
 
           {(paymentChannel === 'mp_point' ||
             paymentChannel === 'mp_qr' ||
+            paymentChannel === 'mp_meli' ||
             mpPointName.trim().length > 0) && (
             <div>
               <label
                 htmlFor="purchase-mp-point-name"
                 className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300"
               >
-                {tr(
-                  'Nombre del Point Mercado Pago',
-                  'Mercado Pago Point name',
-                  'Nome do Point Mercado Pago'
-                )}
+                {paymentChannel === 'mp_meli'
+                  ? 'Cuenta / Point vinculado (ej: Point Smart / Mercado Libre)'
+                  : tr(
+                      'Nombre del Point Mercado Pago',
+                      'Mercado Pago Point name',
+                      'Nome do Point Mercado Pago'
+                    )}
               </label>
               <input
                 id="purchase-mp-point-name"
                 type="text"
                 value={mpPointName}
                 onChange={(e) => setMpPointName(e.target.value)}
-                placeholder="Ej: Point Smart Mostrador"
+                placeholder={
+                  paymentChannel === 'mp_meli'
+                    ? 'Ej: Mercado Libre / Point Smart'
+                    : 'Ej: Point Smart Mostrador'
+                }
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>

@@ -27,6 +27,8 @@ export type PaymentAttemptStatus =
   | 'pending_verification'
   | 'force_reconciled';
 
+export type RecoveredMpChannel = MpPaymentChannel | 'mp_meli' | 'mp_transfer';
+
 export interface RecoveredPaymentEntry {
   id: string;
   ownerId: string;
@@ -34,7 +36,9 @@ export interface RecoveredPaymentEntry {
   at: string;
   source: 'venta' | 'reparacion' | 'mp_sync';
   method: PaymentMethod;
-  mpChannel?: MpPaymentChannel;
+  mpChannel?: RecoveredMpChannel;
+  isOutflow?: boolean;
+  isMercadoLibre?: boolean;
   amount: number;
   totalAmount?: number;
   clientName: string;
@@ -94,8 +98,11 @@ function sanitizeEntry(raw: Partial<RecoveredPaymentEntry>, ownerId: string): Re
     : Date.parse(String(raw.at || '')) || Date.now();
   const at =
     sanitizePlainLine(String(raw.at || ''), 40) || new Date(createdAt).toISOString();
-  const mpChannel: MpPaymentChannel | undefined =
-    raw.mpChannel === 'mp_point' || raw.mpChannel === 'mp_qr'
+  const mpChannel: RecoveredMpChannel | undefined =
+    raw.mpChannel === 'mp_point' ||
+    raw.mpChannel === 'mp_qr' ||
+    raw.mpChannel === 'mp_meli' ||
+    raw.mpChannel === 'mp_transfer'
       ? raw.mpChannel
       : undefined;
 
@@ -120,6 +127,8 @@ function sanitizeEntry(raw: Partial<RecoveredPaymentEntry>, ownerId: string): Re
           : 'venta',
     method: normalizeMethod(raw.method),
     ...(mpChannel ? { mpChannel } : {}),
+    ...(raw.isOutflow ? { isOutflow: true } : {}),
+    ...(raw.isMercadoLibre ? { isMercadoLibre: true } : {}),
     amount,
     ...(raw.totalAmount !== undefined ? { totalAmount: safeMoney(raw.totalAmount) } : {}),
     clientName: sanitizePlainLine(String(raw.clientName || 'Mostrador'), 120) || 'Mostrador',
@@ -494,6 +503,42 @@ export function mergeSyncedMpPayments(
   for (const mp of mpPayments) {
     if (!mp || Number(mp.amount || 0) <= 0) continue;
     const atMs = Date.parse(mp.dateApproved || '') || Date.now();
+    const mappedChannel: RecoveredMpChannel | undefined =
+      mp.mpChannel === 'mp_point' ||
+      mp.mpChannel === 'mp_qr' ||
+      mp.mpChannel === 'mp_meli' ||
+      mp.mpChannel === 'mp_transfer'
+        ? mp.mpChannel
+        : undefined;
+    const defaultTitle =
+      mappedChannel === 'mp_meli' || mp.isMercadoLibre
+        ? 'Compra en Mercado Libre'
+        : mappedChannel === 'mp_point'
+          ? mp.isOutflow
+            ? 'Pago con Point Smart'
+            : 'Cobro Point Smart'
+          : mappedChannel === 'mp_qr'
+            ? mp.isOutflow
+              ? 'Pago con QR Mercado Pago'
+              : 'Cobro QR Mercado Pago'
+            : mappedChannel === 'mp_transfer'
+              ? mp.isOutflow
+                ? 'Transferencia enviada MP'
+                : 'Transferencia recibida MP'
+              : mp.isOutflow
+                ? 'Pago con Tarjeta MP'
+                : 'Cobro Tarjeta MP';
+    const subtitleChannelLabel =
+      mappedChannel === 'mp_meli' || mp.isMercadoLibre
+        ? 'Mercado Libre'
+        : mappedChannel === 'mp_point'
+          ? 'Point Smart'
+          : mappedChannel === 'mp_qr'
+            ? 'QR Mercado Pago'
+            : mappedChannel === 'mp_transfer'
+              ? 'Transferencia MP'
+              : 'Tarjeta MP';
+
     const candidate: RecoveredPaymentEntry = {
       id: `mp-${mp.paymentId || mp.orderId || atMs}`,
       ownerId,
@@ -501,15 +546,15 @@ export function mergeSyncedMpPayments(
       at: mp.dateApproved || new Date(atMs).toISOString(),
       source: 'mp_sync',
       method: mp.appMethod,
-      mpChannel: mp.mpChannel,
+      ...(mappedChannel ? { mpChannel: mappedChannel } : {}),
+      ...(mp.isOutflow ? { isOutflow: true } : {}),
+      ...(mp.isMercadoLibre ? { isMercadoLibre: true } : {}),
       amount: safeMoney(mp.amount),
       totalAmount: safeMoney(mp.amount),
-      clientName: 'Mercado Pago',
-      title:
-        mp.description ||
-        (mp.mpChannel === 'mp_point' ? 'Cobro Point Smart' : 'Cobro QR Mercado Pago'),
+      clientName: mp.isMercadoLibre ? 'Mercado Libre' : 'Mercado Pago',
+      title: mp.description || defaultTitle,
       subtitle: [
-        mp.mpChannel === 'mp_point' ? 'Mercado Pago Point' : 'Mercado Pago QR',
+        subtitleChannelLabel,
         mp.pointName || mp.posName || mp.terminalId || '',
         mp.paymentMethodId ? mp.paymentMethodId.toUpperCase() : '',
         mp.cardLastFour ? `****${mp.cardLastFour}` : '',
@@ -540,6 +585,7 @@ export function mergeSyncedMpPayments(
         (item.attemptStatus === 'pending_verification' ||
           item.attemptStatus === 'failed_attempt') &&
         item.method === candidate.method &&
+        !candidate.isOutflow &&
         Math.abs(item.amount - candidate.amount) < 0.05 &&
         Math.abs(item.createdAt - candidate.createdAt) <= 15 * 60 * 1000
       ) {
@@ -558,7 +604,9 @@ export function mergeSyncedMpPayments(
         !prev.mpPaymentId ||
         (!prev.mpOrderId && candidate.mpOrderId) ||
         (!prev.mpChannel && candidate.mpChannel) ||
-        (!prev.mpPointName && candidate.mpPointName)
+        (!prev.mpPointName && candidate.mpPointName) ||
+        (candidate.isOutflow && !prev.isOutflow) ||
+        (candidate.isMercadoLibre && !prev.isMercadoLibre)
       ) {
         next[existingIdx] = {
           ...prev,
@@ -567,6 +615,8 @@ export function mergeSyncedMpPayments(
           mpExternalReference: prev.mpExternalReference || candidate.mpExternalReference,
           mpChannel: prev.mpChannel || candidate.mpChannel,
           mpPointName: prev.mpPointName || candidate.mpPointName,
+          ...(prev.isOutflow || candidate.isOutflow ? { isOutflow: true } : {}),
+          ...(prev.isMercadoLibre || candidate.isMercadoLibre ? { isMercadoLibre: true } : {}),
           ...(wasUnconfirmedAttempt
             ? {
                 attemptStatus: 'approved',
@@ -655,6 +705,7 @@ export function getUnreconciledPayments(
 
   return entries.filter((entry) => {
     if (entry.dismissed) return false;
+    if (entry.isOutflow) return false;
     // Do NOT count failed/pending attempts in revenue totals unless confirmed via MP or force-reconciled or saveFailed
     if (
       (entry.attemptStatus === 'failed_attempt' ||
@@ -740,11 +791,15 @@ export function toSyntheticSalesFromRecovered(
   unreconciled: RecoveredPaymentEntry[]
 ): SaleRecord[] {
   return unreconciled
-    .filter((entry) => entry.source !== 'reparacion')
+    .filter((entry) => entry.source !== 'reparacion' && !entry.isOutflow)
     .map((entry) => {
       const total = safeMoney(entry.totalAmount || entry.amount);
       const deposit = Math.min(total || entry.amount, entry.amount);
       const isPaid = total <= 0 || deposit >= total;
+      const saleMpChannel: MpPaymentChannel | undefined =
+        entry.mpChannel === 'mp_point' || entry.mpChannel === 'mp_qr'
+          ? entry.mpChannel
+          : undefined;
       return {
         id: `rec-sale-${entry.id}`,
         ownerId: entry.ownerId,
@@ -775,7 +830,7 @@ export function toSyntheticSalesFromRecovered(
                 note: entry.saveFailed ? 'Cobro recuperado (pendiente de guardar)' : 'Cobro Mercado Pago',
               },
             ],
-            ...(entry.mpChannel ? { mpChannel: entry.mpChannel } : {}),
+            ...(saleMpChannel ? { mpChannel: saleMpChannel } : {}),
             ...(entry.mpOrderId ? { mpOrderId: entry.mpOrderId } : {}),
             ...(entry.mpExternalReference
               ? { mpExternalReference: entry.mpExternalReference }

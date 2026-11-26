@@ -2186,16 +2186,19 @@ export async function handleApiRequest(
 
     const nowMs = Date.now();
     const rawSince = typeof body.sinceIso === 'string' ? Date.parse(body.sinceIso) : NaN;
+    const maxLookbackMs = 90 * 24 * 60 * 60 * 1000;
+    const defaultLookbackMs = 7 * 24 * 60 * 60 * 1000;
     const beginMs =
-      Number.isFinite(rawSince) && rawSince > nowMs - 7 * 24 * 60 * 60 * 1000 && rawSince <= nowMs
+      Number.isFinite(rawSince) && rawSince > nowMs - maxLookbackMs && rawSince <= nowMs
         ? rawSince
-        : nowMs - 36 * 60 * 60 * 1000;
+        : nowMs - defaultLookbackMs;
     const beginIso = new Date(beginMs).toISOString();
     const endIso = new Date(nowMs + 60_000).toISOString();
 
     try {
-      const searchUrl = `/v1/payments/search?sort=date_created&criteria=desc&status=approved&range=date_created&begin_date=${encodeURIComponent(beginIso)}&end_date=${encodeURIComponent(endIso)}&limit=50`;
-      const [searchRes, posRes, v1TerminalsRes, legacyDevicesRes] = await Promise.all([
+      const searchUrl = `/v1/payments/search?sort=date_created&criteria=desc&status=approved&range=date_created&begin_date=${encodeURIComponent(beginIso)}&end_date=${encodeURIComponent(endIso)}&limit=100`;
+      const [meRes, searchRes, posRes, v1TerminalsRes, legacyDevicesRes] = await Promise.all([
+        mpFetch('/users/me', token).catch(() => ({ ok: false, status: 0, data: {} as Record<string, unknown> })),
         mpFetch(searchUrl, token),
         mpFetch('/pos?limit=50', token).catch(() => ({ ok: false, status: 0, data: {} as Record<string, unknown> })),
         mpFetch('/terminals/v1/list?limit=50', token).catch(() => ({ ok: false, status: 0, data: {} as Record<string, unknown> })),
@@ -2211,6 +2214,21 @@ export async function handleApiRequest(
           ),
         });
         return true;
+      }
+
+      const sellerId = meRes.ok ? String((meRes.data as Record<string, unknown>).id || '').trim() : '';
+
+      let payerSearchResults: unknown[] = [];
+      if (sellerId) {
+        const payerUrl = `/v1/payments/search?payer.id=${encodeURIComponent(sellerId)}&sort=date_created&criteria=desc&status=approved&range=date_created&begin_date=${encodeURIComponent(beginIso)}&end_date=${encodeURIComponent(endIso)}&limit=100`;
+        const payerRes = await mpFetch(payerUrl, token).catch(() => ({
+          ok: false,
+          status: 0,
+          data: {} as Record<string, unknown>,
+        }));
+        if (payerRes.ok && Array.isArray((payerRes.data as Record<string, unknown>).results)) {
+          payerSearchResults = (payerRes.data as Record<string, unknown>).results as unknown[];
+        }
       }
 
       const posInfoByKey = new Map<string, { id: string; externalId: string; name: string }>();
@@ -2263,7 +2281,30 @@ export async function handleApiRequest(
       const singleTerminalFallback =
         terminalById.size === 1 ? Array.from(terminalById.values())[0] : undefined;
 
-      const rawResults = Array.isArray(searchRes.data.results) ? searchRes.data.results : [];
+      const combinedRaw: Array<{ item: Record<string, unknown>; fromPayerQuery: boolean }> = [];
+      const seenPaymentIds = new Set<string>();
+      const rawSellerResults = Array.isArray(searchRes.data.results) ? searchRes.data.results : [];
+      for (const item of rawSellerResults) {
+        if (!item || typeof item !== 'object') continue;
+        const row = item as Record<string, unknown>;
+        const pid = String(row.id || '').trim();
+        if (pid) {
+          if (seenPaymentIds.has(pid)) continue;
+          seenPaymentIds.add(pid);
+        }
+        combinedRaw.push({ item: row, fromPayerQuery: false });
+      }
+      for (const item of payerSearchResults) {
+        if (!item || typeof item !== 'object') continue;
+        const row = item as Record<string, unknown>;
+        const pid = String(row.id || '').trim();
+        if (pid) {
+          if (seenPaymentIds.has(pid)) continue;
+          seenPaymentIds.add(pid);
+        }
+        combinedRaw.push({ item: row, fromPayerQuery: true });
+      }
+
       const payments: Array<{
         paymentId: string;
         orderId: string;
@@ -2271,8 +2312,10 @@ export async function handleApiRequest(
         amount: number;
         dateApproved: string;
         description: string;
-        mpChannel: 'mp_point' | 'mp_qr';
+        mpChannel: 'mp_point' | 'mp_qr' | 'mp_meli' | 'mp_transfer' | 'tarjeta';
         appMethod: 'tarjeta' | 'transferencia';
+        isOutflow: boolean;
+        isMercadoLibre: boolean;
         paymentMethodId: string;
         paymentTypeId: string;
         posId: string;
@@ -2283,20 +2326,13 @@ export async function handleApiRequest(
         payerLabel: string;
       }> = [];
 
-      for (const item of rawResults) {
-        if (!item || typeof item !== 'object') continue;
-        const p = item as Record<string, unknown>;
+      for (const { item: p, fromPayerQuery } of combinedRaw) {
         const status = String(p.status || '').toLowerCase();
         if (status !== 'approved') continue;
 
         const opType = String(p.operation_type || '').toLowerCase();
         const extRef = String(p.external_reference || '').trim();
-        if (
-          opType === 'recurring_payment' ||
-          opType === 'money_transfer' ||
-          opType === 'account_fund' ||
-          extRef.startsWith('SUB-')
-        ) {
+        if (opType === 'recurring_payment' || extRef.startsWith('SUB-')) {
           continue;
         }
 
@@ -2331,28 +2367,94 @@ export async function handleApiRequest(
           p.order && typeof p.order === 'object' ? (p.order as Record<string, unknown>) : {};
         const orderId = String(orderObj.id || '').trim();
 
-        const isQrPayment =
-          poiSubType.includes('QR') ||
-          poiType.includes('QR') ||
-          paymentTypeId === 'account_money' ||
-          paymentTypeId === 'bank_transfer' ||
-          paymentTypeId === 'digital_wallet';
+        const collectorObj =
+          p.collector && typeof p.collector === 'object'
+            ? (p.collector as Record<string, unknown>)
+            : {};
+        const collectorId = String(p.collector_id || collectorObj.id || '').trim();
+        const payerObj =
+          p.payer && typeof p.payer === 'object' ? (p.payer as Record<string, unknown>) : {};
+        const payerId = String(payerObj.id || '').trim();
+        const isOutflow = Boolean(
+          fromPayerQuery ||
+            (sellerId && payerId === sellerId && (!collectorId || collectorId !== sellerId))
+        );
 
-        const isPointPayment =
-          !isQrPayment &&
-          (poiType === 'POINT' ||
-            opType === 'pos_payment' ||
-            paymentTypeId === 'credit_card' ||
+        const rawDescription = String(p.description || '').trim();
+        const marketplace = String(p.marketplace || '').toUpperCase();
+        const isMercadoLibre = Boolean(
+          marketplace === 'MELI' ||
+            poiType.includes('MERCADOLIBRE') ||
+            rawDescription.toLowerCase().includes('mercado libre') ||
+            rawDescription.toLowerCase().includes('mercadolibre') ||
+            (isOutflow && opType === 'regular_payment')
+        );
+
+        const isTransferPayment = Boolean(
+          opType === 'money_transfer' ||
+            opType === 'account_fund' ||
+            paymentTypeId === 'bank_transfer' ||
+            paymentMethodId === 'cvu' ||
+            paymentMethodId === 'bank_transfer'
+        );
+
+        const isQrPayment = Boolean(
+          !isMercadoLibre &&
+            !isTransferPayment &&
+            (poiSubType.includes('QR') ||
+              poiType.includes('QR') ||
+              paymentTypeId === 'account_money' ||
+              paymentTypeId === 'digital_wallet')
+        );
+
+        const isPointPayment = Boolean(
+          !isMercadoLibre &&
+            !isQrPayment &&
+            !isTransferPayment &&
+            (poiType === 'POINT' ||
+              opType === 'pos_payment' ||
+              Boolean(posId) ||
+              Boolean(rawTerminalId))
+        );
+
+        const isCardPayment = Boolean(
+          paymentTypeId === 'credit_card' ||
             paymentTypeId === 'debit_card' ||
-            paymentTypeId === 'prepaid_card');
+            paymentTypeId === 'prepaid_card'
+        );
 
-        if (!isQrPayment && !isPointPayment && !posId && !orderId) {
+        if (
+          !isMercadoLibre &&
+          !isTransferPayment &&
+          !isQrPayment &&
+          !isPointPayment &&
+          !isCardPayment &&
+          !posId &&
+          !orderId
+        ) {
           continue;
         }
 
-        const mpChannel: 'mp_point' | 'mp_qr' = isQrPayment ? 'mp_qr' : 'mp_point';
+        const mpChannel: 'mp_point' | 'mp_qr' | 'mp_meli' | 'mp_transfer' | 'tarjeta' =
+          isMercadoLibre
+            ? 'mp_meli'
+            : isPointPayment
+              ? 'mp_point'
+              : isQrPayment
+                ? 'mp_qr'
+                : isTransferPayment
+                  ? 'mp_transfer'
+                  : 'tarjeta';
+
         const appMethod: 'tarjeta' | 'transferencia' =
-          mpChannel === 'mp_qr' ? 'transferencia' : 'tarjeta';
+          mpChannel === 'mp_qr' ||
+          mpChannel === 'mp_transfer' ||
+          (!isCardPayment &&
+            (paymentTypeId === 'account_money' ||
+              paymentTypeId === 'bank_transfer' ||
+              paymentTypeId === 'digital_wallet'))
+            ? 'transferencia'
+            : 'tarjeta';
 
         const termInfo =
           (rawTerminalId ? terminalById.get(rawTerminalId) : undefined) ||
@@ -2372,7 +2474,17 @@ export async function handleApiRequest(
             ? `${posName} · ${resolvedTerminalId}`
             : posName ||
               resolvedTerminalId ||
-              (mpChannel === 'mp_point' ? 'Point Mercado Pago' : 'QR Mercado Pago');
+              (mpChannel === 'mp_meli'
+                ? 'Mercado Libre'
+                : mpChannel === 'mp_point'
+                  ? 'Point Smart'
+                  : mpChannel === 'mp_qr'
+                    ? 'QR Mercado Pago'
+                    : mpChannel === 'mp_transfer'
+                      ? isOutflow
+                        ? 'Transferencia enviada MP'
+                        : 'Transferencia recibida MP'
+                      : 'Tarjeta Mercado Pago');
 
         const cardObj =
           p.card && typeof p.card === 'object' ? (p.card as Record<string, unknown>) : {};
@@ -2380,18 +2492,31 @@ export async function handleApiRequest(
           cardObj.cardholder && typeof cardObj.cardholder === 'object'
             ? (cardObj.cardholder as Record<string, unknown>)
             : {};
-        const payerObj =
-          p.payer && typeof p.payer === 'object' ? (p.payer as Record<string, unknown>) : {};
         const payerFullName = [payerObj.first_name, payerObj.last_name]
           .filter((x) => typeof x === 'string' && x.trim())
           .join(' ')
           .trim();
+        const collectorName = String(
+          collectorObj.nickname || collectorObj.first_name || ''
+        ).trim();
         const cardLastFour = String(cardObj.last_four_digits || '').trim().slice(0, 4);
-        const payerLabel = String(
-          cardholder.name || payerFullName || payerObj.email || ''
-        )
-          .trim()
-          .slice(0, 80);
+        const payerLabel = isOutflow
+          ? String(collectorName || (isMercadoLibre ? 'Mercado Libre' : 'Mercado Pago'))
+              .trim()
+              .slice(0, 80)
+          : String(cardholder.name || payerFullName || payerObj.email || '')
+              .trim()
+              .slice(0, 80);
+
+        const additionalInfo =
+          p.additional_info && typeof p.additional_info === 'object'
+            ? (p.additional_info as Record<string, unknown>)
+            : {};
+        const itemsArr = Array.isArray(additionalInfo.items) ? additionalInfo.items : [];
+        const firstItemTitle =
+          itemsArr[0] && typeof itemsArr[0] === 'object'
+            ? String((itemsArr[0] as Record<string, unknown>).title || '').trim()
+            : '';
 
         payments.push({
           paymentId: String(p.id || ''),
@@ -2399,9 +2524,11 @@ export async function handleApiRequest(
           externalReference: extRef,
           amount,
           dateApproved: String(p.date_approved || p.date_created || new Date().toISOString()),
-          description: String(p.description || '').trim(),
+          description: rawDescription || firstItemTitle,
           mpChannel,
           appMethod,
+          isOutflow,
+          isMercadoLibre,
           paymentMethodId,
           paymentTypeId,
           posId,
@@ -2412,6 +2539,11 @@ export async function handleApiRequest(
           payerLabel,
         });
       }
+
+      payments.sort(
+        (a, b) =>
+          (Date.parse(b.dateApproved || '') || 0) - (Date.parse(a.dateApproved || '') || 0)
+      );
 
       sendJson(res, 200, { ok: true, payments });
       return true;
